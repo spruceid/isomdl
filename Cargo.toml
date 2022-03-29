@@ -6,5 +6,6 @@ description = "ISO mDL implementation in Rust"
 readme = "README.md"
 homepage = "https://github.com/spruceid/isomdl"
 repository = "https://github.com/spruceid/isomdl"
+license = "Apache-2.0"
 
 [dependencies]
