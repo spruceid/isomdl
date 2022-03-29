@@ -1,0 +1,10 @@
+[package]
+name = "isomdl"
+version = "0.1.0"
+edition = "2021"
+description = "ISO mDL implementation in Rust"
+readme = "README.md"
+homepage = "https://github.com/spruceid/isomdl"
+repository = "https://github.com/spruceid/isomdl"
+
+[dependencies]
