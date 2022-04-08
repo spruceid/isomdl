@@ -59,7 +59,56 @@ pub struct FullDate {}
 pub struct Latin1UpTo150Chars {}
 pub struct LocalBstr {}
 pub struct Tstr {}
-pub struct DrivingPrivileges {}
+
+
+
+/// DrivingPrivilegeCode = {
+///     ; Code as per ISO/IEC 18013-2 Annex A
+///     "code": tstr
+///     ; Sign as per ISO/IEC 18013-2 Annex A
+///     ? "sign": tstr
+///     ; Value as per ISO/IEC 18013-2 Annex A
+///     ? "value": tstr
+/// }
+pub struct DrivingPrivilegeCode {
+    /// TODO:
+    /// Code as per ISO/IEC 18013-2 Annex A
+    code: String,
+    /// Sign as per ISO/IEC 18013-2 Annex A
+    sign: Option<String>,
+    /// Value as per ISO/IEC 18013-2 Annex A
+    value: Option<String>,
+}
+
+/// DrivingPrivilege = {
+///     ; Vehicle category code as per ISO/IEC 18013-1 Annex B
+///     "vehicle_category_code" : tstr
+///     ; Date of issue encoded as full-date
+///     ? "issue_date" : full-date
+///     ; Date of expiry encoded as full-date
+///     ? "expiry_date" : full-date
+///     ; Array of code info
+///     ? "codes" : [+DrivingPrivilegeCode]
+/// }
+pub struct DrivingPrivilege {
+    /// Vehicle category code as per ISO/IEC 18013-1 Annex B
+    vehicle_category_code: Tstr,
+    /// Date of issue encoded as full-date
+    issue_date: Option<FullDate>,
+    /// Date of expiry encoded as full-date
+    expiry_date: Option<FullDate>,
+    /// Array of code info
+    codes: Option<Vec<DrivingPrivilegeCode>>,
+}
+
+/// ; NOTE The DrivingPrivileges structure can be an empty array.
+/// DrivingPrivileges = [
+///     * DrivingPrivilege
+/// ]
+pub struct DrivingPrivileges {
+    driving_privileges: Vec<DrivingPrivilege>,
+}
+
 pub struct UnDistinguishingSign {}
 
 /// The four codes specified in ISO/IEC 5218 are:
@@ -210,7 +259,7 @@ pub struct MdlDataElements {
 
     /// Age attestation: Nearest “true” attestation above request
     /// See 7.2.5
-    age_over_NN: Option<bool>,
+    age_over_nn: Option<bool>,
 
     /// Issuing jurisdiction
     /// Country subdivision code of the jurisdiction that issued the mDL as defined in ISO 3166-2:2020, Clause 8.
@@ -304,7 +353,7 @@ MdlDataElements = {
 
     ; Driving privileges of the mDL holder. See 7.2.4
     ; Categories of vehicles/ restrictions/ conditions
-    driving_privileges: driving-privileges,
+    driving_privileges: DrivingPrivileges,
 
     ; Distinguishing sign of the issuing country according to ISO/IEC 18013-1:2018, Annex F. 
     ; If no applicable distinguishing sign is available in ISO/IEC 18013-1, an
@@ -445,11 +494,35 @@ latin1-up-to-150-chars = tstr .regexp "[0-9A-z\u00C0-\u00ff]{1, 150}"
 ; The value shall only use latin1^b characters and shall have a maximum length of 150 characters.
 ; latin1-up-to-150-chars-or-empty = tstr .regexp "[0-9A-z\u00C0-\u00ff]{0, 150}"
 
-; TODO
+; TODO: implement CBOR-friendly version
 local-bstr = tstr .regexp "0x[0-9a-fA-F]*"
 
-; TODO
-driving-privileges = tstr
+; TODO: non-empty array
+; NOTE The DrivingPrivileges structure can be an empty array.
+DrivingPrivileges = [
+    * DrivingPrivilege
+]
+
+DrivingPrivilege = {
+    ; Vehicle category code as per ISO/IEC 18013-1 Annex B
+    "vehicle_category_code" : tstr
+    ; Date of issue encoded as full-date
+    ? "issue_date" : full-date
+    ; Date of expiry encoded as full-date
+    ? "expiry_date" : full-date
+    ; Array of code info
+    ? "codes" : [+Code]
+}
+
+; a.k.a. "DrivingPrivilegeCode"
+Code = {
+    ; Code as per ISO/IEC 18013-2 Annex A
+    "code": tstr
+    ; Sign as per ISO/IEC 18013-2 Annex A
+    ? "sign": tstr
+    ; Value as per ISO/IEC 18013-2 Annex A
+    ? "value": tstr
+}
 "#.to_string()
 }
 
@@ -472,7 +545,7 @@ mod mdl_data_elements_tests {
           "issuing_authority": "Some Issuing Authority",
           "document_number": "1234",
           "portrait": "0xFFFFF",
-          "driving_privileges": "[driving_privileges]",
+          "driving_privileges": [],
           "un_distinguishing_sign": "USA",
           "eye_colour": "unknown",
           "hair_colour": "unknown"
