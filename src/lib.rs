@@ -1,5 +1,6 @@
 use either::Either;
-use isocountry::CountryCode;
+use rust_iso3166::CountryCode;
+use rust_iso3166::iso3166_2::Subdivision;
 
 #[cfg(test)]
 use cddl::{lexer_from_str, parser::cddl_from_str, validate_json_from_str};
@@ -72,13 +73,13 @@ pub struct Tstr {}
 ///     ? "value": tstr
 /// }
 pub struct DrivingPrivilegeCode {
-    /// TODO: restrict to ISO/IEX 18013-2 Annex A's definition
+    /// TODO: restrict to ISO/IEC 18013-2 Annex A's definition
     /// Code as per ISO/IEC 18013-2 Annex A
     code: String,
-    /// TODO: restrict to ISO/IEX 18013-2 Annex A's definition
+    /// TODO: restrict to ISO/IEC 18013-2 Annex A's definition
     /// Sign as per ISO/IEC 18013-2 Annex A
     sign: Option<String>,
-    /// TODO: restrict to ISO/IEX 18013-2 Annex A's definition
+    /// TODO: restrict to ISO/IEC 18013-2 Annex A's definition
     /// Value as per ISO/IEC 18013-2 Annex A
     value: Option<String>,
 }
@@ -264,10 +265,11 @@ pub struct MdlDataElements {
     /// See 7.2.5
     age_over_nn: Option<bool>,
 
+    /// TODO: ISO 3166-2:2020
     /// Issuing jurisdiction
     /// Country subdivision code of the jurisdiction that issued the mDL as defined in ISO 3166-2:2020, Clause 8.
     /// The first part of the code shall be the same as the value for issuing_country.
-    issuing_jurisdiction: Option<Tstr>,
+    issuing_jurisdiction: Option<Subdivision>,
 
     /// Nationality
     /// Nationality of the mDL holder as a two letter country code (alpha-2 code) defined in ISO 3166-1
@@ -320,8 +322,8 @@ pub fn mdl_data_elements_cddl() -> String {
             ; First name(s), other name(s), or secondary identifier, of the mDL holder.
             ; Given name
             ;
-            ; TODO: or-empty?
-            given_name: latin1-up-to-150-chars,
+            ; TODO: note support for or-empty
+            given_name: latin1-up-to-150-chars-or-empty,
 
             ; TODO: full-date not supported by (rust)-cddl?
             ; Day, month and year on which the mDL holder was born. If unknown, approximate date of birth
@@ -339,7 +341,7 @@ pub fn mdl_data_elements_cddl() -> String {
 
             ; Alpha-2 country code, as defined in ISO 3166-1, of the issuing authority’s country or territory
             ; Issuing country
-            issuing_country: tstr,
+            issuing_country: alpha-2-country-code,
 
             ; Issuing authority name.
             ; Issuing authority
@@ -425,7 +427,7 @@ pub fn mdl_data_elements_cddl() -> String {
             ; Issuing jurisdiction
             ; Country subdivision code of the jurisdiction that issued the mDL as defined in ISO 3166-2:2020, Clause 8.
             ; The first part of the code shall be the same as the value for issuing_country.
-            ? issuing_jurisdiction: tstr,
+            ? issuing_jurisdiction: country-subdivision-code,
 
             ; Nationality
             ; Nationality of the mDL holder as a two letter country code (alpha-2 code) defined in ISO 3166-1
@@ -492,7 +494,7 @@ pub fn mdl_data_elements_cddl() -> String {
 
         ; TODO: extend regex a la latin1-up-to-150-chars
         ; The value shall only use latin1^b characters and shall have a maximum length of 150 characters.
-        ; latin1-up-to-150-chars-or-empty = tstr .regexp "[0-9A-z\u00C0-\u00ff]{0, 150}"
+        latin1-up-to-150-chars-or-empty = tstr .regexp "[0-9A-z\u00C0-\u00ff]{0, 150}"
 
         ; TODO: implement CBOR-friendly version
         local-bstr = tstr .regexp "0x[0-9a-fA-F]*"
@@ -530,13 +532,29 @@ pub fn mdl_data_elements_cddl() -> String {
     let mut alpha_2_country_code_cddl = "\n".to_string();
     alpha_2_country_code_cddl.push_str("; A two letter country code (alpha-2 code) defined in ISO 3166-1.\n");
     alpha_2_country_code_cddl.push_str("alpha-2-country-code = tstr .regexp \"");
-    for country_code in CountryCode::iter() {
-        alpha_2_country_code_cddl.push_str(&format!("{}{}", regex_prefix, country_code.alpha2()));
+    for country_code in rust_iso3166::ALL {
+        alpha_2_country_code_cddl.push_str(&format!("{}{}", regex_prefix, country_code.alpha2));
         regex_prefix = "|"
     }
     alpha_2_country_code_cddl.push_str(")\"");
-
     cddl_str.push_str(&alpha_2_country_code_cddl);
+
+    regex_prefix = "(";
+    let mut country_subdivision_code_cddl = "\n".to_string();
+    country_subdivision_code_cddl.push_str("; A country subdivision code defined in ISO 3166-2.\n");
+    country_subdivision_code_cddl.push_str("country-subdivision-code = tstr .regexp \"");
+    for country_code in rust_iso3166::ALL {
+        // TODO: is this the correct ISO 3166-2 code?
+        // Also available besides .code are: .name, .region_code, etc.
+        for subdivision in country_code.subdivisions()
+            .expect(&format!("missing country subdivision codes for: {}", country_code.alpha2)) {
+            country_subdivision_code_cddl.push_str(&format!("{}{}", regex_prefix, subdivision.code));
+            regex_prefix = "|"
+        }
+    }
+    country_subdivision_code_cddl.push_str(")\"");
+    cddl_str.push_str(&country_subdivision_code_cddl);
+
     cddl_str
 }
 
@@ -564,7 +582,8 @@ mod mdl_data_elements_tests {
           "un_distinguishing_sign": "USA",
           "eye_colour": "unknown",
           "hair_colour": "unknown",
-          "nationality": "US"
+          "nationality": "US",
+          "issuing_jurisdiction": "US-NY"
         }"#;
 
         assert!(validate_json_from_str(&cddl, json).map(|_| true).unwrap())
