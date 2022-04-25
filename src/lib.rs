@@ -57,19 +57,98 @@ pub struct Uint {
     uint: usize,
 }
 
-/// TODO
+/// RFC 3339 date (with time)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tdate {
     tdate: DateTime<FixedOffset>,
 }
 
-/// TODO
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FullDate {}
+impl Tdate {
+    pub fn validate(datetime_str: &String) -> Result<Tdate, chrono::format::ParseError> {
+        DateTime::parse_from_rfc3339(datetime_str)
+            .map(|tdate| Tdate {
+                tdate: tdate,
+            })
+    }
+
+    pub fn forget_validation(&self) -> String {
+        self.tdate.to_rfc3339()
+    }
+}
 
 /// TODO
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Latin1UpTo150Chars {}
+pub enum FullDate {}
+
+impl FullDate {
+    pub fn forget_validation(&self) -> String {
+        match *self {}
+    }
+}
+
+/// TODO: fix (de)serialize
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Latin1UpTo150Chars {
+    latin1: String,
+}
+
+impl Latin1UpTo150Chars {
+    pub fn valid_len(&self) -> Result<(), Latin1UpTo150CharsError> {
+        if self.latin1.len() <= 150 {
+            Ok(())
+        } else {
+            Err(Latin1UpTo150CharsError::TooLong {
+                len: self.latin1.len(),
+                string: self.latin1.clone(),
+            })
+        }
+    }
+
+    pub fn valid_latin1(&self) -> Result<(), Latin1UpTo150CharsError> {
+        if encoding_rs::mem::is_str_latin1(&self.latin1) {
+            Ok(())
+        } else {
+            let valid_prefix_size = encoding_rs::mem::str_latin1_up_to(&self.latin1);
+            let mut invalid_suffix = self.latin1.clone();
+            let valid_prefix = invalid_suffix.drain(..valid_prefix_size).collect();
+            Err(Latin1UpTo150CharsError::NotLatin1 {
+                valid: valid_prefix,
+                invalid: invalid_suffix,
+            })
+        }
+    }
+
+    pub fn is_valid(&self) -> Result<(), Latin1UpTo150CharsError> {
+        self.valid_len()?;
+        self.valid_latin1()?;
+        Ok(())
+    }
+
+    pub fn validate(string: String) -> Result<Self, Latin1UpTo150CharsError> {
+        let result = Latin1UpTo150Chars {
+            latin1: string,
+        };
+        result.is_valid()?;
+        Ok(result)
+    }
+}
+
+#[derive(Clone, Debug, Error)]
+pub enum Latin1UpTo150CharsError {
+    #[error("Latin1UpTo150Chars: {len:?} is too long: \n{string:?}")]
+    TooLong {
+        len: usize,
+        string: String,
+    },
+
+    #[error("Latin1UpTo150Chars: input valid up to: \n{valid:?} \nbut invalid here: \n{invalid:?}")]
+    NotLatin1 {
+        valid: String,
+        invalid: String,
+    },
+}
+
+
 
 /// TODO
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -340,51 +419,46 @@ pub struct MdlDataElementsRaw {
 }
 
 impl MdlDataElementsRaw {
-    pub fn validate_country_code(alpha2_str: String) -> Result<CountryCode, MdlDataElementsError> {
-        rust_iso3166::from_alpha2(&alpha2_str)
-            .ok_or_else(|| MdlDataElementsError::UnexpectedCountryCode(alpha2_str))
+    pub fn validate_country_code(alpha2_str: &String) -> Result<CountryCode, MdlDataElementsError> {
+        rust_iso3166::from_alpha2(alpha2_str)
+            .ok_or_else(|| MdlDataElementsError::UnexpectedCountryCode(alpha2_str.clone()))
     }
 
-    pub fn validate_subdivision(code_str: String) -> Result<Subdivision, MdlDataElementsError> {
-        rust_iso3166::iso3166_2::from_code(&code_str)
-            .ok_or_else(|| MdlDataElementsError::UnexpectedSubdivision(code_str))
+    pub fn validate_subdivision(code_str: &String) -> Result<Subdivision, MdlDataElementsError> {
+        rust_iso3166::iso3166_2::from_code(code_str)
+            .ok_or_else(|| MdlDataElementsError::UnexpectedSubdivision(code_str.clone()))
     }
 
-    pub fn validate_datetime(datetime_str: String) -> Result<Tdate, MdlDataElementsError> {
-        DateTime::parse_from_rfc3339(&datetime_str)
+    pub fn validate_datetime(datetime_str: &String) -> Result<Tdate, MdlDataElementsError> {
+        Tdate::validate(datetime_str)
             .map_err(|e| MdlDataElementsError::UnexpectedDateTime {
-                date_str: datetime_str,
+                date_str: datetime_str.clone(),
                 error: e,
             })
-            .map(|tdate| Tdate {
-                tdate: tdate,
-            })
     }
 
-    /// TODO: support Tdate
-    pub fn validate_either_date(date_str: String) -> Result<Either<Tdate, FullDate>, MdlDataElementsError> {
+    /// TODO: support FullDate
+    pub fn validate_either_date(date_str: &String) -> Result<Either<Tdate, FullDate>, MdlDataElementsError> {
         Ok(Either::Left(Self::validate_datetime(date_str)?))
     }
 
-
-
     pub fn validate(self) -> Result<MdlDataElements, MdlDataElementsError> {
-        let birth_date = Self::validate_datetime(self.birth_date)?;
-        let issue_date = Self::validate_either_date(self.issue_date)?;
-        let expiry_date = Self::validate_either_date(self.expiry_date)?;
-        let issuing_country = Self::validate_country_code(self.issuing_country)?;
+        let birth_date = Self::validate_datetime(&self.birth_date)?;
+        let issue_date = Self::validate_either_date(&self.issue_date)?;
+        let expiry_date = Self::validate_either_date(&self.expiry_date)?;
+        let issuing_country = Self::validate_country_code(&self.issuing_country)?;
 
         let portrait_capture_date = self.portrait_capture_date
-            .map(|date_str| Self::validate_datetime(date_str)).transpose()?;
+            .map(|date_str| Self::validate_datetime(&date_str)).transpose()?;
 
         let issuing_jurisdiction = self.issuing_jurisdiction
-            .map(|code_str| Self::validate_subdivision(code_str)).transpose()?;
+            .map(|code_str| Self::validate_subdivision(&code_str)).transpose()?;
 
         let nationality = self.nationality
-            .map(|alpha2_str| Self::validate_country_code(alpha2_str)).transpose()?;
+            .map(|alpha2_str| Self::validate_country_code(&alpha2_str)).transpose()?;
 
         let resident_country = self.resident_country
-            .map(|alpha2_str| Self::validate_country_code(alpha2_str)).transpose()?;
+            .map(|alpha2_str| Self::validate_country_code(&alpha2_str)).transpose()?;
 
         Ok(MdlDataElements {
             family_name: self.family_name,
@@ -656,6 +730,63 @@ impl MdlDataElements {
             signature_usual_mark: None,
         }
     }
+
+    pub fn forget_validation(self) -> MdlDataElementsRaw {
+        let birth_date = self.birth_date.forget_validation();
+        let issue_date = self.issue_date.as_ref().either(Tdate::forget_validation, FullDate::forget_validation);
+        let expiry_date = self.expiry_date.as_ref().either(Tdate::forget_validation, FullDate::forget_validation);
+        let issuing_country = self.issuing_country.alpha2.to_string();
+
+        let portrait_capture_date = self.portrait_capture_date
+            .map(|date| date.forget_validation());
+            // .map(|date_str| Self::validate_datetime(date_str)).transpose()?;
+
+        let issuing_jurisdiction = self.issuing_jurisdiction
+            .map(|code| code.code.to_string());
+
+        let nationality = self.nationality
+            .map(|alpha2| alpha2.alpha2.to_string());
+
+        let resident_country = self.resident_country
+            .map(|alpha2| alpha2.alpha2.to_string());
+
+        MdlDataElementsRaw {
+            family_name: self.family_name,
+            given_name: self.given_name,
+            birth_date: birth_date,
+            issue_date: issue_date,
+            expiry_date: expiry_date,
+            issuing_country: issuing_country,
+            issuing_authority: self.issuing_authority,
+            document_number: self.document_number,
+            portrait: self.portrait,
+            driving_privileges: self.driving_privileges,
+            un_distinguishing_sign: self.un_distinguishing_sign,
+            administrative_number: self.administrative_number,
+            sex: self.sex,
+            height: self.height,
+            weight: self.weight,
+            eye_colour: self.eye_colour,
+            hair_colour: self.hair_colour,
+            birth_place: self.birth_place,
+            resident_address: self.resident_address,
+            portrait_capture_date: portrait_capture_date,
+            age_in_years: self.age_in_years,
+            age_birth_year: self.age_birth_year,
+            age_over_nn: self.age_over_nn,
+            issuing_jurisdiction: issuing_jurisdiction,
+            nationality: nationality,
+            resident_city: self.resident_city,
+            resident_state: self.resident_state,
+            resident_postal_code: self.resident_postal_code,
+            resident_country: resident_country,
+            biometric_template_xx: self.biometric_template_xx,
+            family_name_national_character: self.family_name_national_character,
+            given_name_national_character: self.given_name_national_character,
+            signature_usual_mark: self.signature_usual_mark,
+        }
+    }
+
 
     // /// Attempt to convert from JSON
     // pub fn from_json(json: Value) -> Result<MdlDataElementsError, Self> {

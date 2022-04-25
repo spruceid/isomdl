@@ -13,6 +13,7 @@ cbor = "0.4.1"
 cddl = "0.8.7"
 chrono = "0.4.19"
 either = "1.6.1"
+encoding_rs = "0.8.31"
 rust_iso3166 = "0.1.5"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_cbor = "0.11.2"
