@@ -72,13 +72,24 @@ mod url_value {
             D: Deserializer<'de>,
         {
             // deserializer.deserialize_i32(I32Visitor)
-            <&str as Deserialize>::deserialize(deserializer)
-                .and_then(|x| Ok(UrlValue {
+            <String as Deserialize>::deserialize(deserializer)
+                .and_then(|x| {
+                    let mut encoded_str = "dummy_key=".to_string();
+                    encoded_str.push_str(&x);
+                    let result_list: Vec<(String, String)> =
+                        serde_urlencoded::from_str(&encoded_str)
+                        .map_err(|e| serde::de::Error::invalid_type(
+                            Unexpected::Other(&format!("not urlencoded: ({}, {})", x, e)),
+                            &"URL-encoded string"))?;
+                    let (_, result) = &result_list[0];
+                    Ok(result.clone())
+                })
+                .and_then(|x: String| Ok(UrlValue {
                     url: Url::new(x
                                   .parse::<Uri>()
                                   .map_err(|e|
                                       serde::de::Error::invalid_type(
-                                          Unexpected::Other(&format!("InvalidUri: {}", e)),
+                                          Unexpected::Other(&format!("InvalidUri: ({}, {})", x, e)),
                                           &"URL-encoded issuer URL"))?),
                 }))
         }
@@ -115,6 +126,7 @@ mod https_dmv_ca_gov_mdl {
             let result = serde_json::to_value(input)
                 .map_err(|e| format!("{}", e))
                 .and_then(|json_value|
+                    // TODO: skip to_value, unneeded
                     serde_json::to_string_pretty(&json_value)
                         .map_err(|e| format!("{}", e)));
 
@@ -163,6 +175,7 @@ mod urn_ietf_params_oauth_grant_type_pre_authorized_code {
             let result = serde_json::to_value(input)
                 .map_err(|e| format!("{}", e))
                 .and_then(|json_value|
+                    // TODO: skip to_value, unneeded
                     serde_json::to_string_pretty(&json_value)
                         .map_err(|e| format!("{}", e)));
 
@@ -195,10 +208,6 @@ mod jwt_const_string {
         pub fn string() -> String {
             "jwt".to_string()
         }
-
-        // pub fn to_string(&self) -> String {
-        //     Self::string()
-        // }
     }
 
     #[cfg(test)]
@@ -211,6 +220,7 @@ mod jwt_const_string {
             let result = serde_json::to_value(input)
                 .map_err(|e| format!("{}", e))
                 .and_then(|json_value|
+                    // TODO: skip to_value, unneeded
                     serde_json::to_string_pretty(&json_value)
                         .map_err(|e| format!("{}", e)));
 
@@ -243,10 +253,6 @@ mod invalid_request {
         pub fn string() -> String {
             "invalid_request".to_string()
         }
-
-        // pub fn to_string(&self) -> String {
-        //     Self::string()
-        // }
     }
 
     #[cfg(test)]
@@ -259,6 +265,7 @@ mod invalid_request {
             let result = serde_json::to_value(input)
                 .map_err(|e| format!("{}", e))
                 .and_then(|json_value|
+                    // TODO: skip to_value, unneeded
                     serde_json::to_string_pretty(&json_value)
                         .map_err(|e| format!("{}", e)));
 
@@ -291,10 +298,6 @@ mod invalid_or_missing_proof {
         pub fn string() -> String {
             "invalid_or_missing_proof".to_string()
         }
-
-        // pub fn to_string(&self) -> String {
-        //     Self::string()
-        // }
     }
 
     #[cfg(test)]
@@ -307,6 +310,7 @@ mod invalid_or_missing_proof {
             let result = serde_json::to_value(input)
                 .map_err(|e| format!("{}", e))
                 .and_then(|json_value|
+                    // TODO: skip to_value, unneeded
                     serde_json::to_string_pretty(&json_value)
                         .map_err(|e| format!("{}", e)));
 
@@ -388,7 +392,6 @@ pub struct RequestQR {
     /// Contains a pre-authorized credential type which the mDL app can request.
     /// The credential_type must be set to https://dmv.ca.gov/mdl.
     credential_type: HttpsDmvCaGovMdl,
-
 
     /// The code represents the DMV’s authorization for the mDL app to obtain
     /// credentials of the types specified by the credential_type parameters.
@@ -567,8 +570,14 @@ async fn qr_code_api(request: web::Form<RequestQR>) -> Result<HttpResponse, QrCo
     }
 }
 
-
-
+/// POST /token HTTP/1.1
+///   Host: op.dmv.ca.gov
+///   Content-Type: application/x-www-form-urlencoded
+///
+///   grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code
+///   &client_id=NzbLsXh8...
+///   &pre-authorized_code=SplxlOBeZQQYbYS6WxSbIA
+///   &user_pin=493536
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TokenRequest {
     /// The OIDC grant type that is being used.
@@ -749,10 +758,28 @@ pub enum CredentialFormat {
     MdocB64uCbor,
 }
 
+/// The format of the credential being requested.
+/// The value must be either mdoc_b64u_cbor or jwt_vc.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CredentialRequestFormat {
+    #[serde(rename = "jwt_vc")]
+    JwtVc,
+    #[serde(rename = "mdoc_b64u_cbor")]
+    MdocB64uCbor,
+}
+
 /// Claims in the JWT credential
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CredentialClaims {
     example_claim: String,
+}
+
+impl CredentialClaims {
+    pub fn example() -> Self {
+        Self {
+            example_claim: "example_claim_contents".to_string(),
+        }
+    }
 }
 
 /// Doesn't check any signatures
@@ -769,7 +796,7 @@ impl CredentialJwt {
     }
 
     pub fn example_header() -> jsonwebtoken::Header {
-        jsonwebtoken::Header::new(jsonwebtoken::Algorithm::PS256)
+        jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256)
     }
 
     pub fn example_secret() -> &'static str {
@@ -787,9 +814,17 @@ impl CredentialJwt {
     /// Doesn't check any signatures
     pub fn example_validation() -> jsonwebtoken::Validation {
         let mut validation =
-            jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::PS256);
+            jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
         validation.insecure_disable_signature_validation();
+        validation.required_spec_claims = std::collections::HashSet::new();
         validation
+    }
+
+    pub fn example() -> Self {
+        Self::new(jsonwebtoken::TokenData {
+            header: Self::example_header(),
+            claims: CredentialClaims::example(),
+        })
     }
 }
 
@@ -812,9 +847,9 @@ impl<'de> Deserialize<'de> for CredentialJwt {
     where
         D: Deserializer<'de>,
     {
-        <&str as Deserialize>::deserialize(deserializer)
+        <String as Deserialize>::deserialize(deserializer)
             .and_then(|jwt_str|
-                jsonwebtoken::decode(jwt_str,
+                jsonwebtoken::decode(&jwt_str,
                                      &Self::example_decoding_key(),
                                      &Self::example_validation())
                     .map_err(|e| serde::de::Error::custom(format!("{}", e))))
@@ -832,6 +867,54 @@ pub struct CredentialRequestProof {
     /// <base64-URL-encoded-header>.<base64-URL-encoded-payload>.<base64-URL-encoded-signature>.
     jwt: CredentialJwt,
 }
+
+impl CredentialRequestProof {
+    pub fn example() -> Self {
+        Self {
+            proof_type: JwtConstString::JwtConstString,
+            jwt: CredentialJwt::example(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CredentialRequestProofString {
+    credential_request_proof: CredentialRequestProof,
+}
+
+impl Serialize for CredentialRequestProofString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serde_json::to_value(self.credential_request_proof.clone())
+            .map_err(|e| serde::ser::Error::custom(format!("{}", e)))
+            // TODO: skip to_value, unneeded
+            .and_then(|json| serde_json::to_string_pretty(&json)
+                .map_err(|e|
+                    serde::ser::Error::custom(
+                        format!("error to JSON: ({}, {})", json, e))))
+            .and_then(|string| string.serialize(serializer))
+    }
+}
+
+impl<'de> Deserialize<'de> for CredentialRequestProofString {
+    fn deserialize<D>(deserializer: D) -> Result<CredentialRequestProofString, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        <String as Deserialize>::deserialize(deserializer)
+            .and_then(|string| serde_json::from_str(&string)
+                .map(|x| CredentialRequestProofString {
+                    credential_request_proof: x,
+                })
+                .map_err(|e|
+                    serde::de::Error::custom(
+                        format!("error from JSON: ({:?}, {})", string, e))))
+    }
+}
+
+
 
 /// Table: Details of OIDC4VCI JWT Payload
 ///
@@ -859,14 +942,13 @@ pub struct CredentialRequest {
 
     /// The format of the credential being requested.
     /// The value must be either mdoc_b64u_cbor or jwt_vc.
-    format: CredentialFormat,
+    format: CredentialRequestFormat,
 
     /// A JSON Object containing proof of possession of the key material the
     /// issued credential shall be bound to. The proof object must contain a
     /// proof_type and a jwt element.
-    proof: CredentialRequestProof,
+    proof: CredentialRequestProofString,
 }
-
 
 /// Table: Details of Successful OIDC4VCI Credential Response
 ///
@@ -1029,10 +1111,11 @@ impl actix_web::ResponseError for CredentialError {
 async fn credential_api(request: web::Form<CredentialRequest>) ->
     Result<HttpResponse, CredentialError> {
     match request.format {
-        CredentialFormat::LdpVc =>
+        CredentialRequestFormat::JwtVc =>
             Ok(HttpResponse::Ok().json(CredentialResponse::example())),
-        CredentialFormat::MdocB64uCbor =>
-            Err(CredentialError::InvalidProof(CredentialInvalidProof::example())),
+        CredentialRequestFormat::MdocB64uCbor =>
+            // Err(CredentialError::InvalidProof(CredentialInvalidProof::example())),
+            Err(CredentialError::InvalidRequest(CredentialInvalidRequest { error: InvalidRequest::InvalidRequest })),
     }
 }
 
@@ -1046,6 +1129,10 @@ async fn credential_api(request: web::Form<CredentialRequest>) ->
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    println!("Example CredentialRequestProof: \n{:?}\n",
+             serde_json::to_string_pretty(&CredentialRequestProof::example()));
+             // serde_urlencoded::to_string(CredentialRequestProof::example()));
+
     let server_root = "127.0.0.1";
     let server_port = 9999;
     let server_address = format!("http://{}:{}", server_root, server_port);
@@ -1055,7 +1142,6 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(app_state.clone()))
-            // .service(index)
             .service(eligibility_api)
             .service(qr_code_api)
             .service(token_api)
