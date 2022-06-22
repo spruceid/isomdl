@@ -8,7 +8,7 @@ Can be run remote or locally:
 - Remote:
 
 ```
-https://michael-test.spruceid.xyz
+https://mdl-microservice-test.spruceid.xyz
 ```
 
 - Local:
@@ -21,7 +21,7 @@ http://127.0.0.1:9999
 ### GET `/eligibility`
 
 ```bash
-curl https://michael-test.spruceid.xyz/eligibility
+curl https://mdl-microservice-test.spruceid.xyz/eligibility
 
 eligible: 0 checks performed.
 ```
@@ -36,7 +36,7 @@ curl \
   --data-urlencode "credential_type=https://dmv.ca.gov/mdl" \
   --data-urlencode "pre-authorized_code=SplxlOBeZQQYbYS6WxSbIA" \
   --data-urlencode "user_pin=true" \
-  https://michael-test.spruceid.xyz/generate_qr_code
+  https://mdl-microservice-test.spruceid.xyz/generate_qr_code
 
 "customscheme://example_authority/?issuer=https%3A%2F%2Fop.dmv.ca.gov&credential_type=https%3A%2F%2Fdmv.ca.gov%2Fmdl&pre-authorized_code=SplxlOBeZQQYbYS6WxSbIA&user_pin_required=false"
 ```
@@ -51,7 +51,7 @@ curl \
   --data-urlencode "client_id=NzbLsXh8" \
   --data-urlencode "pre-authorized_code=SplxlOBeZQQYbYS6WxSbIA" \
   --data-urlencode "user_pin=493536" \
-  https://michael-test.spruceid.xyz/token
+  https://mdl-microservice-test.spruceid.xyz/token
 
 {"access_token":"eyJhbGciOiJSUzI1NiIsInR5cCI6Ikp..sHQ","token_type":"bearer","expires_in":86400,"c_nonce":"tZignsnFbp","c_nonce_expires_in":86400}
 ```
@@ -68,7 +68,7 @@ curl \
   --data-urlencode "client_id=NzbLsXh8" \
   --data-urlencode "pre-authorized_code=SplxlOBeZQQYbYS6WxSbIA" \
   --data-urlencode "user_pin=" \
-  https://michael-test.spruceid.xyz/token
+  https://mdl-microservice-test.spruceid.xyz/token
 
 {"error":"invalid_request"}
 ```
@@ -82,7 +82,7 @@ curl \
   --data-urlencode "type=https://dmv.ca.gov/mdl" \
   --data-urlencode "format=jwt_vc" \
   --data-urlencode 'proof={"proof_type": "jwt", "jwt": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleGFtcGxlX2NsYWltIjoiZXhhbXBsZV9jbGFpbV9jb250ZW50cyJ9.1BXqgc7srYMzdAM4RfF6LnROfnRb1arfngzuM6JV9_w"}' \
-  https://michael-test.spruceid.xyz/credential
+  https://mdl-microservice-test.spruceid.xyz/credential
 
 {"format":"ldp_vc","credential":"AAECAwQFBgc","c_nonce":"fGFF7UkhLa","c_nonce_expires_in":86400}
 ```
@@ -96,7 +96,7 @@ curl \
   --data-urlencode "type=https://dmv.ca.gov/mdl" \
   --data-urlencode "format=mdoc_b64u_cbor" \
   --data-urlencode 'proof={"proof_type": "jwt", "jwt": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleGFtcGxlX2NsYWltIjoiZXhhbXBsZV9jbGFpbV9jb250ZW50cyJ9.1BXqgc7srYMzdAM4RfF6LnROfnRb1arfngzuM6JV9_w"}' \
-  https://michael-test.spruceid.xyz/credential
+  https://mdl-microservice-test.spruceid.xyz/credential
 
 {"error":"invalid_request"}
 ```
