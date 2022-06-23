@@ -15,6 +15,131 @@ use actix_web::dev::Url;
 use serde::de::Unexpected;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+
+mod vdl_vc {
+    use super::*;
+
+    use ssi::jwk::JWK;
+    use ssi::vc::Credential;
+    use serde_json::{json, Value};
+
+    pub fn example_vdl_json() -> Value {
+        json!({
+            "@context": [
+              "https://www.w3.org/2018/credentials/v1",
+              "https://w3id.org/vdl/v1"
+            ],
+            "type": [
+              "VerifiableCredential",
+              "Iso18013DriversLicense"
+            ],
+            "issuer": "did:key:z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5",
+            "issuanceDate": "2018-01-15T10:00:00.0000000-07:00",
+            "expirationDate": "2022-08-27T12:00:00.0000000-06:00",
+            "credentialSubject": {
+              "id": "did:example:12347abcd",
+              "license": {
+                "type": "Iso18013DriversLicense",
+                "document_number": "542426814",
+                "family_name": "TURNER",
+                "given_name": "SUSAN",
+                "portrait": "/9j/4AAQSkZJRgABAQEAkACQA...gcdgck5HtRRSClooooP/2Q==",
+                "birth_date": "1998-08-28",
+                "issue_date": "2018-01-15T10:00:00.0000000-07:00",
+                "expiry_date": "2022-08-27T12:00:00.0000000-06:00",
+                "issuing_country": "US",
+                "issuing_authority": "CO",
+                "driving_privileges": [{
+                  "codes": [{"code": "D"}],
+                  "vehicle_category_code": "D",
+                  "issue_date": "2019-01-01",
+                  "expiry_date": "2027-01-01"
+                },
+                {
+                  "codes": [{"code": "C"}],
+                  "vehicle_category_code": "C",
+                  "issue_date": "2019-01-01",
+                  "expiry_date": "2017-01-01"
+                }],
+                "un_distinguishing_sign": "USA",
+              },
+            },
+            "proof": {
+              "type": "Ed25519Signature2020",
+              "created": "2021-06-20T00:17:01Z",
+              "verificationMethod": "did:key:z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5
+                #z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5",
+              "proofPurpose": "assertionMethod",
+              "proofValue": "z4zKSH1WmuSQ8tcpSB6mtaSGhtzvMnBQSckqrpTDm3wQyNfHd6rctuST2
+                cyzaKSY135Kp6ZYMyFaiLvBUjJ89GP7V"
+            }
+        })
+    }
+
+    pub fn example_vdl_vc() -> Result<Credential, String> {
+        serde_json::from_value(example_vdl_json())
+            .map_err(|e| format!("example_vdl_vc: {}", e))
+    }
+
+    pub fn example_jwk() -> Result<JWK, String> {
+        // wget https://raw.githubusercontent.com/spruceid/ssi/v0.4.0/tests/ed25519-2020-10-18.json
+        let key_str = include_str!("../tests/ed25519-2020-10-18.json");
+        serde_json::from_str(key_str)
+            .map_err(|e| format!("example_jwk: {}", e))
+    }
+
+    pub async fn example_vdl_proof() -> Result<String, String> {
+        let key: JWK = example_jwk()?;
+
+        let mut issue_options = ssi::vc::LinkedDataProofOptions::default();
+        issue_options.verification_method =
+            Some(ssi::vc::URI::String("did:example:foo#key3".to_string()));
+
+        let mut context_loader = ssi::did::example::DIDExample;
+        let _proof = example_vdl_vc()?
+            .generate_proof(&key, &issue_options, &mut context_loader)
+            .await?;
+
+        Ok("".to_string())
+
+        // Ok(format!("{}", serde_json::to_string_pretty(&proof)
+        //            .map_err(|e| format!("example_vdl_proof: {}", e))?))
+    }
+
+    #[cfg(test)]
+    mod vdl_tests {
+        use super::*;
+        use tokio;
+
+        #[test]
+        fn test_example_vdl_vc() {
+            assert_eq!(example_vdl_vc().map(|_| ()), Ok(()))
+        }
+
+        #[test]
+        fn test_example_jwk() {
+            assert_eq!(example_jwk().map(|_| ()), Ok(()))
+        }
+
+        #[tokio::test]
+        async fn test_vc() {
+            let result = example_vdl_proof().await;
+
+            assert_eq!(result, Ok("".to_string()))
+
+            // vc.add_proof(proof);
+            // vc.validate().unwrap();
+            // let verification_result = vc.verify(None, &DIDExample, &mut context_loader).await;
+            // println!("{:#?}", verification_result);
+            // assert!(verification_result.errors.is_empty());
+        }
+    }
+
+}
+// use crate::vdl_vc;
+
+
+
 // oidc4vci:
 // - /initiate_issuance -> JWT (as defined in dual prov doc), for inperson prov this is consumed by dmv internally, for remote prov this is consumed by the mdl app and protected by an access token issued by the dmv idp. note, the latter was not fully agreed.
 
