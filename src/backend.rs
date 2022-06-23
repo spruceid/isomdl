@@ -67,11 +67,9 @@ mod vdl_vc {
             "proof": {
               "type": "Ed25519Signature2020",
               "created": "2021-06-20T00:17:01Z",
-              "verificationMethod": "did:key:z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5
-                #z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5",
+              "verificationMethod": "did:key:z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5#z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5",
               "proofPurpose": "assertionMethod",
-              "proofValue": "z4zKSH1WmuSQ8tcpSB6mtaSGhtzvMnBQSckqrpTDm3wQyNfHd6rctuST2
-                cyzaKSY135Kp6ZYMyFaiLvBUjJ89GP7V"
+              "proofValue": "z4zKSH1WmuSQ8tcpSB6mtaSGhtzvMnBQSckqrpTDm3wQyNfHd6rctuST2cyzaKSY135Kp6ZYMyFaiLvBUjJ89GP7V"
             }
         })
     }
@@ -93,17 +91,21 @@ mod vdl_vc {
 
         let mut issue_options = ssi::vc::LinkedDataProofOptions::default();
         issue_options.verification_method =
-            Some(ssi::vc::URI::String("did:example:foo#key3".to_string()));
+            Some(ssi::vc::URI::String("did:key:z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5#z6MkjxvA4FNrQUhr8f7xhdQuP1VPzErkcnfxsRaU5oFgy2E5".to_string()));
+            // .to_string()
+            // Some(ssi::vc::URI::String("did:example:foo#key3".to_string()));
 
-        let mut context_loader = ssi::did::example::DIDExample;
-        let _proof = example_vdl_vc()?
-            .generate_proof(&key, &issue_options, &mut context_loader)
-            .await?;
+        // let mut resolver = ssi::did::example::DIDExample;
+        let resolver = didkit::DID_METHODS.to_resolver();
+        let proof = example_vdl_vc()?
+            .generate_proof(&key, &issue_options, resolver)
+            .await
+            .map_err(|e| format!("proof error: {:?}", e));
 
-        Ok("".to_string())
+        // Ok("".to_string())
 
-        // Ok(format!("{}", serde_json::to_string_pretty(&proof)
-        //            .map_err(|e| format!("example_vdl_proof: {}", e))?))
+        Ok(format!("{}", serde_json::to_string_pretty(&proof)
+                   .map_err(|e| format!("example_vdl_proof: {}", e))?))
     }
 
     #[cfg(test)]
@@ -119,6 +121,17 @@ mod vdl_vc {
         #[test]
         fn test_example_jwk() {
             assert_eq!(example_jwk().map(|_| ()), Ok(()))
+        }
+
+        #[tokio::test]
+        async fn test_test() {
+            let vc = example_vdl_vc().unwrap();
+            let resolver = didkit::DID_METHODS.to_resolver();
+            let result = format!("{:?}", vc.verify(None, resolver).await);
+                // .map_err(|e| format!("{}", e))
+                // .map(|x| format!("{:?}", x));
+
+            assert_eq!(result, "".to_string());
         }
 
         #[tokio::test]
