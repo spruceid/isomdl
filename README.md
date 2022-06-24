@@ -41,6 +41,24 @@ curl \
 "customscheme://example_authority/?issuer=https%3A%2F%2Fop.dmv.ca.gov&credential_type=https%3A%2F%2Fdmv.ca.gov%2Fmdl&pre-authorized_code=SplxlOBeZQQYbYS6WxSbIA&user_pin_required=false"
 ```
 
+#### Generate PNG Image
+
+The output will be to `example.png`:
+
+```bash
+curl \
+  -X GET \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "issuer=https://op.dmv.ca.gov" \
+  --data-urlencode "credential_type=https://dmv.ca.gov/mdl" \
+  --data-urlencode "pre-authorized_code=SplxlOBeZQQYbYS6WxSbIA" \
+  --data-urlencode "user_pin=true" \
+  --data-urlencode "format=png" \
+  --output example.png \
+  https://mdl-microservice-test.spruceid.xyz/generate_qr_code
+```
+
+
 ### POST `/token`
 
 ```bash
