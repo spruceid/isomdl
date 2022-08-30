@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use openssl::x509::{X509Ref, X509VerifyResult, X509};
-use std::fs::File;
-use std::io::Read;
+use serde_cbor::Value as CborValue;
+use std::{fs::File, io::Read};
 
 #[derive(Debug, Clone)]
 pub struct X5Chain(Vec<Vec<u8>>);
@@ -18,15 +18,23 @@ impl AsRef<Vec<Vec<u8>>> for X5Chain {
     }
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct Builder {
-    certs: Vec<X509>,
-}
-
 impl X5Chain {
     pub fn builder() -> Builder {
         Builder::default()
     }
+
+    pub fn into_cbor(self) -> CborValue {
+        self.0
+            .into_iter()
+            .map(CborValue::Bytes)
+            .collect::<Vec<CborValue>>()
+            .into()
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct Builder {
+    certs: Vec<X509>,
 }
 
 impl Builder {
@@ -71,7 +79,8 @@ impl Builder {
             first = second;
             current_subject += 1;
         }
-        self.certs.iter()
+        self.certs
+            .iter()
             .map(|cert| cert.to_der())
             .collect::<Result<Vec<_>, _>>()
             .map_err(Into::into)
