@@ -1,3 +1,4 @@
+use crate::x5chain::{self, X5Chain};
 use anyhow::Result;
 use aws_nitro_enclaves_cose::crypto::{
     Hash, MessageDigest, Openssl, SignatureAlgorithm, SigningPrivateKey, SigningPublicKey,
@@ -7,28 +8,33 @@ use aws_nitro_enclaves_cose::header_map::HeaderMap;
 use aws_nitro_enclaves_cose::{sign, CoseSign1};
 use cddl::{parser::cddl_from_str, validate_json_from_str};
 use chrono::{DateTime, FixedOffset, Offset, Utc};
-use der::Encode;
 use der::Writer;
-use ecdsa::{signature::Signature, signature::Signer, SigningKey};
+use der::{Document, Encode};
+use ecdsa::signature::digest::Key;
+use ecdsa::{signature::Signature, SigningKey};
 use openssl::ec::EcKey;
 use openssl::pkey::{Id, PKey, Private, Public};
 use p256::{AffinePoint, NistP256, PublicKey};
+use rand::Rng;
 use rand_core::OsRng;
+use ring::digest::{Context, Digest, SHA256};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_cbor::{self, value};
-use serde_json::Value;
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
-use x509_parser::pem::Pem;
-use x509_parser::prelude::*;
-use x509_parser::x509::X509Version;
-use zeroize::Zeroize;
+use std::str::Bytes;
 
 const ALG: i128 = 1;
 const X5CHAIN: i128 = 33;
+const PEM_FILE: &'static str = include_str!("../test.pem");
 
-#[derive(Serialize, Deserialize)]
+type Namespaces = HashMap<String, HashMap<String, String>>;
+type DigestIds = HashMap<DigestID, Vec<u8>>;
+type IssuerSignedItemBytes = [u8];
+type DigestID = u64;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Mdoc {
     doc_type: String,
     namespaces: HashMap<String, HashMap<String, String>>,
@@ -36,28 +42,38 @@ pub struct Mdoc {
     issuer_auth: Option<CoseSign1>,
 }
 
-#[derive(Clone, Debug)]
-pub struct Namespaces {
+pub struct PreparationMdoc {
+    doc_type: String,
     namespaces: HashMap<String, HashMap<String, String>>,
+    mobile_security_object: Mso,
+    x5chain: X5Chain,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Mso {
     version: String,
     digest_algorithm: String,
-    value_digests: HashMap<String, HashMap<String, ecdsa::Signature<NistP256>>>,
+    value_digests: HashMap<String, HashMap<DigestID, Vec<u8>>>,
     device_key_info: DeviceKeyInfo,
     doc_type: String,
     validity_info: ValidityInfo,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct IssuerAuth {
-    issuer_auth: Value,
+pub struct IssuerSigned {
+    namespaces: IssuerNamespace,
+    issuer_auth: CoseSign1,
 }
 
-pub struct DigestIDs {
-    digest_ids: HashMap<String, String>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IssuerSignedItem {
+    digest_id: u64,
+    random: [u8; 16],
+    element_identifier: String,
+    element_value: String,
+}
+
+pub struct IssuerNamespace {
+    namespace: HashMap<String, IssuerSignedItem>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -69,6 +85,12 @@ pub struct MobileSecurityObjectBytes {
 pub struct DeviceKeyInfo {
     device_key: CoseKey,
     key_authorization: Option<KeyAuthorization>,
+}
+
+pub trait Signer {
+    fn alg() {}
+
+    fn sign() {}
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -94,72 +116,29 @@ pub struct CoseKey {
     alg: SignatureAlgorithm,
 }
 
-pub struct IssuerSignedItem {
-    digest_id: i32,
-    random: String, //bstr
-    element_identifier: String,
-    element_value: String,
+pub enum DigestAlgorithm {
+    SHA256,
+    SHA384,
+    SHA512,
 }
 
-/// TODO
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LocalBstr {}
-
-/// TODO: fix (de)serialize
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Tstr {
-    tstr: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tdate {
-    tdate: DateTime<FixedOffset>,
-}
-
-impl Mdoc {
-    pub fn issue<T: SigningPrivateKey + SigningPublicKey + DeviceKeyInfoTrait>(
+impl PreparationMdoc {
+    fn complete<T: SigningPrivateKey + SigningPublicKey + DeviceKeyInfoTrait>(
         self,
-        doc_type: String,
-        namespaces: Namespaces,
-        issuerx5chain: Vec<String>,
-        validity_info: ValidityInfo,
-        digest_algorithm: String,
-        //external_signer: String,
         signer: T,
     ) -> Mdoc {
-        //generate mso
-        let value_digest = self.digest_namespaces(namespaces, signer.get_device_key_info());
-        let mso = Mso {
-            version: "1.0".to_string(),
-            digest_algorithm,
-            value_digests: value_digest,
-            device_key_info: signer.get_device_key_info(),
-            doc_type: doc_type,
-            validity_info: validity_info,
-        };
-
         //encode mso to cbor
-        let mobile_security_object_bytes = to_cbor(mso);
+        let mobile_security_object_bytes = to_cbor(self.mobile_security_object.clone());
 
-        //load mso bytes into a Cose_Sign1 object as IssuerAuth
         //headermap should contain alg header and x5chain header
-        let mut alg_header_map: HeaderMap = signer.get_device_key_info().device_key.alg.into();
+        let cose_key = signer.get_cose_key().alg;
+        let mut alg_header_map: HeaderMap = signer.get_alg().into();
         let mut buf: Vec<u8> = vec![];
 
-        let cert_bytes = der::Encode::encode_to_vec(&issuerx5chain, &mut buf);
-        println!("cert_bytes: {:?}", cert_bytes);
-
-        let cbor_cert_chain: Vec<CborValue> = issuerx5chain
-            .into_iter()
-            .map(|s| s.as_bytes().to_vec())
-            .map(|v| serde_cbor::Value::Bytes(v))
-            .collect();
-
+        let x5chain_cbor = self.x5chain.into_cbor();
         let mut cert_header_map = HeaderMap::new();
-        cert_header_map.insert(
-            serde_cbor::Value::Integer(X5CHAIN),
-            serde_cbor::Value::Array(cbor_cert_chain),
-        );
+        cert_header_map.insert(serde_cbor::Value::Integer(X5CHAIN), x5chain_cbor);
+
         let cose_sign1 = sign::CoseSign1::new_with_protected::<Openssl>(
             &mobile_security_object_bytes.unwrap(),
             &alg_header_map,
@@ -167,68 +146,154 @@ impl Mdoc {
             &signer,
         );
 
-        println!("cose_sign1: {:?}", cose_sign1);
+        let mdoc = Mdoc {
+            doc_type: "org.iso.18013.5.1".to_string(),
+            namespaces: self.namespaces,
+            mobile_security_object: self.mobile_security_object,
+            issuer_auth: Some(cose_sign1.unwrap()),
+        };
 
-        unimplemented!()
+        mdoc
+    }
+}
+
+impl Mdoc {
+    pub fn prepare_mdoc<T: SigningPrivateKey + SigningPublicKey + DeviceKeyInfoTrait>(
+        self,
+        doc_type: String,
+        namespaces: Namespaces,
+        issuerx5chain: X5Chain,
+        validity_info: ValidityInfo,
+        digest_algorithm: String,
+        signer: T,
+        key_authorization: Option<KeyAuthorization>,
+    ) -> PreparationMdoc {
+        let device_key_info = DeviceKeyInfo {
+            device_key: signer.get_cose_key(),
+            key_authorization: key_authorization,
+        };
+
+        let value_digest =
+            self.digest_namespaces(&namespaces, &device_key_info, digest_algorithm.clone());
+
+        let mso = Mso {
+            version: "1.0".to_string(),
+            digest_algorithm,
+            value_digests: value_digest,
+            device_key_info: device_key_info,
+            doc_type: doc_type.clone(),
+            validity_info: validity_info,
+        };
+
+        let preparation_mdoc = PreparationMdoc {
+            doc_type,
+            namespaces,
+            mobile_security_object: mso,
+            x5chain: issuerx5chain,
+        };
+
+        preparation_mdoc
     }
 
     pub fn digest_namespaces(
         self,
-        namespaces: Namespaces,
-        device_key_info: DeviceKeyInfo,
-    ) -> HashMap<String, HashMap<String, ecdsa::Signature<NistP256>>> {
-        let mut value_digest =
-            HashMap::<String, HashMap<String, ecdsa::Signature<NistP256>>>::new();
+        namespaces: &Namespaces,
+        device_key_info: &DeviceKeyInfo,
+        digest_algorithm: String,
+    ) -> HashMap<String, HashMap<DigestID, Vec<u8>>> {
+        let mut value_digest = HashMap::<String, DigestIds>::new();
 
-        let signing_key = SigningKey::<NistP256>::random(&mut OsRng); // do this somewhere else and hand function the key`
+        let key_authorization = &device_key_info.key_authorization;
 
-        let key_authorization = device_key_info.key_authorization;
+        let mut context = Context::new(&SHA256);
 
         if key_authorization.is_none() {
-            //grab all data elements
+            //digest all data elements
+            for namespace in namespaces {
+                let mut element_map = namespace.1;
+                let mut digest_entry = HashMap::<DigestID, Vec<u8>>::new();
+
+                for (key, value) in element_map {
+                    let issuer_signed_item = IssuerSignedItem {
+                        digest_id: rand::thread_rng().gen(),
+                        random: rand::thread_rng().gen::<[u8; 16]>(),
+                        element_identifier: key.to_string(),
+                        element_value: element_map.get(key).unwrap().to_string(),
+                    };
+                    let digest_id = issuer_signed_item.digest_id;
+                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item).unwrap();
+
+                    context.update(&issuer_signed_item_bytes);
+                    digest_entry.insert(digest_id, issuer_signed_item_bytes.clone());
+                }
+                value_digest.insert(namespace.0.to_string(), digest_entry.clone());
+            }
         } else {
             //grab all authorized data elements
+
             let authorized_namespaces = key_authorization
-                .clone()
+                .as_ref()
                 .unwrap()
                 .authorized_namespaces
+                .as_ref();
+            let authorized_data_elements = key_authorization
+                .as_ref()
+                .unwrap()
+                .authorized_data_elements
+                .as_ref()
                 .unwrap();
-            let authorized_data_elements =
-                key_authorization.unwrap().authorized_data_elements.unwrap();
 
-            for namespace in authorized_namespaces {
-                let digest_map = namespaces.namespaces.get(&namespace).unwrap().clone();
-                let mut digest = HashMap::<String, ecdsa::Signature<NistP256>>::new();
+            for namespace in authorized_namespaces.unwrap() {
+                let digest_map = namespaces.get(namespace).unwrap();
+                let mut digest = HashMap::<DigestID, Vec<u8>>::new();
                 for (key, value) in digest_map {
-                    let mut signed_digest = signing_key.sign(&value.clone().into_bytes());
-                    digest.insert(key.to_string(), signed_digest);
+                    let issuer_signed_item = IssuerSignedItem {
+                        digest_id: rand::thread_rng().gen(),
+                        random: rand::thread_rng().gen::<[u8; 16]>(),
+                        element_identifier: key.to_string(),
+                        element_value: digest_map.get(key).unwrap().to_string(),
+                    };
+                    let digest_id = issuer_signed_item.digest_id;
+                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item).unwrap();
+
+                    context.update(&issuer_signed_item_bytes); //signing_key.sign(&value.clone().into_bytes());
+                    digest.insert(digest_id, issuer_signed_item_bytes);
                 }
-                value_digest.insert(namespace, digest.clone());
+                value_digest.insert(namespace.to_string(), digest.clone());
             }
 
-            for (key, value) in authorized_data_elements {
-                let digest_map = namespaces.namespaces.get(&key).unwrap();
-                let mut digest = HashMap::<String, ecdsa::Signature<NistP256>>::new();
+            for (namespace, data_elements) in authorized_data_elements {
+                let digest_map = namespaces.get(namespace).unwrap();
+                let mut digest = HashMap::<DigestID, Vec<u8>>::new();
 
-                for val in value {
-                    let digest_value = digest_map.get(&val).unwrap();
-                    let signed_digest = signing_key.sign(&digest_value.clone().into_bytes());
-                    digest.insert(val, signed_digest);
+                for element in data_elements {
+                    let issuer_signed_item = IssuerSignedItem {
+                        digest_id: rand::thread_rng().gen(),
+                        random: rand::thread_rng().gen::<[u8; 16]>(),
+                        element_identifier: element.to_string(),
+                        element_value: digest_map.get(element).unwrap().to_string(),
+                    };
+                    let digest_id = issuer_signed_item.digest_id;
+                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item).unwrap();
+
+                    context.update(&issuer_signed_item_bytes); //signing_key.sign(&value.clone().into_bytes());
+                    digest.insert(digest_id, issuer_signed_item_bytes);
                 }
-                value_digest.insert(key, digest);
+                value_digest.insert(namespace.to_string(), digest);
             }
         };
-
         value_digest
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct PrivateKey {
     pkey: SigningKey<NistP256>,
 }
 
 impl SigningPrivateKey for PrivateKey {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CoseError> {
+        use ecdsa::signature::Signer;
         let signature = self.pkey.sign(data);
         let result = signature.as_bytes();
         Ok(result.to_vec())
@@ -247,20 +312,22 @@ impl SigningPublicKey for PrivateKey {
     }
 }
 
-impl DeviceKeyInfoTrait for PrivateKey {
-    fn get_alg(&self) -> SignatureAlgorithm {
-        SignatureAlgorithm::ES256
-    }
+pub trait DeviceKeyInfoTrait {
+    fn get_alg(&self) -> SignatureAlgorithm;
+    fn get_kty(&self) -> KeyType;
+    fn get_cose_key(&self) -> CoseKey;
+}
 
-    fn get_device_key_info(&self) -> DeviceKeyInfo {
+impl DeviceKeyInfoTrait for PrivateKey {
+    fn get_cose_key(&self) -> CoseKey {
         let cose_key = CoseKey {
             kty: KeyType::EC,
             alg: SignatureAlgorithm::ES256,
         };
-        DeviceKeyInfo {
-            device_key: (cose_key),
-            key_authorization: None,
-        }
+        cose_key
+    }
+    fn get_alg(&self) -> SignatureAlgorithm {
+        SignatureAlgorithm::ES256
     }
 
     fn get_kty(&self) -> KeyType {
@@ -274,12 +341,6 @@ pub enum KeyType {
     EC,
 }
 
-pub trait DeviceKeyInfoTrait {
-    fn get_alg(&self) -> SignatureAlgorithm;
-    fn get_kty(&self) -> KeyType;
-    fn get_device_key_info(&self) -> DeviceKeyInfo;
-}
-
 pub fn generate_keys() -> (PublicKey, SigningKey<NistP256>) {
     let affine_point = AffinePoint::GENERATOR;
     let public_key = PublicKey::try_from(affine_point).unwrap();
@@ -288,14 +349,40 @@ pub fn generate_keys() -> (PublicKey, SigningKey<NistP256>) {
     (public_key, signing_key)
 }
 
-pub fn to_cbor(mso: Mso) -> Result<Vec<u8>, serde_cbor::Error> {
-    let cbor_mdoc = serde_cbor::to_vec(&mso);
+pub fn to_cbor<T: Serialize>(input: T) -> Result<Vec<u8>, serde_cbor::Error> {
+    let cbor_mdoc = serde_cbor::to_vec(&input);
     cbor_mdoc
 }
 
 pub fn from_cbor(mso_bytes: Vec<u8>) -> Result<Mso, serde_cbor::Error> {
     let mso: Result<Mso, serde_cbor::Error> = serde_cbor::from_slice(&mso_bytes);
     mso
+}
+
+pub fn x5chain_to_cbor(chain: &[Document]) -> CborValue {
+    let cbor_chain: Vec<CborValue> = chain
+        .iter()
+        .map(|doc| doc.as_bytes().to_vec())
+        .map(CborValue::Bytes)
+        .collect();
+    CborValue::Array(cbor_chain)
+}
+
+pub fn create_issuer_signed_item(key: String, value: String) {}
+
+/// TODO
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalBstr {}
+
+/// TODO: fix (de)serialize
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tstr {
+    tstr: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tdate {
+    tdate: DateTime<FixedOffset>,
 }
 
 #[cfg(test)]
@@ -306,57 +393,42 @@ pub mod tests {
     use p256::NistP256;
     use serde_cbor::value;
 
-    pub async fn generate_mso(
-        doc_type: String,
-        namespaces: Namespaces,
-        device_key: String,
-        device_key_info: DeviceKeyInfo,
-        issuerx5chain: X509Certificate<'_>,
-        validity_info: ValidityInfo,
-        signing_alg: String,
-        external_signer: String,
-    ) {
-    }
-
     #[test]
     pub fn issue_credential_test() {
         let mut info_mdoc = load_mock_data();
-        let namespaces = Namespaces {
-            namespaces: info_mdoc.namespaces.clone(),
-        };
+        let namespaces = info_mdoc.namespaces;
         let device_key_info = info_mdoc.mobile_security_object.device_key_info.clone();
         let doc_type = info_mdoc.doc_type.clone();
         let validity_info = info_mdoc.mobile_security_object.validity_info.clone();
         let signing_alg = info_mdoc.mobile_security_object.digest_algorithm.clone();
 
-        let value_digest = info_mdoc
-            .digest_namespaces(namespaces.clone(), device_key_info.clone())
-            .clone();
-
         let keys = generate_keys(); //move out of mdoc?
         let sig_key = keys.1.clone();
-        let priv_key = PrivateKey { pkey: sig_key };
+        let signer = PrivateKey { pkey: sig_key };
 
         //parse x509 from pem
-
         static IGCA_PEM: &str = "./test.pem";
-        let data = std::fs::read(IGCA_PEM).expect("Could not read file");
-        let issuerx5 = serde_json::to_string(&data).unwrap();
-        println!("data: {:?}", data.len());
-        println!("issuerx5: {:?}", issuerx5);
+        let x5chain = std::fs::read(IGCA_PEM).expect("Could not read file");
+        let issuerx5chain = x5chain::X5Chain::from(vec![x5chain]);
+        let key_authorization = device_key_info.key_authorization;
 
-        let issuerx5chain = vec![issuerx5];
+        let digest_algorithm = "SHA256".to_string();
 
         let mut mdoc = load_mock_data();
 
-        let issued_credential = mdoc.issue(
+        let preparation_mdoc = mdoc.prepare_mdoc(
             doc_type,
             namespaces,
             issuerx5chain,
             validity_info,
-            signing_alg,
-            priv_key,
+            digest_algorithm,
+            signer.clone(),
+            key_authorization,
         );
+
+        let issued_credential = preparation_mdoc.complete(signer);
+
+        println!("issued_credential {:?}", issued_credential);
     }
 
     #[test]
@@ -373,19 +445,18 @@ pub mod tests {
     pub fn test_digest_namespaces() {
         //set up some data to enter into an mdoc
         let mdoc = load_mock_data();
-        let namespaces = Namespaces {
-            namespaces: mdoc.namespaces.clone(),
-        };
+        let namespaces = mdoc.namespaces.clone();
         let device_key_info = mdoc.mobile_security_object.device_key_info.clone();
+        let digest_algorithm = "SHA256".to_string();
 
-        let value_digests = mdoc.digest_namespaces(namespaces, device_key_info);
+        let value_digest = mdoc.digest_namespaces(&namespaces, &device_key_info, digest_algorithm);
+        println!("value_digest {:?}", value_digest);
         //asserteq
     }
 
     pub fn load_mock_data() -> Mdoc {
-        let mut namespaces: Namespaces = Namespaces {
-            namespaces: HashMap::<String, HashMap<String, String>>::new(),
-        };
+        let mut namespaces: Namespaces = HashMap::<String, HashMap<String, String>>::new();
+
         let mut org_iso_1801351_namespace = HashMap::<String, String>::new();
         org_iso_1801351_namespace.insert(
             "org.iso.18013.5.1.age_over_18".to_string(),
@@ -405,10 +476,8 @@ pub mod tests {
             "United States of America".to_string(),
         );
 
-        namespaces
-            .namespaces
-            .insert("org.iso.18013.5.1".to_string(), org_iso_1801351_namespace);
-        namespaces.namespaces.insert(
+        namespaces.insert("org.iso.18013.5.1".to_string(), org_iso_1801351_namespace);
+        namespaces.insert(
             "org.iso.18013.5.1.aamva".to_string(),
             org_iso_1801351_aamva_namespace,
         );
@@ -450,7 +519,7 @@ pub mod tests {
         let mut mso = Mso {
             version: "1.0".to_string(),
             digest_algorithm: "SHA-256".to_string(),
-            value_digests: HashMap::<String, HashMap<String, ecdsa::Signature<NistP256>>>::new(),
+            value_digests: HashMap::<String, HashMap<DigestID, Vec<u8>>>::new(),
             device_key_info: device_key_info.clone(),
             doc_type: "org.iso.18013.5.1".to_string(),
             validity_info: validity_info,
@@ -458,7 +527,7 @@ pub mod tests {
 
         let mut mdoc = Mdoc {
             doc_type: "org.iso.18013.5.1".to_string(),
-            namespaces: namespaces.namespaces.clone(),
+            namespaces: namespaces.clone(),
             mobile_security_object: mso.clone(),
             issuer_auth: None,
         };

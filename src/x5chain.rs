@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
-use openssl::x509::{X509Ref, X509VerifyResult, X509};
+use openssl::nid::Nid;
+use openssl::x509::{X509AlgorithmRef, X509Ref, X509VerifyResult, X509};
 use serde_cbor::Value as CborValue;
 use std::{fs::File, io::Read};
+use x509_parser::public_key;
 
 #[derive(Debug, Clone)]
 pub struct X5Chain(Vec<Vec<u8>>);
@@ -19,7 +21,7 @@ impl AsRef<Vec<Vec<u8>>> for X5Chain {
 }
 
 impl X5Chain {
-    pub fn builder() -> Builder {
+    pub fn builder(self) -> Builder {
         Builder::default()
     }
 
@@ -85,5 +87,36 @@ impl Builder {
             .collect::<Result<Vec<_>, _>>()
             .map_err(Into::into)
             .map(Into::into)
+    }
+
+    pub fn get_signing_algorithm(self) -> Option<Nid> {
+        let cert = self.certs.clone();
+        println!("cert {:?}", cert);
+        let public_key = X509Ref::public_key(&self.certs[0]).unwrap();
+        let key_type = public_key.ec_key().unwrap();
+        let ecgroup = key_type.group();
+        let alg = ecgroup.curve_name();
+
+        alg
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+
+    use crate::x5chain::Builder;
+    use crate::x5chain::X5Chain;
+
+    #[test]
+    pub fn test_get_signing_algorithm() {
+        static IGCA_PEM: &str = "./test.pem";
+        let x5chain = std::fs::read(IGCA_PEM).expect("Could not read file");
+        let x5chain_copy = x5chain.clone();
+        let x5chain_string = match std::str::from_utf8(&x5chain_copy) {
+            Ok(v) => v,
+            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        };
+        let issuerx5chain = X5Chain::from(vec![x5chain]);
+        todo!()
     }
 }

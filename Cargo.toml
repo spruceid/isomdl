@@ -24,4 +24,6 @@ anyhow = "1.0.62"
 cddl = "0.8.7"
 zeroize = { version = "1.4", features = ["zeroize_derive"] }
 serde_repr = "0.1.9"
-der = "0.6.0"
+der = { version = "0.6.0", features = ["pem"] }
+ring = "0.16.20"
+rand = "0.8.5"
