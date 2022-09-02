@@ -17,19 +17,19 @@ use openssl::pkey::{Id, PKey, Private, Public};
 use p256::{AffinePoint, NistP256, PublicKey};
 use rand::Rng;
 use rand_core::OsRng;
-use ring::digest::{Context, Digest, SHA256};
+use ring::digest::{Context, Digest, SHA256, Algorithm as RingDigestAlgorithm};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_cbor::{self, value};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::Bytes;
 
 const ALG: i128 = 1;
 const X5CHAIN: i128 = 33;
 const PEM_FILE: &'static str = include_str!("../test.pem");
 
-type Namespaces = HashMap<String, HashMap<String, String>>;
+type Namespaces = HashMap<String, HashMap<String, CborValue>>;
 type DigestIds = HashMap<DigestID, Vec<u8>>;
 type IssuerSignedItemBytes = [u8];
 type DigestID = u64;
@@ -37,14 +37,14 @@ type DigestID = u64;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Mdoc {
     doc_type: String,
-    namespaces: HashMap<String, HashMap<String, String>>,
+    namespaces: Namespaces,
     mobile_security_object: Mso,
     issuer_auth: Option<CoseSign1>,
 }
 
 pub struct PreparationMdoc {
     doc_type: String,
-    namespaces: HashMap<String, HashMap<String, String>>,
+    namespaces: Namespaces,
     mobile_security_object: Mso,
     x5chain: X5Chain,
 }
@@ -52,7 +52,7 @@ pub struct PreparationMdoc {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Mso {
     version: String,
-    digest_algorithm: String,
+    digest_algorithm: DigestAlgorithm,
     value_digests: HashMap<String, HashMap<DigestID, Vec<u8>>>,
     device_key_info: DeviceKeyInfo,
     doc_type: String,
@@ -69,7 +69,7 @@ pub struct IssuerSignedItem {
     digest_id: u64,
     random: [u8; 16],
     element_identifier: String,
-    element_value: String,
+    element_value: CborValue,
 }
 
 pub struct IssuerNamespace {
@@ -116,6 +116,7 @@ pub struct CoseKey {
     alg: SignatureAlgorithm,
 }
 
+#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
 pub enum DigestAlgorithm {
     SHA256,
     SHA384,
@@ -159,22 +160,21 @@ impl PreparationMdoc {
 
 impl Mdoc {
     pub fn prepare_mdoc<T: SigningPrivateKey + SigningPublicKey + DeviceKeyInfoTrait>(
-        self,
         doc_type: String,
         namespaces: Namespaces,
         issuerx5chain: X5Chain,
         validity_info: ValidityInfo,
-        digest_algorithm: String,
+        digest_algorithm: DigestAlgorithm,
         signer: T,
         key_authorization: Option<KeyAuthorization>,
-    ) -> PreparationMdoc {
+    ) -> Result<PreparationMdoc> {
         let device_key_info = DeviceKeyInfo {
             device_key: signer.get_cose_key(),
             key_authorization: key_authorization,
         };
 
         let value_digest =
-            self.digest_namespaces(&namespaces, &device_key_info, digest_algorithm.clone());
+            Mdoc::digest_namespaces(&namespaces, digest_algorithm)?;
 
         let mso = Mso {
             version: "1.0".to_string(),
@@ -192,97 +192,48 @@ impl Mdoc {
             x5chain: issuerx5chain,
         };
 
-        preparation_mdoc
+        Ok(preparation_mdoc)
     }
 
     pub fn digest_namespaces(
-        self,
         namespaces: &Namespaces,
-        device_key_info: &DeviceKeyInfo,
-        digest_algorithm: String,
-    ) -> HashMap<String, HashMap<DigestID, Vec<u8>>> {
-        let mut value_digest = HashMap::<String, DigestIds>::new();
-
-        let key_authorization = &device_key_info.key_authorization;
-
-        let mut context = Context::new(&SHA256);
-
-        if key_authorization.is_none() {
-            //digest all data elements
-            for namespace in namespaces {
-                let mut element_map = namespace.1;
-                let mut digest_entry = HashMap::<DigestID, Vec<u8>>::new();
-
-                for (key, value) in element_map {
+        digest_algorithm: DigestAlgorithm,
+    ) -> Result<HashMap<String, HashMap<DigestID, Vec<u8>>>> {
+        fn digest_namespace(
+            elements: &HashMap<String, CborValue>,
+            digest_algorithm: DigestAlgorithm
+        ) -> Result<HashMap<DigestID, Vec<u8>>> {
+            let mut used_ids: HashSet<u64> = HashSet::new();
+            elements.iter()
+                .map(|(key, value)| {
+                    let mut digest_id;
+                    loop {
+                        digest_id = rand::thread_rng().gen();
+                        if used_ids.insert(digest_id) {
+                            break;
+                        }
+                    }
                     let issuer_signed_item = IssuerSignedItem {
-                        digest_id: rand::thread_rng().gen(),
+                        digest_id,
                         random: rand::thread_rng().gen::<[u8; 16]>(),
                         element_identifier: key.to_string(),
-                        element_value: element_map.get(key).unwrap().to_string(),
+                        element_value: value.clone(),
                     };
-                    let digest_id = issuer_signed_item.digest_id;
-                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item).unwrap();
-
-                    context.update(&issuer_signed_item_bytes);
-                    digest_entry.insert(digest_id, issuer_signed_item_bytes.clone());
-                }
-                value_digest.insert(namespace.0.to_string(), digest_entry.clone());
-            }
-        } else {
-            //grab all authorized data elements
-
-            let authorized_namespaces = key_authorization
-                .as_ref()
-                .unwrap()
-                .authorized_namespaces
-                .as_ref();
-            let authorized_data_elements = key_authorization
-                .as_ref()
-                .unwrap()
-                .authorized_data_elements
-                .as_ref()
-                .unwrap();
-
-            for namespace in authorized_namespaces.unwrap() {
-                let digest_map = namespaces.get(namespace).unwrap();
-                let mut digest = HashMap::<DigestID, Vec<u8>>::new();
-                for (key, value) in digest_map {
-                    let issuer_signed_item = IssuerSignedItem {
-                        digest_id: rand::thread_rng().gen(),
-                        random: rand::thread_rng().gen::<[u8; 16]>(),
-                        element_identifier: key.to_string(),
-                        element_value: digest_map.get(key).unwrap().to_string(),
+                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item)?;
+                    let ring_alg = match digest_algorithm {
+                        DigestAlgorithm::SHA256 => &ring::digest::SHA256,
+                        DigestAlgorithm::SHA384 => &ring::digest::SHA384,
+                        DigestAlgorithm::SHA512 => &ring::digest::SHA512,
                     };
-                    let digest_id = issuer_signed_item.digest_id;
-                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item).unwrap();
+                    let digest = ring::digest::digest(ring_alg, &issuer_signed_item_bytes);
+                    return Ok((digest_id, digest.as_ref().to_vec()))
+                })
+                .collect()
+        }
 
-                    context.update(&issuer_signed_item_bytes); //signing_key.sign(&value.clone().into_bytes());
-                    digest.insert(digest_id, issuer_signed_item_bytes);
-                }
-                value_digest.insert(namespace.to_string(), digest.clone());
-            }
-
-            for (namespace, data_elements) in authorized_data_elements {
-                let digest_map = namespaces.get(namespace).unwrap();
-                let mut digest = HashMap::<DigestID, Vec<u8>>::new();
-
-                for element in data_elements {
-                    let issuer_signed_item = IssuerSignedItem {
-                        digest_id: rand::thread_rng().gen(),
-                        random: rand::thread_rng().gen::<[u8; 16]>(),
-                        element_identifier: element.to_string(),
-                        element_value: digest_map.get(element).unwrap().to_string(),
-                    };
-                    let digest_id = issuer_signed_item.digest_id;
-                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item).unwrap();
-
-                    context.update(&issuer_signed_item_bytes); //signing_key.sign(&value.clone().into_bytes());
-                    digest.insert(digest_id, issuer_signed_item_bytes);
-                }
-                value_digest.insert(namespace.to_string(), digest);
-            }
-        };
-        value_digest
+        namespaces.iter()
+            .map(|(name, elements)| Ok((name.clone(), digest_namespace(elements, digest_algorithm)?)))
+            .collect()
     }
 }
 
