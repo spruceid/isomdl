@@ -1,4 +1,3 @@
-use crate::mdoc::{CoseKey, KeyType};
 use anyhow::{anyhow, Result};
 use aws_nitro_enclaves_cose::crypto::SignatureAlgorithm;
 use openssl::nid::Nid;
@@ -22,7 +21,7 @@ impl AsRef<Vec<X509>> for X5Chain {
     }
 }
 
-impl std::ops::Deref for X5Chain{
+impl std::ops::Deref for X5Chain {
     type Target = Vec<X509>;
 
     fn deref(&self) -> &Self::Target {
@@ -46,11 +45,13 @@ impl X5Chain {
 
     pub fn key_algorithm(&self) -> Result<SignatureAlgorithm> {
         // Safe to index into chain, as we know there is at least one element from Builder::build.
-        Ok(match X509Ref::public_key(&self[0])?
-            .ec_key()?
-            .group()
-            .curve_name()
-            .ok_or_else(|| anyhow!("no curve name found on first X509 cert in chain"))? {
+        Ok(
+            match X509Ref::public_key(&self[0])?
+                .ec_key()?
+                .group()
+                .curve_name()
+                .ok_or_else(|| anyhow!("no curve name found on first X509 cert in chain"))?
+            {
                 openssl::nid::Nid::ECDSA_WITH_SHA256 => SignatureAlgorithm::ES256,
                 openssl::nid::Nid::ECDSA_WITH_SHA384 => SignatureAlgorithm::ES384,
                 openssl::nid::Nid::ECDSA_WITH_SHA512 => SignatureAlgorithm::ES512,
@@ -58,9 +59,13 @@ impl X5Chain {
                     if let Ok(name) = nid.long_name() {
                         Err(anyhow!("unsupported algorithm: {}", name))?
                     }
-                    Err(anyhow!("unsupported algorithm: {:?} (see openssl::nid)", nid))?
+                    Err(anyhow!(
+                        "unsupported algorithm: {:?} (see openssl::nid)",
+                        nid
+                    ))?
                 }
-            })
+            },
+        )
     }
 }
 
