@@ -1,4 +1,6 @@
+use crate::mdoc::{CoseKey, KeyType};
 use anyhow::{anyhow, Result};
+use aws_nitro_enclaves_cose::crypto::SignatureAlgorithm;
 use openssl::nid::Nid;
 use openssl::x509::{X509AlgorithmRef, X509Ref, X509VerifyResult, X509};
 use serde_cbor::Value as CborValue;
@@ -6,31 +8,59 @@ use std::{fs::File, io::Read};
 use x509_parser::public_key;
 
 #[derive(Debug, Clone)]
-pub struct X5Chain(Vec<Vec<u8>>);
+pub struct X5Chain(Vec<X509>);
 
-impl From<Vec<Vec<u8>>> for X5Chain {
-    fn from(v: Vec<Vec<u8>>) -> Self {
+impl From<Vec<X509>> for X5Chain {
+    fn from(v: Vec<X509>) -> Self {
         Self(v)
     }
 }
 
-impl AsRef<Vec<Vec<u8>>> for X5Chain {
-    fn as_ref(&self) -> &Vec<Vec<u8>> {
+impl AsRef<Vec<X509>> for X5Chain {
+    fn as_ref(&self) -> &Vec<X509> {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for X5Chain{
+    type Target = Vec<X509>;
+
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl X5Chain {
-    pub fn builder(self) -> Builder {
+    pub fn builder() -> Builder {
         Builder::default()
     }
 
-    pub fn into_cbor(self) -> CborValue {
+    pub fn into_cbor(&self) -> Result<CborValue> {
         self.0
-            .into_iter()
-            .map(CborValue::Bytes)
-            .collect::<Vec<CborValue>>()
-            .into()
+            .iter()
+            .map(|x509| x509.to_der())
+            .map(|result| Ok(CborValue::Bytes(result?)))
+            .collect::<Result<Vec<CborValue>>>()
+            .map(CborValue::Array)
+    }
+
+    pub fn key_algorithm(&self) -> Result<SignatureAlgorithm> {
+        // Safe to index into chain, as we know there is at least one element from Builder::build.
+        Ok(match X509Ref::public_key(&self[0])?
+            .ec_key()?
+            .group()
+            .curve_name()
+            .ok_or_else(|| anyhow!("no curve name found on first X509 cert in chain"))? {
+                openssl::nid::Nid::ECDSA_WITH_SHA256 => SignatureAlgorithm::ES256,
+                openssl::nid::Nid::ECDSA_WITH_SHA384 => SignatureAlgorithm::ES384,
+                openssl::nid::Nid::ECDSA_WITH_SHA512 => SignatureAlgorithm::ES512,
+                nid => {
+                    if let Ok(name) = nid.long_name() {
+                        Err(anyhow!("unsupported algorithm: {}", name))?
+                    }
+                    Err(anyhow!("unsupported algorithm: {:?} (see openssl::nid)", nid))?
+                }
+            })
     }
 }
 
@@ -81,23 +111,7 @@ impl Builder {
             first = second;
             current_subject += 1;
         }
-        self.certs
-            .iter()
-            .map(|cert| cert.to_der())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Into::into)
-            .map(Into::into)
-    }
-
-    pub fn get_signing_algorithm(self) -> Option<Nid> {
-        let cert = self.certs.clone();
-        println!("cert {:?}", cert);
-        let public_key = X509Ref::public_key(&self.certs[0]).unwrap();
-        let key_type = public_key.ec_key().unwrap();
-        let ecgroup = key_type.group();
-        let alg = ecgroup.curve_name();
-
-        alg
+        Ok(self.certs.into())
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::x5chain::{self, X5Chain};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use aws_nitro_enclaves_cose::crypto::{
     Hash, MessageDigest, Openssl, SignatureAlgorithm, SigningPrivateKey, SigningPublicKey,
 };
@@ -73,7 +73,7 @@ pub struct IssuerSignedItem {
 }
 
 pub struct IssuerNamespace {
-    namespace: HashMap<String, IssuerSignedItem>,
+    namespace: HashMap<DigestID, Vec<u8>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -112,8 +112,8 @@ pub struct ValidityInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CoseKey {
-    kty: KeyType,
-    alg: SignatureAlgorithm,
+    pub kty: KeyType,
+    pub alg: SignatureAlgorithm,
 }
 
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]
@@ -124,72 +124,78 @@ pub enum DigestAlgorithm {
 }
 
 impl PreparationMdoc {
-    fn complete<T: SigningPrivateKey + SigningPublicKey + DeviceKeyInfoTrait>(
+    fn complete<T: SigningPrivateKey + SigningPublicKey>(
         self,
         signer: T,
-    ) -> Mdoc {
+    ) -> Result<Mdoc> {
+        let signer_algorithm = signer.get_parameters()
+            .map_err(|error| anyhow!("error getting key parameters: {error}"))?
+            .0;
+
+        match (self.x5chain.key_algorithm()?, signer_algorithm) {
+            (SignatureAlgorithm::ES256, SignatureAlgorithm::ES256) => (),
+            (SignatureAlgorithm::ES384, SignatureAlgorithm::ES384) => (),
+            (SignatureAlgorithm::ES512, SignatureAlgorithm::ES512) => (),
+            _ => Err(anyhow!("provided signer's algorithm does not match X509 cert"))?
+        }
+
         //encode mso to cbor
-        let mobile_security_object_bytes = to_cbor(self.mobile_security_object.clone());
+        let mobile_security_object_bytes = to_cbor(self.mobile_security_object.clone())?;
 
         //headermap should contain alg header and x5chain header
-        let cose_key = signer.get_cose_key().alg;
-        let mut alg_header_map: HeaderMap = signer.get_alg().into();
+        let mut alg_header_map: HeaderMap = signer_algorithm.into();
         let mut buf: Vec<u8> = vec![];
 
-        let x5chain_cbor = self.x5chain.into_cbor();
+        let x5chain_cbor = self.x5chain.into_cbor()?;
         let mut cert_header_map = HeaderMap::new();
         cert_header_map.insert(serde_cbor::Value::Integer(X5CHAIN), x5chain_cbor);
 
         let cose_sign1 = sign::CoseSign1::new_with_protected::<Openssl>(
-            &mobile_security_object_bytes.unwrap(),
+            &mobile_security_object_bytes,
             &alg_header_map,
             &cert_header_map,
             &signer,
-        );
+        )
+            .map_err(|error| anyhow!("error signing mso: {error}"))?;
 
         let mdoc = Mdoc {
             doc_type: "org.iso.18013.5.1".to_string(),
             namespaces: self.namespaces,
             mobile_security_object: self.mobile_security_object,
-            issuer_auth: Some(cose_sign1.unwrap()),
+            issuer_auth: Some(cose_sign1),
         };
 
-        mdoc
+        Ok(mdoc)
     }
 }
 
 impl Mdoc {
-    pub fn prepare_mdoc<T: SigningPrivateKey + SigningPublicKey + DeviceKeyInfoTrait>(
+    pub fn prepare_mdoc(
         doc_type: String,
         namespaces: Namespaces,
-        issuerx5chain: X5Chain,
+        x5chain: X5Chain,
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
-        signer: T,
         key_authorization: Option<KeyAuthorization>,
+        device_key_info: DeviceKeyInfo,
     ) -> Result<PreparationMdoc> {
-        let device_key_info = DeviceKeyInfo {
-            device_key: signer.get_cose_key(),
-            key_authorization: key_authorization,
-        };
-
-        let value_digest =
+        let value_digests =
             Mdoc::digest_namespaces(&namespaces, digest_algorithm)?;
 
-        let mso = Mso {
+        let mobile_security_object = Mso {
             version: "1.0".to_string(),
             digest_algorithm,
-            value_digests: value_digest,
-            device_key_info: device_key_info,
+            value_digests,
+            device_key_info,
             doc_type: doc_type.clone(),
-            validity_info: validity_info,
+            validity_info,
         };
 
         let preparation_mdoc = PreparationMdoc {
             doc_type,
             namespaces,
-            mobile_security_object: mso,
-            x5chain: issuerx5chain,
+            mobile_security_object,
+            x5chain,
         };
 
         Ok(preparation_mdoc)
@@ -236,69 +242,68 @@ impl Mdoc {
             .collect()
     }
 }
-
-#[derive(Clone, Debug)]
-pub struct PrivateKey {
-    pkey: SigningKey<NistP256>,
-}
-
-impl SigningPrivateKey for PrivateKey {
-    fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CoseError> {
-        use ecdsa::signature::Signer;
-        let signature = self.pkey.sign(data);
-        let result = signature.as_bytes();
-        Ok(result.to_vec())
-    }
-}
-
-impl SigningPublicKey for PrivateKey {
-    fn get_parameters(&self) -> Result<(SignatureAlgorithm, MessageDigest), CoseError> {
-        let sig = SignatureAlgorithm::ES256;
-        let msg = MessageDigest::Sha256;
-        Ok((sig, msg))
-    }
-
-    fn verify(&self, digest: &[u8], signature: &[u8]) -> Result<bool, CoseError> {
-        Ok(true)
-    }
-}
-
-pub trait DeviceKeyInfoTrait {
-    fn get_alg(&self) -> SignatureAlgorithm;
-    fn get_kty(&self) -> KeyType;
-    fn get_cose_key(&self) -> CoseKey;
-}
-
-impl DeviceKeyInfoTrait for PrivateKey {
-    fn get_cose_key(&self) -> CoseKey {
-        let cose_key = CoseKey {
-            kty: KeyType::EC,
-            alg: SignatureAlgorithm::ES256,
-        };
-        cose_key
-    }
-    fn get_alg(&self) -> SignatureAlgorithm {
-        SignatureAlgorithm::ES256
-    }
-
-    fn get_kty(&self) -> KeyType {
-        KeyType::EC
-    }
-}
-
-#[derive(Clone, Debug, Serialize_repr, Deserialize_repr)]
-#[repr(i64)]
+//
+//#[derive(Clone, Debug)]
+//pub struct PrivateKey {
+//    pkey: SigningKey<NistP256>,
+//}
+//
+//impl SigningPrivateKey for PrivateKey {
+//    fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CoseError> {
+//        use ecdsa::signature::Signer;
+//        let signature = self.pkey.sign(data);
+//        let result = signature.as_bytes();
+//        Ok(result.to_vec())
+//    }
+//}
+//
+//impl SigningPublicKey for PrivateKey {
+//    fn get_parameters(&self) -> Result<(SignatureAlgorithm, MessageDigest), CoseError> {
+//        let sig = SignatureAlgorithm::ES256;
+//        let msg = MessageDigest::Sha256;
+//        Ok((sig, msg))
+//    }
+//
+//    fn verify(&self, digest: &[u8], signature: &[u8]) -> Result<bool, CoseError> {
+//        Ok(true)
+//    }
+//}
+//
+//pub trait DeviceKeyInfoTrait {
+//    fn get_alg(&self) -> SignatureAlgorithm;
+//    fn get_kty(&self) -> KeyType;
+//    fn get_cose_key(&self) -> CoseKey;
+//}
+//
+//impl DeviceKeyInfoTrait for PrivateKey {
+//    fn get_cose_key(&self) -> CoseKey {
+//        let cose_key = CoseKey {
+//            kty: KeyType::EC,
+//            alg: SignatureAlgorithm::ES256,
+//        };
+//        cose_key
+//    }
+//    fn get_alg(&self) -> SignatureAlgorithm {
+//        SignatureAlgorithm::ES256
+//    }
+//
+//    fn get_kty(&self) -> KeyType {
+//        KeyType::EC
+//    }
+//}
+//
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum KeyType {
     EC,
 }
-
-pub fn generate_keys() -> (PublicKey, SigningKey<NistP256>) {
-    let affine_point = AffinePoint::GENERATOR;
-    let public_key = PublicKey::try_from(affine_point).unwrap();
-    let signing_key = SigningKey::<NistP256>::random(&mut OsRng); // Serialize with `::to_bytes()`
-
-    (public_key, signing_key)
-}
+//
+//pub fn generate_keys() -> (PublicKey, SigningKey<NistP256>) {
+//    let affine_point = AffinePoint::GENERATOR;
+//    let public_key = PublicKey::try_from(affine_point).unwrap();
+//    let signing_key = SigningKey::<NistP256>::random(&mut OsRng); // Serialize with `::to_bytes()`
+//
+//    (public_key, signing_key)
+//}
 
 pub fn to_cbor<T: Serialize>(input: T) -> Result<Vec<u8>, serde_cbor::Error> {
     let cbor_mdoc = serde_cbor::to_vec(&input);
