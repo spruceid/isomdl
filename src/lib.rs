@@ -1,7 +1,7 @@
 use chrono::{DateTime, FixedOffset};
 use either::Either;
-use rust_iso3166::CountryCode;
 use rust_iso3166::iso3166_2::Subdivision;
+use rust_iso3166::CountryCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -11,14 +11,16 @@ use cddl::{lexer_from_str, parser::cddl_from_str, validate_json_from_str};
 // NOTE: added quotes to keys for compatibility with JSON, e.g. 1 => "1"
 //
 // https://www.iana.org/assignments/cose/cose.xhtml
-pub fn cose_key_cddl() -> String { r#"
+pub fn cose_key_cddl() -> String {
+    r#"
 COSE_Key = {
    "1" => int,          ; kty: key type
   "-1" => int,          ; crv: EC identifier - Taken from the "COSE Elliptic Curves" registry
   "-2" => tstr,         ; x: value of x-coordinate
   ? "-3" => tstr / bool ; y: value or sign bit of y-coordinate; only applicable for EC2 key types
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 #[cfg(test)]
@@ -65,10 +67,7 @@ pub struct Tdate {
 
 impl Tdate {
     pub fn validate(datetime_str: &String) -> Result<Tdate, chrono::format::ParseError> {
-        DateTime::parse_from_rfc3339(datetime_str)
-            .map(|tdate| Tdate {
-                tdate: tdate,
-            })
+        DateTime::parse_from_rfc3339(datetime_str).map(|tdate| Tdate { tdate: tdate })
     }
 
     pub fn forget_validation(&self) -> String {
@@ -125,9 +124,7 @@ impl Latin1UpTo150Chars {
     }
 
     pub fn validate(string: String) -> Result<Self, Latin1UpTo150CharsError> {
-        let result = Latin1UpTo150Chars {
-            latin1: string,
-        };
+        let result = Latin1UpTo150Chars { latin1: string };
         result.is_valid()?;
         Ok(result)
     }
@@ -136,19 +133,13 @@ impl Latin1UpTo150Chars {
 #[derive(Clone, Debug, Error)]
 pub enum Latin1UpTo150CharsError {
     #[error("Latin1UpTo150Chars: {len:?} is too long: \n{string:?}")]
-    TooLong {
-        len: usize,
-        string: String,
-    },
+    TooLong { len: usize, string: String },
 
-    #[error("Latin1UpTo150Chars: input valid up to: \n{valid:?} \nbut invalid here: \n{invalid:?}")]
-    NotLatin1 {
-        valid: String,
-        invalid: String,
-    },
+    #[error(
+        "Latin1UpTo150Chars: input valid up to: \n{valid:?} \nbut invalid here: \n{invalid:?}"
+    )]
+    NotLatin1 { valid: String, invalid: String },
 }
-
-
 
 /// TODO
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,8 +150,6 @@ pub struct LocalBstr {}
 pub struct Tstr {
     tstr: String,
 }
-
-
 
 /// DrivingPrivilegeCode = {
 ///     ; Code as per ISO/IEC 18013-2 Annex A
@@ -212,6 +201,38 @@ pub struct DrivingPrivilege {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DrivingPrivileges {
     driving_privileges: Vec<DrivingPrivilege>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomesticVehicleClass {
+    domestic_vehicle_class_code: Tstr,
+    domestic_vehicle_class_description: Tstr,
+    issue_date: FullDate,
+    expiry_date: FullDate,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomesticVehicleRestriction {
+    domestic_vehicle_restriction_code: Tstr,
+    domestic_vehicle_restriction_description: Tstr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomesticVehicleEndorsement {
+    domestic_vehicle_endorsement_code: Tstr,
+    domestic_vehicle_endorsement_description: Tstr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomesticDrivingPrivilege {
+    domestic_vehicle_class: DomesticVehicleClass,
+    domestic_vehicle_restriction: DomesticVehicleRestriction,
+    domestic_vehicle_endorsement: DomesticVehicleEndorsement,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomesticDrivingPrivileges {
+    driving_priviliges: Vec<DomesticDrivingPrivilege>,
 }
 
 /// TODO
@@ -311,7 +332,7 @@ pub struct MdlDataElementsRaw {
     /// Categories of vehicles/ restrictions/ conditions
     driving_privileges: DrivingPrivileges,
 
-    /// Distinguishing sign of the issuing country according to ISO/IEC 18013-1:2018, Annex F. 
+    /// Distinguishing sign of the issuing country according to ISO/IEC 18013-1:2018, Annex F.
     /// If no applicable distinguishing sign is available in ISO/IEC 18013-1, an
     /// IA may use an empty identifier or another identifier by which it is
     /// internationally recognized. In this case the IA should ensure there is no
@@ -331,7 +352,7 @@ pub struct MdlDataElementsRaw {
 
     /// Height (cm)^a
     /// mDL holder’s height in centimetres
-    height: Option<Uint>,
+    height: Uint,
 
     /// Weight (kg)^a
     /// mDL holder’s weight in kilograms
@@ -339,7 +360,7 @@ pub struct MdlDataElementsRaw {
 
     /// Eye colour
     /// mDL holder’s eye colour.
-    eye_colour: Option<EyeColour>,
+    eye_colour: EyeColour,
 
     /// Hair colour
     /// mDL holder’s hair colour.
@@ -361,7 +382,7 @@ pub struct MdlDataElementsRaw {
 
     /// Age attestation: How old are you (in years)?
     /// The age of the mDL holder
-    age_in_years: Option<Uint>,
+    age_in_years: Uint,
 
     /// Age attestation: In what year were you born?
     /// The year when the mDL holder was born
@@ -369,7 +390,7 @@ pub struct MdlDataElementsRaw {
 
     /// Age attestation: Nearest “true” attestation above request
     /// See 7.2.5
-    age_over_nn: Option<bool>,
+    age_over_nn: bool,
 
     /// TODO: ISO 3166-2:2020
     /// Issuing jurisdiction
@@ -416,6 +437,79 @@ pub struct MdlDataElementsRaw {
     /// Signature / usual mark
     /// Image of the signature or usual mark of the mDL holder, see 7.2.7
     signature_usual_mark: Option<LocalBstr>,
+
+    /// TODO
+    /// Vehicle types the license holder is authorized  to operate
+    domestic_driving_privileges: DomesticDrivingPrivileges,
+
+    /// TODO
+    /// Name suffix of the individual that has bene issued the credential
+    /// The given name of the mDL holder using full UTF-8 character set.
+    name_suffix: Option<Tstr>,
+
+    /// TODO
+    /// A string of letters and/or numbers that identifies when where and by whom the credential was initially provisioned
+    /// The value shall only use A, N, or S characters and shall have a maximum length of 25 chars
+    audit_information: Option<Tstr>,
+
+    /// TODO
+    /// An indicator that denotes whether the credential holder is an organ donor
+    /// This field is either absent or has the following value : 1:Donor
+    organ_donor: Option<Uint>,
+
+    /// TODO
+    /// An indicator that denotes whether the credential holder is a veteran
+    /// This field is either absent or has the following value : 1:Veteran
+    veteran: Option<Uint>,
+
+    /// TODO
+    /// A number identifying the version of the aamva mDL data element set
+    /// Support for this identifier is not required after 2022-01-31
+    aamva_version: Option<Uint>,
+
+    /// TODO
+    /// A code that indicates whether the field has been truncated (T)
+    ///has not been truncated (N) or unknown whether truncated (U)
+    family_name_truncation: Tstr,
+
+    /// TODO
+    /// A code that indicates whether either the first name or the middle name have bene truncated (T)
+    /// have not been truncated (N), or unkown whether truncated (U)
+    given_name_truncation: Tstr,
+
+    /// TODO
+    /// Indicates the approxiate weight range of the credential holder
+    /// The value shall only use A, N, or S characters and shall have a maximum length of 40 characters
+    weight_range: Option<Uint>,
+
+    /// TODO
+    /// Codes for race or ethnicity of the credential holder, as defined in AAMVA D20
+    race_ethnicity: Option<Tstr>,
+
+    /// TODO
+    /// DHS required field that indicates compliance.
+    /// Only the following values are allowed: F = fully compliant, N= non-compliant. Applicable only in the US
+    dhs_compliance: Option<Tstr>,
+
+    /// TODO
+    /// DHS required field that denotes whether the credential holder has temporary lawful status
+    /// This field is either absent or has the following value: 1:Temporary lawful status. Only applicable in the US.
+    dhs_temporary_lawful_status: Option<Uint>,
+
+    /// TODO
+    /// This field is either absent or has one of the following values if the credential is an EDL
+    /// 1: Driver's license, 2: Identification card. Applicable only in the US
+    edl_credential: Option<Uint>,
+
+    /// TODO
+    /// The 3-digit county code of the county where the credential holder lives,
+    /// as per the 2010 FIPS Codes for Counties and County Equivalent Entities. Applicable only in the US
+    resident_county: Option<Tstr>,
+
+    /// TODO
+    /// Date on which the hazardous material endorsement granted by the document is no longer valid
+    /// Applicable only in the US
+    hazmat_endorsement_expiration_date: Option<FullDate>,
 }
 
 impl MdlDataElementsRaw {
@@ -430,15 +524,16 @@ impl MdlDataElementsRaw {
     }
 
     pub fn validate_datetime(datetime_str: &String) -> Result<Tdate, MdlDataElementsError> {
-        Tdate::validate(datetime_str)
-            .map_err(|e| MdlDataElementsError::UnexpectedDateTime {
-                date_str: datetime_str.clone(),
-                error: e,
-            })
+        Tdate::validate(datetime_str).map_err(|e| MdlDataElementsError::UnexpectedDateTime {
+            date_str: datetime_str.clone(),
+            error: e,
+        })
     }
 
     /// TODO: support FullDate
-    pub fn validate_either_date(date_str: &String) -> Result<Either<Tdate, FullDate>, MdlDataElementsError> {
+    pub fn validate_either_date(
+        date_str: &String,
+    ) -> Result<Either<Tdate, FullDate>, MdlDataElementsError> {
         Ok(Either::Left(Self::validate_datetime(date_str)?))
     }
 
@@ -448,17 +543,25 @@ impl MdlDataElementsRaw {
         let expiry_date = Self::validate_either_date(&self.expiry_date)?;
         let issuing_country = Self::validate_country_code(&self.issuing_country)?;
 
-        let portrait_capture_date = self.portrait_capture_date
-            .map(|date_str| Self::validate_datetime(&date_str)).transpose()?;
+        let portrait_capture_date = self
+            .portrait_capture_date
+            .map(|date_str| Self::validate_datetime(&date_str))
+            .transpose()?;
 
-        let issuing_jurisdiction = self.issuing_jurisdiction
-            .map(|code_str| Self::validate_subdivision(&code_str)).transpose()?;
+        let issuing_jurisdiction = self
+            .issuing_jurisdiction
+            .map(|code_str| Self::validate_subdivision(&code_str))
+            .transpose()?;
 
-        let nationality = self.nationality
-            .map(|alpha2_str| Self::validate_country_code(&alpha2_str)).transpose()?;
+        let nationality = self
+            .nationality
+            .map(|alpha2_str| Self::validate_country_code(&alpha2_str))
+            .transpose()?;
 
-        let resident_country = self.resident_country
-            .map(|alpha2_str| Self::validate_country_code(&alpha2_str)).transpose()?;
+        let resident_country = self
+            .resident_country
+            .map(|alpha2_str| Self::validate_country_code(&alpha2_str))
+            .transpose()?;
 
         Ok(MdlDataElements {
             family_name: self.family_name,
@@ -494,6 +597,21 @@ impl MdlDataElementsRaw {
             family_name_national_character: self.family_name_national_character,
             given_name_national_character: self.given_name_national_character,
             signature_usual_mark: self.signature_usual_mark,
+            domestic_driving_privileges: self.domestic_driving_privileges,
+            family_name_truncation: self.family_name_truncation,
+            given_name_truncation: self.given_name_truncation,
+            name_suffix: self.name_suffix,
+            audit_information: self.audit_information,
+            organ_donor: self.organ_donor,
+            veteran: self.veteran,
+            aamva_version: self.aamva_version,
+            weight_range: self.weight_range,
+            race_ethnicity: self.race_ethnicity,
+            dhs_compliance: self.dhs_compliance,
+            dhs_temporary_lawful_status: self.dhs_temporary_lawful_status,
+            edl_credential: self.edl_credential,
+            resident_county: self.resident_county,
+            hazmat_endorsement_expiration_date: self.hazmat_endorsement_expiration_date,
         })
     }
 }
@@ -541,7 +659,7 @@ pub struct MdlDataElements {
     /// Categories of vehicles/ restrictions/ conditions
     driving_privileges: DrivingPrivileges,
 
-    /// Distinguishing sign of the issuing country according to ISO/IEC 18013-1:2018, Annex F. 
+    /// Distinguishing sign of the issuing country according to ISO/IEC 18013-1:2018, Annex F.
     /// If no applicable distinguishing sign is available in ISO/IEC 18013-1, an
     /// IA may use an empty identifier or another identifier by which it is
     /// internationally recognized. In this case the IA should ensure there is no
@@ -561,7 +679,7 @@ pub struct MdlDataElements {
 
     /// Height (cm)^a
     /// mDL holder’s height in centimetres
-    height: Option<Uint>,
+    height: Uint,
 
     /// Weight (kg)^a
     /// mDL holder’s weight in kilograms
@@ -569,7 +687,7 @@ pub struct MdlDataElements {
 
     /// Eye colour
     /// mDL holder’s eye colour.
-    eye_colour: Option<EyeColour>,
+    eye_colour: EyeColour,
 
     /// Hair colour
     /// mDL holder’s hair colour.
@@ -590,7 +708,7 @@ pub struct MdlDataElements {
 
     /// Age attestation: How old are you (in years)?
     /// The age of the mDL holder
-    age_in_years: Option<Uint>,
+    age_in_years: Uint,
 
     /// Age attestation: In what year were you born?
     /// The year when the mDL holder was born
@@ -598,7 +716,7 @@ pub struct MdlDataElements {
 
     /// Age attestation: Nearest “true” attestation above request
     /// See 7.2.5
-    age_over_nn: Option<bool>,
+    age_over_nn: bool,
 
     /// TODO: ISO 3166-2:2020
     /// Issuing jurisdiction
@@ -645,6 +763,81 @@ pub struct MdlDataElements {
     /// Signature / usual mark
     /// Image of the signature or usual mark of the mDL holder, see 7.2.7
     signature_usual_mark: Option<LocalBstr>,
+
+    /// From here, data-elements belong to the org.iso.18013.5.1.aamva namespace
+
+    /// TODO
+    /// Vehicle types the license holder is authorized  to operate
+    domestic_driving_privileges: DomesticDrivingPrivileges,
+
+    /// TODO
+    /// Name suffix of the individual that has bene issued the credential
+    /// The given name of the mDL holder using full UTF-8 character set.
+    name_suffix: Option<Tstr>,
+
+    /// TODO
+    /// A string of letters and/or numbers that identifies when where and by whom the credential was initially provisioned
+    /// The value shall only use A, N, or S characters and shall have a maximum length of 25 chars
+    audit_information: Option<Tstr>,
+
+    /// TODO
+    /// An indicator that denotes whether the credential holder is an organ donor
+    /// This field is either absent or has the following value : 1:Donor
+    organ_donor: Option<Uint>,
+
+    /// TODO
+    /// An indicator that denotes whether the credential holder is a veteran
+    /// This field is either absent or has the following value : 1:Veteran
+    veteran: Option<Uint>,
+
+    /// TODO
+    /// A number identifying the version of the aamva mDL data element set
+    /// Support for this identifier is not required after 2022-01-31
+    aamva_version: Option<Uint>,
+
+    /// TODO
+    /// A code that indicates whether the field has been truncated (T)
+    ///has not been truncated (N) or unknown whether truncated (U)
+    family_name_truncation: Tstr,
+
+    /// TODO
+    /// A code that indicates whether either the first name or the middle name have bene truncated (T)
+    /// have not been truncated (N), or unkown whether truncated (U)
+    given_name_truncation: Tstr,
+
+    /// TODO
+    /// Indicates the approxiate weight range of the credential holder
+    /// The value shall only use A, N, or S characters and shall have a maximum length of 40 characters
+    weight_range: Option<Uint>,
+
+    /// TODO
+    /// Codes for race or ethnicity of the credential holder, as defined in AAMVA D20
+    race_ethnicity: Option<Tstr>,
+
+    /// TODO
+    /// DHS required field that indicates compliance.
+    /// Only the following values are allowed: F = fully compliant, N= non-compliant. Applicable only in the US
+    dhs_compliance: Option<Tstr>,
+
+    /// TODO
+    /// DHS required field that denotes whether the credential holder has temporary lawful status
+    /// This field is either absent or has the following value: 1:Temporary lawful status. Only applicable in the US.
+    dhs_temporary_lawful_status: Option<Uint>,
+
+    /// TODO
+    /// This field is either absent or has one of the following values if the credential is an EDL
+    /// 1: Driver's license, 2: Identification card. Applicable only in the US
+    edl_credential: Option<Uint>,
+
+    /// TODO
+    /// The 3-digit county code of the county where the credential holder lives,
+    /// as per the 2010 FIPS Codes for Counties and County Equivalent Entities. Applicable only in the US
+    resident_county: Option<Tstr>,
+
+    /// TODO
+    /// Date on which the hazardous material endorsement granted by the document is no longer valid
+    /// Applicable only in the US
+    hazmat_endorsement_expiration_date: Option<FullDate>,
 }
 
 #[derive(Clone, Debug, Error)]
@@ -660,7 +853,6 @@ pub enum MdlDataElementsError {
 
     #[error("Unexpected ISO 3166-2 subdivision code: {0:?}")]
     UnexpectedSubdivision(String),
-
     // /// The value is not cached
     // #[error("Query::get_cached: value not cached:\n{name:?}\n{url:?}")]
     // NotCached {
@@ -681,43 +873,51 @@ pub enum MdlDataElementsError {
 //     }
 // }
 
-
 impl MdlDataElements {
-    pub fn new(family_name: Latin1UpTo150Chars,
-               given_name: Latin1UpTo150Chars,
-               birth_date: Tdate,
-               issue_date: Either<Tdate, FullDate>,
-               expiry_date: Either<Tdate, FullDate>,
-               issuing_country: CountryCode,
-               issuing_authority: Latin1UpTo150Chars,
-               document_number: Latin1UpTo150Chars,
-               portrait: LocalBstr,
-               driving_privileges: DrivingPrivileges,
-               un_distinguishing_sign: UnDistinguishingSign) -> Self {
+    pub fn new(
+        family_name: Latin1UpTo150Chars,
+        given_name: Latin1UpTo150Chars,
+        birth_date: Tdate,
+        issue_date: Either<Tdate, FullDate>,
+        expiry_date: Either<Tdate, FullDate>,
+        issuing_country: CountryCode,
+        issuing_authority: Latin1UpTo150Chars,
+        document_number: Latin1UpTo150Chars,
+        portrait: LocalBstr,
+        driving_privileges: DrivingPrivileges,
+        un_distinguishing_sign: UnDistinguishingSign,
+        height: Uint,
+        eye_colour: EyeColour,
+        age_in_years: Uint,
+        age_over_nn: bool,
+        domestic_driving_privileges: DomesticDrivingPrivileges,
+        family_name_truncation: Tstr,
+        given_name_truncation: Tstr,
+    ) -> Self {
         Self {
-            family_name: family_name,
-            given_name: given_name,
-            birth_date: birth_date,
-            issue_date: issue_date,
-            expiry_date: expiry_date,
-            issuing_country: issuing_country,
-            issuing_authority: issuing_authority,
-            document_number: document_number,
-            portrait: portrait,
-            driving_privileges: driving_privileges,
-            un_distinguishing_sign: un_distinguishing_sign,
+            family_name,
+            given_name,
+            birth_date,
+            issue_date,
+            expiry_date,
+            issuing_country,
+            issuing_authority,
+            document_number,
+            portrait,
+            driving_privileges,
+            un_distinguishing_sign,
+            height,
+            eye_colour,
+            age_in_years,
+            age_over_nn,
             administrative_number: None,
-            sex: None,
-            height: None,
             weight: None,
-            eye_colour: None,
             hair_colour: None,
             birth_place: None,
             resident_address: None,
             portrait_capture_date: None,
-            age_in_years: None,
             age_birth_year: None,
-            age_over_nn: None,
+            sex: None,
             issuing_jurisdiction: None,
             nationality: None,
             resident_city: None,
@@ -728,26 +928,48 @@ impl MdlDataElements {
             family_name_national_character: None,
             given_name_national_character: None,
             signature_usual_mark: None,
+            //aamva data elements
+            domestic_driving_privileges,
+            family_name_truncation,
+            given_name_truncation,
+            name_suffix: None,
+            audit_information: None,
+            organ_donor: None,
+            veteran: None,
+            aamva_version: None,
+            weight_range: None,
+            race_ethnicity: None,
+            dhs_compliance: None,
+            dhs_temporary_lawful_status: None,
+            edl_credential: None,
+            resident_county: None,
+            hazmat_endorsement_expiration_date: None,
         }
     }
 
     pub fn forget_validation(self) -> MdlDataElementsRaw {
         let birth_date = self.birth_date.forget_validation();
-        let issue_date = self.issue_date.as_ref().either(Tdate::forget_validation, FullDate::forget_validation);
-        let expiry_date = self.expiry_date.as_ref().either(Tdate::forget_validation, FullDate::forget_validation);
+        let issue_date = self
+            .issue_date
+            .as_ref()
+            .either(Tdate::forget_validation, FullDate::forget_validation);
+        let expiry_date = self
+            .expiry_date
+            .as_ref()
+            .either(Tdate::forget_validation, FullDate::forget_validation);
         let issuing_country = self.issuing_country.alpha2.to_string();
 
-        let portrait_capture_date = self.portrait_capture_date
+        let portrait_capture_date = self
+            .portrait_capture_date
             .map(|date| date.forget_validation());
-            // .map(|date_str| Self::validate_datetime(date_str)).transpose()?;
+        // .map(|date_str| Self::validate_datetime(date_str)).transpose()?;
 
-        let issuing_jurisdiction = self.issuing_jurisdiction
-            .map(|code| code.code.to_string());
+        let issuing_jurisdiction = self.issuing_jurisdiction.map(|code| code.code.to_string());
 
-        let nationality = self.nationality
-            .map(|alpha2| alpha2.alpha2.to_string());
+        let nationality = self.nationality.map(|alpha2| alpha2.alpha2.to_string());
 
-        let resident_country = self.resident_country
+        let resident_country = self
+            .resident_country
             .map(|alpha2| alpha2.alpha2.to_string());
 
         MdlDataElementsRaw {
@@ -784,9 +1006,23 @@ impl MdlDataElements {
             family_name_national_character: self.family_name_national_character,
             given_name_national_character: self.given_name_national_character,
             signature_usual_mark: self.signature_usual_mark,
+            domestic_driving_privileges: self.domestic_driving_privileges,
+            family_name_truncation: self.family_name_truncation,
+            given_name_truncation: self.given_name_truncation,
+            name_suffix: self.name_suffix,
+            audit_information: self.audit_information,
+            organ_donor: self.organ_donor,
+            veteran: self.veteran,
+            aamva_version: self.aamva_version,
+            weight_range: self.weight_range,
+            race_ethnicity: self.race_ethnicity,
+            dhs_compliance: self.dhs_compliance,
+            dhs_temporary_lawful_status: self.dhs_temporary_lawful_status,
+            edl_credential: self.edl_credential,
+            resident_county: self.resident_county,
+            hazmat_endorsement_expiration_date: self.hazmat_endorsement_expiration_date,
         }
     }
-
 
     // /// Attempt to convert from JSON
     // pub fn from_json(json: Value) -> Result<MdlDataElementsError, Self> {
@@ -840,7 +1076,6 @@ mod mdl_data_elements_tests {
     //     assert!(validate_json_from_str(&cddl, json).map(|_| true).unwrap())
     // }
 }
-
 
 pub fn mdl_data_elements_cddl() -> String {
     let mut cddl_str = r#"
@@ -1060,7 +1295,8 @@ pub fn mdl_data_elements_cddl() -> String {
 
     let mut regex_prefix = "(";
     let mut alpha_2_country_code_cddl = "\n".to_string();
-    alpha_2_country_code_cddl.push_str("; A two letter country code (alpha-2 code) defined in ISO 3166-1.\n");
+    alpha_2_country_code_cddl
+        .push_str("; A two letter country code (alpha-2 code) defined in ISO 3166-1.\n");
     alpha_2_country_code_cddl.push_str("alpha-2-country-code = tstr .regexp \"");
     for country_code in rust_iso3166::ALL {
         alpha_2_country_code_cddl.push_str(&format!("{}{}", regex_prefix, country_code.alpha2));
@@ -1076,9 +1312,12 @@ pub fn mdl_data_elements_cddl() -> String {
     for country_code in rust_iso3166::ALL {
         // TODO: is this the correct ISO 3166-2 code?
         // Also available besides .code are: .name, .region_code, etc.
-        for subdivision in country_code.subdivisions()
-            .expect(&format!("missing country subdivision codes for: {}", country_code.alpha2)) {
-            country_subdivision_code_cddl.push_str(&format!("{}{}", regex_prefix, subdivision.code));
+        for subdivision in country_code.subdivisions().expect(&format!(
+            "missing country subdivision codes for: {}",
+            country_code.alpha2
+        )) {
+            country_subdivision_code_cddl
+                .push_str(&format!("{}{}", regex_prefix, subdivision.code));
             regex_prefix = "|"
         }
     }
@@ -1119,4 +1358,3 @@ mod mdl_data_elements_json_tests {
         assert!(validate_json_from_str(&cddl, json).map(|_| true).unwrap())
     }
 }
-
