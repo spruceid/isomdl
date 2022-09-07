@@ -83,9 +83,13 @@ pub struct MobileSecurityObjectBytes {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceKeyInfo {
     device_key: CoseKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     key_authorization: Option<KeyAuthorization>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key_info: Option<HashMap<i128, CborValue>>,
 }
 
 pub trait Signer {
@@ -96,10 +100,10 @@ pub trait Signer {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct KeyAuthorization {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    authorized_namespaces: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    authorized_data_elements: Option<HashMap<String, Vec<String>>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    authorized_namespaces: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    authorized_data_elements: HashMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -171,7 +175,6 @@ impl Mdoc {
         x5chain: X5Chain,
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
-        key_authorization: Option<KeyAuthorization>,
         device_key_info: DeviceKeyInfo,
     ) -> Result<PreparationMdoc> {
         let value_digests = Mdoc::digest_namespaces(&namespaces, digest_algorithm)?;
