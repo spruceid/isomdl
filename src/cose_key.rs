@@ -2,13 +2,54 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value;
 use std::collections::BTreeMap;
 
-/// An implementation of [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
+/// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
 /// restricted to the requirements of ISO/IEC 18013-5:2021.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(try_from = "Value", into = "Value")]
 pub enum CoseKey {
     EC2 { crv: EC2Curve, x: Vec<u8>, y: EC2_Y },
     OKP { crv: OKPCurve, x: Vec<u8> },
+}
+
+/// The sign bit or value of the y-coordinate for the EC point.
+#[derive(Debug, Clone)]
+pub enum EC2_Y {
+    Value(Vec<u8>),
+    SignBit(bool),
+}
+
+/// The RFC-8152 identifier of the curve, for EC2 key type.
+#[derive(Debug, Clone)]
+pub enum EC2Curve {
+    P256,
+    P384,
+    P521,
+    // TODO: Support for brainpool curves can be added when they are added to the IANA COSE
+    // Elliptic Curves registry.
+}
+
+/// The RFC-8152 identifier of the curve, for OKP key type.
+#[derive(Debug, Clone)]
+pub enum OKPCurve {
+    X25519,
+    X448,
+    Ed25519,
+    Ed448,
+}
+
+/// Errors that can occur when deserialising a COSE_Key.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum Error {
+    #[error("COSE_Key of kty 'EC2' missing y coordinate.")]
+    EC2MissingY,
+    #[error("Expected to parse a CBOR bool or bstr for y-coordinate, received: '{0:?}'")]
+    InvalidTypeY(Value),
+    #[error("Expected to parse a CBOR map, received: '{0:?}'")]
+    NotAMap(Value),
+    #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves.")]
+    UnsupportedCurve,
+    #[error("This implementation of COSE_Key only supports EC2 and OKP keys.")]
+    UnsupportedFormat,
 }
 
 impl From<CoseKey> for Value {
@@ -68,12 +109,6 @@ impl TryFrom<Value> for CoseKey {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum EC2_Y {
-    Value(Vec<u8>),
-    SignBit(bool),
-}
-
 impl From<EC2_Y> for Value {
     fn from(y: EC2_Y) -> Value {
         match y {
@@ -93,15 +128,6 @@ impl TryFrom<Value> for EC2_Y {
             _ => Err(Error::InvalidTypeY(v)),
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum EC2Curve {
-    P256,
-    P384,
-    P521,
-    // TODO: Support for brainpool curves can be added when they are added to the IANA COSE
-    // Elliptic Curves registry.
 }
 
 impl From<EC2Curve> for Value {
@@ -127,14 +153,6 @@ impl TryFrom<i128> for EC2Curve {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum OKPCurve {
-    X25519,
-    X448,
-    Ed25519,
-    Ed448,
-}
-
 impl From<OKPCurve> for Value {
     fn from(crv: OKPCurve) -> Value {
         match crv {
@@ -158,18 +176,4 @@ impl TryFrom<i128> for OKPCurve {
             _ => Err(Error::UnsupportedCurve),
         }
     }
-}
-
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum Error {
-    #[error("COSE_Key of kty 'EC2' missing y coordinate.")]
-    EC2MissingY,
-    #[error("Expected to parse a CBOR bool or bstr for y-coordinate, received: '{0:?}'")]
-    InvalidTypeY(Value),
-    #[error("Expected to parse a CBOR map, received: '{0:?}'")]
-    NotAMap(Value),
-    #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves.")]
-    UnsupportedCurve,
-    #[error("This implementation of COSE_Key only supports EC2 and OKP keys.")]
-    UnsupportedFormat,
 }
