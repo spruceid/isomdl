@@ -7,13 +7,13 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(try_from = "Value", into = "Value")]
 pub enum CoseKey {
-    EC2 { crv: EC2Curve, x: Vec<u8>, y: EC2_Y },
+    EC2 { crv: EC2Curve, x: Vec<u8>, y: EC2Y },
     OKP { crv: OKPCurve, x: Vec<u8> },
 }
 
 /// The sign bit or value of the y-coordinate for the EC point.
 #[derive(Debug, Clone)]
-pub enum EC2_Y {
+pub enum EC2Y {
     Value(Vec<u8>),
     SignBit(bool),
 }
@@ -109,22 +109,22 @@ impl TryFrom<Value> for CoseKey {
     }
 }
 
-impl From<EC2_Y> for Value {
-    fn from(y: EC2_Y) -> Value {
+impl From<EC2Y> for Value {
+    fn from(y: EC2Y) -> Value {
         match y {
-            EC2_Y::Value(s) => Value::Bytes(s),
-            EC2_Y::SignBit(b) => Value::Bool(b),
+            EC2Y::Value(s) => Value::Bytes(s),
+            EC2Y::SignBit(b) => Value::Bool(b),
         }
     }
 }
 
-impl TryFrom<Value> for EC2_Y {
+impl TryFrom<Value> for EC2Y {
     type Error = Error;
 
     fn try_from(v: Value) -> Result<Self, Error> {
         match v {
-            Value::Bytes(s) => Ok(EC2_Y::Value(s)),
-            Value::Bool(b) => Ok(EC2_Y::SignBit(b)),
+            Value::Bytes(s) => Ok(EC2Y::Value(s)),
+            Value::Bool(b) => Ok(EC2Y::SignBit(b)),
             _ => Err(Error::InvalidTypeY(v)),
         }
     }

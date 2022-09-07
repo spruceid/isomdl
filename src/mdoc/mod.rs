@@ -1,44 +1,29 @@
 use anyhow::{anyhow, Result};
-use aws_nitro_enclaves_cose::crypto::{
-    Hash, MessageDigest, Openssl, SignatureAlgorithm, SigningPrivateKey, SigningPublicKey,
+use aws_nitro_enclaves_cose::{
+    crypto::{Openssl, SignatureAlgorithm, SigningPrivateKey, SigningPublicKey},
+    header_map::HeaderMap,
+    sign, CoseSign1,
 };
-use aws_nitro_enclaves_cose::error::CoseError;
-use aws_nitro_enclaves_cose::header_map::HeaderMap;
-use aws_nitro_enclaves_cose::{sign, CoseSign1};
-use cddl::{parser::cddl_from_str, validate_json_from_str};
-use chrono::{DateTime, FixedOffset, Offset, Utc};
-use der::Writer;
-use der::{Document, Encode};
-use ecdsa::signature::digest::Key;
-use ecdsa::{signature::Signature, SigningKey};
-use openssl::ec::EcKey;
-use openssl::pkey::{Id, PKey, Private, Public};
-use p256::{AffinePoint, NistP256, PublicKey};
 use rand::Rng;
-use rand_core::OsRng;
-use ring::digest::{Algorithm as RingDigestAlgorithm, Context, Digest, SHA256};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
-use serde_cbor::{self, value};
 use std::collections::{HashMap, HashSet};
-use std::str::Bytes;
 
 mod bytestr;
 use bytestr::ByteStr;
 mod cose_key;
 pub use cose_key::CoseKey;
+mod tag24;
+use tag24::Tag24;
 mod validity_info;
 pub use validity_info::ValidityInfo;
 mod x5chain;
 pub use x5chain::{Builder, X5Chain};
 
-const ALG: i128 = 1;
 const X5CHAIN: i128 = 33;
-const PEM_FILE: &'static str = include_str!("../../test.pem");
 
 type Namespaces = HashMap<String, HashMap<String, CborValue>>;
 type DigestIds = HashMap<DigestId, ByteStr>;
-type IssuerSignedItemBytes = [u8];
 type DigestId = u64;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -67,21 +52,24 @@ pub struct Mso {
     validity_info: ValidityInfo,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IssuerSigned {
-    namespaces: IssuerNamespace,
+    #[serde(default, skip_serializing_if = "IssuerNamespaces::is_empty")]
+    namespaces: IssuerNamespaces,
     issuer_auth: CoseSign1,
 }
 
+pub type IssuerNamespaces = HashMap<String, Tag24<IssuerSignedItem>>;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IssuerSignedItem {
+    #[serde(rename = "digestID")]
     digest_id: u64,
-    random: [u8; 16],
+    random: ByteStr,
     element_identifier: String,
     element_value: CborValue,
-}
-
-pub struct IssuerNamespace {
-    namespace: HashMap<DigestId, Vec<u8>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -99,13 +87,8 @@ pub struct DeviceKeyInfo {
     key_info: Option<HashMap<i128, CborValue>>,
 }
 
-pub trait Signer {
-    fn alg() {}
-
-    fn sign() {}
-}
-
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyAuthorization {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     authorized_namespaces: Vec<String>,
@@ -140,11 +123,10 @@ impl PreparationMdoc {
         }
 
         // encode mso to cbor
-        let mso_bytes = to_cbor_bytes_with_tag_24(&self.mobile_security_object)?;
+        let mso_bytes = serde_cbor::to_vec(&Tag24::new(self.mobile_security_object.clone()))?;
 
         //headermap should contain alg header and x5chain header
-        let mut alg_header_map: HeaderMap = signer_algorithm.into();
-        let mut buf: Vec<u8> = vec![];
+        let alg_header_map: HeaderMap = signer_algorithm.into();
 
         let x5chain_cbor = self.x5chain.into_cbor()?;
         let mut cert_header_map = HeaderMap::new();
@@ -159,7 +141,7 @@ impl PreparationMdoc {
         .map_err(|error| anyhow!("error signing mso: {error}"))?;
 
         let mdoc = Mdoc {
-            doc_type: "org.iso.18013.5.1".to_string(),
+            doc_type: self.doc_type,
             namespaces: self.namespaces,
             mobile_security_object: self.mobile_security_object,
             issuer_auth: Some(cose_sign1),
@@ -218,9 +200,10 @@ impl Mdoc {
                             break;
                         }
                     }
+                    let random: ByteStr = Vec::from(rand::thread_rng().gen::<[u8; 16]>()).into();
                     let issuer_signed_item = IssuerSignedItem {
                         digest_id,
-                        random: rand::thread_rng().gen::<[u8; 16]>(),
+                        random,
                         element_identifier: key.to_string(),
                         element_value: value.clone(),
                     };
@@ -245,53 +228,9 @@ impl Mdoc {
     }
 }
 
-pub fn to_cbor<T: Serialize>(input: T) -> Result<Vec<u8>, serde_cbor::Error> {
-    let cbor_mdoc = serde_cbor::to_vec(&input);
-    cbor_mdoc
-}
-
-pub fn from_cbor(mso_bytes: Vec<u8>) -> Result<Mso, serde_cbor::Error> {
-    let mso: Result<Mso, serde_cbor::Error> = serde_cbor::from_slice(&mso_bytes);
-    mso
-}
-
-/// Encode value as an embedded
-/// [CBOR data item](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item).
-pub fn to_cbor_bytes_with_tag_24<T: Serialize>(t: &T) -> Result<Vec<u8>> {
-    let t_cbor = serde_cbor::to_vec(t)?;
-    let t_tagged = CborValue::Tag(24, Box::new(CborValue::Bytes(t_cbor)));
-    let t_bytes = serde_cbor::to_vec(&t_tagged)?;
-    Ok(t_bytes)
-}
-
-pub fn x5chain_to_cbor(chain: &[Document]) -> CborValue {
-    let cbor_chain: Vec<CborValue> = chain
-        .iter()
-        .map(|doc| doc.as_bytes().to_vec())
-        .map(CborValue::Bytes)
-        .collect();
-    CborValue::Array(cbor_chain)
-}
-
-pub fn create_issuer_signed_item(key: String, value: String) {}
-
-/// TODO
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LocalBstr {}
-
-/// TODO: fix (de)serialize
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Tstr {
-    tstr: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tdate {
-    tdate: DateTime<FixedOffset>,
-}
-
 #[cfg(test)]
 pub mod tests {
+    const PEM_FILE: &'static str = include_str!("../../test.pem");
 
     use super::*;
     use crate::mdoc;

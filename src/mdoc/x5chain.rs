@@ -1,10 +1,8 @@
 use anyhow::{anyhow, Result};
 use aws_nitro_enclaves_cose::crypto::SignatureAlgorithm;
-use openssl::nid::Nid;
-use openssl::x509::{X509AlgorithmRef, X509Ref, X509VerifyResult, X509};
+use openssl::x509::{X509Ref, X509VerifyResult, X509};
 use serde_cbor::Value as CborValue;
 use std::{fs::File, io::Read};
-use x509_parser::public_key;
 
 #[derive(Debug, Clone)]
 pub struct X5Chain(Vec<X509>);
@@ -105,8 +103,8 @@ impl Builder {
             "at least one certificate must be given to the builder"
         ))?;
         let mut current_subject: u8 = 0;
-        while let Some(second) = iter.next() {
-            if second.issued(&first) != X509VerifyResult::OK {
+        for second in iter {
+            if second.issued(first) != X509VerifyResult::OK {
                 return Err(anyhow!(
                     "x5chain invalid: certificate {} did not issue certificate {}",
                     current_subject + 1,
