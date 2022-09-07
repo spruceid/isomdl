@@ -1,5 +1,6 @@
+use crate::cose_key::CoseKey;
 use crate::x5chain::{self, X5Chain};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use aws_nitro_enclaves_cose::crypto::{
     Hash, MessageDigest, Openssl, SignatureAlgorithm, SigningPrivateKey, SigningPublicKey,
 };
@@ -17,7 +18,7 @@ use openssl::pkey::{Id, PKey, Private, Public};
 use p256::{AffinePoint, NistP256, PublicKey};
 use rand::Rng;
 use rand_core::OsRng;
-use ring::digest::{Context, Digest, SHA256, Algorithm as RingDigestAlgorithm};
+use ring::digest::{Algorithm as RingDigestAlgorithm, Context, Digest, SHA256};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_cbor::{self, value};
@@ -110,12 +111,6 @@ pub struct ValidityInfo {
     expected_update: Option<DateTime<Utc>>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CoseKey {
-    pub kty: KeyType,
-    pub alg: SignatureAlgorithm,
-}
-
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]
 pub enum DigestAlgorithm {
     SHA256,
@@ -124,11 +119,9 @@ pub enum DigestAlgorithm {
 }
 
 impl PreparationMdoc {
-    fn complete<T: SigningPrivateKey + SigningPublicKey>(
-        self,
-        signer: T,
-    ) -> Result<Mdoc> {
-        let signer_algorithm = signer.get_parameters()
+    fn complete<T: SigningPrivateKey + SigningPublicKey>(self, signer: T) -> Result<Mdoc> {
+        let signer_algorithm = signer
+            .get_parameters()
             .map_err(|error| anyhow!("error getting key parameters: {error}"))?
             .0;
 
@@ -136,7 +129,9 @@ impl PreparationMdoc {
             (SignatureAlgorithm::ES256, SignatureAlgorithm::ES256) => (),
             (SignatureAlgorithm::ES384, SignatureAlgorithm::ES384) => (),
             (SignatureAlgorithm::ES512, SignatureAlgorithm::ES512) => (),
-            _ => Err(anyhow!("provided signer's algorithm does not match X509 cert"))?
+            _ => Err(anyhow!(
+                "provided signer's algorithm does not match X509 cert"
+            ))?,
         }
 
         //encode mso to cbor
@@ -156,7 +151,7 @@ impl PreparationMdoc {
             &cert_header_map,
             &signer,
         )
-            .map_err(|error| anyhow!("error signing mso: {error}"))?;
+        .map_err(|error| anyhow!("error signing mso: {error}"))?;
 
         let mdoc = Mdoc {
             doc_type: "org.iso.18013.5.1".to_string(),
@@ -179,8 +174,7 @@ impl Mdoc {
         key_authorization: Option<KeyAuthorization>,
         device_key_info: DeviceKeyInfo,
     ) -> Result<PreparationMdoc> {
-        let value_digests =
-            Mdoc::digest_namespaces(&namespaces, digest_algorithm)?;
+        let value_digests = Mdoc::digest_namespaces(&namespaces, digest_algorithm)?;
 
         let mobile_security_object = Mso {
             version: "1.0".to_string(),
@@ -207,10 +201,11 @@ impl Mdoc {
     ) -> Result<HashMap<String, HashMap<DigestID, Vec<u8>>>> {
         fn digest_namespace(
             elements: &HashMap<String, CborValue>,
-            digest_algorithm: DigestAlgorithm
+            digest_algorithm: DigestAlgorithm,
         ) -> Result<HashMap<DigestID, Vec<u8>>> {
             let mut used_ids: HashSet<u64> = HashSet::new();
-            elements.iter()
+            elements
+                .iter()
                 .map(|(key, value)| {
                     let mut digest_id;
                     loop {
@@ -232,13 +227,16 @@ impl Mdoc {
                         DigestAlgorithm::SHA512 => &ring::digest::SHA512,
                     };
                     let digest = ring::digest::digest(ring_alg, &issuer_signed_item_bytes);
-                    return Ok((digest_id, digest.as_ref().to_vec()))
+                    return Ok((digest_id, digest.as_ref().to_vec()));
                 })
                 .collect()
         }
 
-        namespaces.iter()
-            .map(|(name, elements)| Ok((name.clone(), digest_namespace(elements, digest_algorithm)?)))
+        namespaces
+            .iter()
+            .map(|(name, elements)| {
+                Ok((name.clone(), digest_namespace(elements, digest_algorithm)?))
+            })
             .collect()
     }
 }
@@ -292,10 +290,6 @@ impl Mdoc {
 //    }
 //}
 //
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum KeyType {
-    EC,
-}
 //
 //pub fn generate_keys() -> (PublicKey, SigningKey<NistP256>) {
 //    let affine_point = AffinePoint::GENERATOR;
