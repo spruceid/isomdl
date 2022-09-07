@@ -140,7 +140,7 @@ impl PreparationMdoc {
         }
 
         // encode mso to cbor
-        let mso_bytes = to_cbor_bytes_with_tag_24(self.mobile_security_object.clone())?;
+        let mso_bytes = to_cbor_bytes_with_tag_24(&self.mobile_security_object)?;
 
         //headermap should contain alg header and x5chain header
         let mut alg_header_map: HeaderMap = signer_algorithm.into();
@@ -257,11 +257,11 @@ pub fn from_cbor(mso_bytes: Vec<u8>) -> Result<Mso, serde_cbor::Error> {
 
 /// Encode value as an embedded
 /// [CBOR data item](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item).
-pub fn to_cbor_bytes_with_tag_24<T: Serialize>(t: T) -> Result<Vec<u8>> {
+pub fn to_cbor_bytes_with_tag_24<T: Serialize>(t: &T) -> Result<Vec<u8>> {
     let t_cbor = serde_cbor::to_vec(t)?;
-    let t_tagged = CborValue::Tag(24, CborValue::Bytes(t_cbor));
-    let t_bytes = serde_cbor::to_vec(t_tagged)?;
-    t_bytes
+    let t_tagged = CborValue::Tag(24, Box::new(CborValue::Bytes(t_cbor)));
+    let t_bytes = serde_cbor::to_vec(&t_tagged)?;
+    Ok(t_bytes)
 }
 
 pub fn x5chain_to_cbor(chain: &[Document]) -> CborValue {
