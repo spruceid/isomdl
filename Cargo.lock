@@ -567,7 +567,6 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_json",
- "serde_repr",
  "thiserror",
  "x509-parser",
  "zeroize",

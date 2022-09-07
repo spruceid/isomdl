@@ -20,7 +20,6 @@ use ring::digest::{Algorithm as RingDigestAlgorithm, Context, Digest, SHA256};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_cbor::{self, value};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::{HashMap, HashSet};
 use std::str::Bytes;
 
@@ -140,8 +139,8 @@ impl PreparationMdoc {
             ))?,
         }
 
-        //encode mso to cbor
-        let mobile_security_object_bytes = to_cbor(self.mobile_security_object.clone())?;
+        // encode mso to cbor
+        let mso_bytes = to_cbor_bytes_with_tag_24(self.mobile_security_object.clone())?;
 
         //headermap should contain alg header and x5chain header
         let mut alg_header_map: HeaderMap = signer_algorithm.into();
@@ -152,7 +151,7 @@ impl PreparationMdoc {
         cert_header_map.insert(serde_cbor::Value::Integer(X5CHAIN), x5chain_cbor);
 
         let cose_sign1 = sign::CoseSign1::new_with_protected::<Openssl>(
-            &mobile_security_object_bytes,
+            &mso_bytes,
             &alg_header_map,
             &cert_header_map,
             &signer,
@@ -254,6 +253,15 @@ pub fn to_cbor<T: Serialize>(input: T) -> Result<Vec<u8>, serde_cbor::Error> {
 pub fn from_cbor(mso_bytes: Vec<u8>) -> Result<Mso, serde_cbor::Error> {
     let mso: Result<Mso, serde_cbor::Error> = serde_cbor::from_slice(&mso_bytes);
     mso
+}
+
+/// Encode value as an embedded
+/// [CBOR data item](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item).
+pub fn to_cbor_bytes_with_tag_24<T: Serialize>(t: T) -> Result<Vec<u8>> {
+    let t_cbor = serde_cbor::to_vec(t)?;
+    let t_tagged = CborValue::Tag(24, CborValue::Bytes(t_cbor));
+    let t_bytes = serde_cbor::to_vec(t_tagged)?;
+    t_bytes
 }
 
 pub fn x5chain_to_cbor(chain: &[Document]) -> CborValue {

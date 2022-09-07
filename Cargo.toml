@@ -19,11 +19,10 @@ openssl = "0.10.41"
 ecdsa = { version = "0.14.4", features = ["serde"] }
 p256 = {version = "0.11.1", features = ["serde"] }
 rand_core = "0.6.3"
-serde_cbor = "0.11.2"
+serde_cbor = { version = "0.11.2", features = ["tags"] }
 anyhow = "1.0.62"
 cddl = "0.8.7"
 zeroize = { version = "1.4", features = ["zeroize_derive"] }
-serde_repr = "0.1.9"
 der = { version = "0.6.0", features = ["pem"] }
 ring = "0.16.20"
 rand = "0.8.5"
