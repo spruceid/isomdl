@@ -1,5 +1,3 @@
-use crate::cose_key::CoseKey;
-use crate::x5chain::{self, X5Chain};
 use anyhow::{anyhow, Result};
 use aws_nitro_enclaves_cose::crypto::{
     Hash, MessageDigest, Openssl, SignatureAlgorithm, SigningPrivateKey, SigningPublicKey,
@@ -26,14 +24,23 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::{HashMap, HashSet};
 use std::str::Bytes;
 
+mod bytestr;
+use bytestr::ByteStr;
+mod cose_key;
+pub use cose_key::CoseKey;
+mod validity_info;
+pub use validity_info::ValidityInfo;
+mod x5chain;
+pub use x5chain::{Builder, X5Chain};
+
 const ALG: i128 = 1;
 const X5CHAIN: i128 = 33;
-const PEM_FILE: &'static str = include_str!("../test.pem");
+const PEM_FILE: &'static str = include_str!("../../test.pem");
 
 type Namespaces = HashMap<String, HashMap<String, CborValue>>;
-type DigestIds = HashMap<DigestID, Vec<u8>>;
+type DigestIds = HashMap<DigestId, ByteStr>;
 type IssuerSignedItemBytes = [u8];
-type DigestID = u64;
+type DigestId = u64;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Mdoc {
@@ -51,10 +58,11 @@ pub struct PreparationMdoc {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Mso {
     version: String,
     digest_algorithm: DigestAlgorithm,
-    value_digests: HashMap<String, HashMap<DigestID, Vec<u8>>>,
+    value_digests: HashMap<String, DigestIds>,
     device_key_info: DeviceKeyInfo,
     doc_type: String,
     validity_info: ValidityInfo,
@@ -74,7 +82,7 @@ pub struct IssuerSignedItem {
 }
 
 pub struct IssuerNamespace {
-    namespace: HashMap<DigestID, Vec<u8>>,
+    namespace: HashMap<DigestId, Vec<u8>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -106,24 +114,18 @@ pub struct KeyAuthorization {
     authorized_data_elements: HashMap<String, Vec<String>>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-// To Do: change datetimes to more specific types for mDL
-pub struct ValidityInfo {
-    signed: DateTime<Utc>,
-    valid_from: DateTime<Utc>,
-    valid_until: DateTime<Utc>,
-    expected_update: Option<DateTime<Utc>>,
-}
-
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]
 pub enum DigestAlgorithm {
+    #[serde(rename = "SHA-256")]
     SHA256,
+    #[serde(rename = "SHA-384")]
     SHA384,
+    #[serde(rename = "SHA-512")]
     SHA512,
 }
 
 impl PreparationMdoc {
-    fn complete<T: SigningPrivateKey + SigningPublicKey>(self, signer: T) -> Result<Mdoc> {
+    pub fn complete<T: SigningPrivateKey + SigningPublicKey>(self, signer: T) -> Result<Mdoc> {
         let signer_algorithm = signer
             .get_parameters()
             .map_err(|error| anyhow!("error getting key parameters: {error}"))?
@@ -201,11 +203,11 @@ impl Mdoc {
     pub fn digest_namespaces(
         namespaces: &Namespaces,
         digest_algorithm: DigestAlgorithm,
-    ) -> Result<HashMap<String, HashMap<DigestID, Vec<u8>>>> {
+    ) -> Result<HashMap<String, DigestIds>> {
         fn digest_namespace(
             elements: &HashMap<String, CborValue>,
             digest_algorithm: DigestAlgorithm,
-        ) -> Result<HashMap<DigestID, Vec<u8>>> {
+        ) -> Result<DigestIds> {
             let mut used_ids: HashSet<u64> = HashSet::new();
             elements
                 .iter()
@@ -230,7 +232,7 @@ impl Mdoc {
                         DigestAlgorithm::SHA512 => &ring::digest::SHA512,
                     };
                     let digest = ring::digest::digest(ring_alg, &issuer_signed_item_bytes);
-                    return Ok((digest_id, digest.as_ref().to_vec()));
+                    return Ok((digest_id, digest.as_ref().to_vec().into()));
                 })
                 .collect()
         }
@@ -243,64 +245,6 @@ impl Mdoc {
             .collect()
     }
 }
-//
-//#[derive(Clone, Debug)]
-//pub struct PrivateKey {
-//    pkey: SigningKey<NistP256>,
-//}
-//
-//impl SigningPrivateKey for PrivateKey {
-//    fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CoseError> {
-//        use ecdsa::signature::Signer;
-//        let signature = self.pkey.sign(data);
-//        let result = signature.as_bytes();
-//        Ok(result.to_vec())
-//    }
-//}
-//
-//impl SigningPublicKey for PrivateKey {
-//    fn get_parameters(&self) -> Result<(SignatureAlgorithm, MessageDigest), CoseError> {
-//        let sig = SignatureAlgorithm::ES256;
-//        let msg = MessageDigest::Sha256;
-//        Ok((sig, msg))
-//    }
-//
-//    fn verify(&self, digest: &[u8], signature: &[u8]) -> Result<bool, CoseError> {
-//        Ok(true)
-//    }
-//}
-//
-//pub trait DeviceKeyInfoTrait {
-//    fn get_alg(&self) -> SignatureAlgorithm;
-//    fn get_kty(&self) -> KeyType;
-//    fn get_cose_key(&self) -> CoseKey;
-//}
-//
-//impl DeviceKeyInfoTrait for PrivateKey {
-//    fn get_cose_key(&self) -> CoseKey {
-//        let cose_key = CoseKey {
-//            kty: KeyType::EC,
-//            alg: SignatureAlgorithm::ES256,
-//        };
-//        cose_key
-//    }
-//    fn get_alg(&self) -> SignatureAlgorithm {
-//        SignatureAlgorithm::ES256
-//    }
-//
-//    fn get_kty(&self) -> KeyType {
-//        KeyType::EC
-//    }
-//}
-//
-//
-//pub fn generate_keys() -> (PublicKey, SigningKey<NistP256>) {
-//    let affine_point = AffinePoint::GENERATOR;
-//    let public_key = PublicKey::try_from(affine_point).unwrap();
-//    let signing_key = SigningKey::<NistP256>::random(&mut OsRng); // Serialize with `::to_bytes()`
-//
-//    (public_key, signing_key)
-//}
 
 pub fn to_cbor<T: Serialize>(input: T) -> Result<Vec<u8>, serde_cbor::Error> {
     let cbor_mdoc = serde_cbor::to_vec(&input);
@@ -472,7 +416,7 @@ pub mod tests {
         let mut mso = Mso {
             version: "1.0".to_string(),
             digest_algorithm: "SHA-256".to_string(),
-            value_digests: HashMap::<String, HashMap<DigestID, Vec<u8>>>::new(),
+            value_digests: HashMap::<String, DigestIds>::new(),
             device_key_info: device_key_info.clone(),
             doc_type: "org.iso.18013.5.1".to_string(),
             validity_info: validity_info,
