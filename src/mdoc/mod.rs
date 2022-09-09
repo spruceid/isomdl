@@ -10,90 +10,99 @@ use serde_cbor::Value as CborValue;
 use std::collections::{HashMap, HashSet};
 
 mod bytestr;
-use bytestr::ByteStr;
 mod cose_key;
-pub use cose_key::CoseKey;
+mod non_empty_map;
+mod non_empty_vec;
 mod tag24;
-use tag24::Tag24;
 mod validity_info;
-pub use validity_info::ValidityInfo;
 mod x5chain;
+
+use bytestr::ByteStr;
+pub use cose_key::CoseKey;
+pub use non_empty_map::NonEmptyMap;
+pub use non_empty_vec::NonEmptyVec;
+pub use tag24::Tag24;
+pub use validity_info::ValidityInfo;
 pub use x5chain::{Builder, X5Chain};
 
 const X5CHAIN: i128 = 33;
 
-type Namespaces = HashMap<String, HashMap<String, CborValue>>;
-type DigestIds = HashMap<DigestId, ByteStr>;
-type DigestId = u64;
+pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
+pub type DigestIds = HashMap<DigestId, ByteStr>;
+pub type DigestId = u64;
+pub type IssuerNamespaces = NonEmptyMap<String, NonEmptyVec<Tag24<IssuerSignedItem>>>;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+/// Representation of an issued mdoc.
 pub struct Mdoc {
     doc_type: String,
-    namespaces: Namespaces,
-    mobile_security_object: Mso,
-    issuer_auth: Option<CoseSign1>,
+    namespaces: IssuerNamespaces,
+    issuer_auth: CoseSign1,
 }
 
-pub struct PreparationMdoc {
+#[derive(Debug, Clone)]
+pub struct MdocPreparation {
     doc_type: String,
-    namespaces: Namespaces,
-    mobile_security_object: Mso,
+    namespaces: IssuerNamespaces,
+    mso: Mso,
     x5chain: X5Chain,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mso {
-    version: String,
-    digest_algorithm: DigestAlgorithm,
-    value_digests: HashMap<String, DigestIds>,
-    device_key_info: DeviceKeyInfo,
-    doc_type: String,
-    validity_info: ValidityInfo,
+    pub version: String,
+    pub digest_algorithm: DigestAlgorithm,
+    pub value_digests: HashMap<String, DigestIds>,
+    pub device_key_info: DeviceKeyInfo,
+    pub doc_type: String,
+    pub validity_info: ValidityInfo,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IssuerSigned {
-    #[serde(default, skip_serializing_if = "IssuerNamespaces::is_empty")]
-    namespaces: IssuerNamespaces,
-    issuer_auth: CoseSign1,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "nameSpaces"
+    )]
+    pub namespaces: Option<IssuerNamespaces>,
+    pub issuer_auth: CoseSign1,
 }
-
-pub type IssuerNamespaces = HashMap<String, Tag24<IssuerSignedItem>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IssuerSignedItem {
     #[serde(rename = "digestID")]
-    digest_id: u64,
-    random: ByteStr,
-    element_identifier: String,
-    element_value: CborValue,
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct MobileSecurityObjectBytes {
-    data: Vec<u8>,
+    pub digest_id: u64,
+    pub random: ByteStr,
+    pub element_identifier: String,
+    pub element_value: CborValue,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceKeyInfo {
-    device_key: CoseKey,
+    pub device_key: CoseKey,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    key_authorization: Option<KeyAuthorization>,
+    pub key_authorizations: Option<KeyAuthorizations>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    key_info: Option<HashMap<i128, CborValue>>,
+    pub key_info: Option<HashMap<i128, CborValue>>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct KeyAuthorization {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    authorized_namespaces: Vec<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    authorized_data_elements: HashMap<String, Vec<String>>,
+pub struct KeyAuthorizations {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "nameSpaces"
+    )]
+    pub namespaces: Option<NonEmptyVec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_elements: Option<NonEmptyMap<String, NonEmptyVec<String>>>,
 }
 
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]
@@ -106,45 +115,51 @@ pub enum DigestAlgorithm {
     SHA512,
 }
 
-impl PreparationMdoc {
+impl MdocPreparation {
     pub fn complete<T: SigningPrivateKey + SigningPublicKey>(self, signer: T) -> Result<Mdoc> {
+        let MdocPreparation {
+            doc_type,
+            namespaces,
+            mso,
+            x5chain,
+        } = self;
+
         let signer_algorithm = signer
             .get_parameters()
-            .map_err(|error| anyhow!("error getting key parameters: {error}"))?
+            .map_err(|error| anyhow!("error getting signer parameters: {error}"))?
             .0;
 
-        match (self.x5chain.key_algorithm()?, signer_algorithm) {
+        match (x5chain.key_algorithm()?, signer_algorithm) {
             (SignatureAlgorithm::ES256, SignatureAlgorithm::ES256) => (),
             (SignatureAlgorithm::ES384, SignatureAlgorithm::ES384) => (),
             (SignatureAlgorithm::ES512, SignatureAlgorithm::ES512) => (),
-            _ => Err(anyhow!(
-                "provided signer's algorithm does not match X509 cert"
+            (chain_alg, signer_alg) => Err(anyhow!(
+                "signature algorithm does not match: expected '{:?}' (from x5chain), found '{:?}' (from signer)"
+                , chain_alg, signer_alg
             ))?,
         }
 
         // encode mso to cbor
-        let mso_bytes = serde_cbor::to_vec(&Tag24::new(self.mobile_security_object.clone()))?;
+        let mso_bytes = serde_cbor::to_vec(&Tag24::new(mso)?)?;
 
         //headermap should contain alg header and x5chain header
-        let alg_header_map: HeaderMap = signer_algorithm.into();
+        let protected_headers: HeaderMap = signer_algorithm.into();
 
-        let x5chain_cbor = self.x5chain.into_cbor()?;
-        let mut cert_header_map = HeaderMap::new();
-        cert_header_map.insert(serde_cbor::Value::Integer(X5CHAIN), x5chain_cbor);
+        let mut unprotected_headers = HeaderMap::new();
+        unprotected_headers.insert(serde_cbor::Value::Integer(X5CHAIN), x5chain.into_cbor()?);
 
         let cose_sign1 = sign::CoseSign1::new_with_protected::<Openssl>(
             &mso_bytes,
-            &alg_header_map,
-            &cert_header_map,
+            &protected_headers,
+            &unprotected_headers,
             &signer,
         )
         .map_err(|error| anyhow!("error signing mso: {error}"))?;
 
         let mdoc = Mdoc {
-            doc_type: self.doc_type,
-            namespaces: self.namespaces,
-            mobile_security_object: self.mobile_security_object,
-            issuer_auth: Some(cose_sign1),
+            doc_type,
+            namespaces,
+            issuer_auth: cose_sign1,
         };
 
         Ok(mdoc)
@@ -159,10 +174,17 @@ impl Mdoc {
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
-    ) -> Result<PreparationMdoc> {
-        let value_digests = Mdoc::digest_namespaces(&namespaces, digest_algorithm)?;
+    ) -> Result<MdocPreparation> {
+        if let Some(authorizations) = &device_key_info.key_authorizations {
+            if !authorizations.is_valid() {
+                return Err(anyhow!("key authorizations for device key are invalid: an authorized namespace cannot be included in the authorized data elements map"));
+            }
+        }
 
-        let mobile_security_object = Mso {
+        let issuer_namespaces = Mdoc::to_issuer_namespaces(namespaces)?;
+        let value_digests = Mdoc::digest_namespaces(&issuer_namespaces, digest_algorithm)?;
+
+        let mso = Mso {
             version: "1.0".to_string(),
             digest_algorithm,
             value_digests,
@@ -171,50 +193,81 @@ impl Mdoc {
             validity_info,
         };
 
-        let preparation_mdoc = PreparationMdoc {
+        let preparation_mdoc = MdocPreparation {
             doc_type,
-            namespaces,
-            mobile_security_object,
+            namespaces: issuer_namespaces,
+            mso,
             x5chain,
         };
 
         Ok(preparation_mdoc)
     }
 
+    pub fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
+        fn to_issuer_signed_items(
+            elements: HashMap<String, CborValue>,
+        ) -> impl Iterator<Item = IssuerSignedItem> {
+            let mut used_ids: HashSet<u64> = HashSet::new();
+            elements.into_iter().map(move |(key, value)| {
+                let mut digest_id;
+                loop {
+                    digest_id = rand::thread_rng().gen();
+                    if used_ids.insert(digest_id) {
+                        break;
+                    }
+                }
+                let random: ByteStr = Vec::from(rand::thread_rng().gen::<[u8; 16]>()).into();
+                IssuerSignedItem {
+                    digest_id,
+                    random,
+                    element_identifier: key,
+                    element_value: value,
+                }
+            })
+        }
+
+        namespaces
+            .into_iter()
+            .map(|(name, elements)| {
+                to_issuer_signed_items(elements)
+                    .map(Tag24::new)
+                    .collect::<Result<Vec<Tag24<IssuerSignedItem>>, _>>()
+                    .map_err(|err| anyhow!("unable to encode IssuerSignedItem as cbor: {}", err))
+                    .and_then(|items| {
+                        NonEmptyVec::try_from(items)
+                            .map_err(|_| anyhow!("at least one element required in each namespace"))
+                    })
+                    .map(|elems| (name, elems))
+            })
+            .collect::<Result<HashMap<String, NonEmptyVec<Tag24<IssuerSignedItem>>>>>()
+            .and_then(|namespaces| {
+                NonEmptyMap::try_from(namespaces)
+                    .map_err(|_| anyhow!("at least one namespace required"))
+            })
+    }
+
     pub fn digest_namespaces(
-        namespaces: &Namespaces,
+        namespaces: &IssuerNamespaces,
         digest_algorithm: DigestAlgorithm,
     ) -> Result<HashMap<String, DigestIds>> {
         fn digest_namespace(
-            elements: &HashMap<String, CborValue>,
+            elements: &[Tag24<IssuerSignedItem>],
             digest_algorithm: DigestAlgorithm,
         ) -> Result<DigestIds> {
-            let mut used_ids: HashSet<u64> = HashSet::new();
+            let ring_alg = match digest_algorithm {
+                DigestAlgorithm::SHA256 => &ring::digest::SHA256,
+                DigestAlgorithm::SHA384 => &ring::digest::SHA384,
+                DigestAlgorithm::SHA512 => &ring::digest::SHA512,
+            };
             elements
                 .iter()
-                .map(|(key, value)| {
-                    let mut digest_id;
-                    loop {
-                        digest_id = rand::thread_rng().gen();
-                        if used_ids.insert(digest_id) {
-                            break;
-                        }
-                    }
-                    let random: ByteStr = Vec::from(rand::thread_rng().gen::<[u8; 16]>()).into();
-                    let issuer_signed_item = IssuerSignedItem {
-                        digest_id,
-                        random,
-                        element_identifier: key.to_string(),
-                        element_value: value.clone(),
-                    };
-                    let issuer_signed_item_bytes = serde_cbor::to_vec(&issuer_signed_item)?;
-                    let ring_alg = match digest_algorithm {
-                        DigestAlgorithm::SHA256 => &ring::digest::SHA256,
-                        DigestAlgorithm::SHA384 => &ring::digest::SHA384,
-                        DigestAlgorithm::SHA512 => &ring::digest::SHA512,
-                    };
+                .map(|item| {
+                    let issuer_signed_item_bytes = serde_cbor::to_vec(item)?;
                     let digest = ring::digest::digest(ring_alg, &issuer_signed_item_bytes);
-                    return Ok((digest_id, digest.as_ref().to_vec().into()));
+                    return Ok((
+                        item.as_ref().digest_id.clone(),
+                        digest.as_ref().to_vec().into(),
+                    ));
                 })
                 .collect()
         }
@@ -225,6 +278,22 @@ impl Mdoc {
                 Ok((name.clone(), digest_namespace(elements, digest_algorithm)?))
             })
             .collect()
+    }
+}
+
+impl KeyAuthorizations {
+    pub fn is_valid(&self) -> bool {
+        if let Some(ns) = &self.namespaces {
+            ns.iter().all(|namespace| {
+                if let Some(ds) = &self.data_elements {
+                    ds.get(namespace).is_none()
+                } else {
+                    true
+                }
+            })
+        } else {
+            true
+        }
     }
 }
 
