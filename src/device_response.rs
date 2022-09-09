@@ -44,12 +44,31 @@ pub struct DeviceNamespaces {
 pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(untagged, rename_all = "camelCase")]
+#[serde(untagged)]
 pub enum DeviceAuth {
+    #[serde(rename_all = "camelCase")]
     Signature { device_signature: CoseSign1 },
-    // TBD: Mac { device_mac: CoseMac0 },
+    /// TODO: Implement CoseMac0
+    #[serde(rename_all = "camelCase")]
+    Mac { device_mac: CborValue },
 }
 
 pub type Errors = NonEmptyMap<String, NonEmptyMap<String, i128>>;
 
 pub type DocumentErrors = NonEmptyVec<HashMap<String, i128>>;
+
+#[cfg(test)]
+mod test {
+    use super::DeviceResponse;
+    use hex::FromHex;
+
+    static DEVICE_RESPONSE_CBOR: &str = include_str!("../test/device_response.cbor");
+
+    #[test]
+    fn serde_device_response() {
+        let cbor_bytes = <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");
+        let response: DeviceResponse = serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as a DeviceResponse");
+        let roundtripped_bytes = serde_cbor::to_vec(&response).expect("unable to encode DeviceResponse as cbor bytes");
+        assert_eq!(cbor_bytes, roundtripped_bytes, "original cbor and re-serialized DeviceResponse do not match");
+    }
+}

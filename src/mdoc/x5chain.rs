@@ -99,9 +99,9 @@ impl Builder {
     }
     pub fn build(self) -> Result<X5Chain> {
         let mut iter = self.certs.iter();
-        let mut first: &X509 = iter.next().ok_or(anyhow!(
-            "at least one certificate must be given to the builder"
-        ))?;
+        let mut first: &X509 = iter
+            .next()
+            .ok_or_else(|| anyhow!("at least one certificate must be given to the builder"))?;
         for (current_subject, second) in (0_u8..).zip(iter) {
             if second.issued(first) != X509VerifyResult::OK {
                 return Err(anyhow!(
@@ -122,14 +122,14 @@ pub mod tests {
 
     #[test]
     pub fn test_get_signing_algorithm() {
-        static IGCA_PEM: &str = "./test.pem";
-        let x5chain = std::fs::read(IGCA_PEM).expect("Could not read file");
-        let x5chain_copy = x5chain.clone();
-        let x5chain_string = match std::str::from_utf8(&x5chain_copy) {
-            Ok(v) => v,
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-        };
-        let issuerx5chain = X5Chain::from(vec![x5chain]);
+        //static IGCA_PEM: &str = "./test.pem";
+        //let x5chain = std::fs::read(IGCA_PEM).expect("Could not read file");
+        //let x5chain_copy = x5chain.clone();
+        //let x5chain_string = match std::str::from_utf8(&x5chain_copy) {
+        //    Ok(v) => v,
+        //    Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        //};
+        //let issuerx5chain = X5Chain::from(vec![x5chain]);
         todo!()
     }
 }

@@ -27,3 +27,6 @@ der = { version = "0.6.0", features = ["pem"] }
 ring = "0.16.20"
 rand = "0.8.5"
 thiserror = "1.0.33"
+
+[dev-dependencies]
+hex = "0.4.3"

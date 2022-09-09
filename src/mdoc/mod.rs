@@ -264,10 +264,7 @@ impl Mdoc {
                 .map(|item| {
                     let issuer_signed_item_bytes = serde_cbor::to_vec(item)?;
                     let digest = ring::digest::digest(ring_alg, &issuer_signed_item_bytes);
-                    return Ok((
-                        item.as_ref().digest_id,
-                        digest.as_ref().to_vec().into(),
-                    ));
+                    return Ok((item.as_ref().digest_id, digest.as_ref().to_vec().into()));
                 })
                 .collect()
         }
