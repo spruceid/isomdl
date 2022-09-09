@@ -76,34 +76,33 @@ impl Builder {
     pub fn with_pem(mut self, s: &str) -> Result<Builder> {
         let cert: X509 = X509::from_pem(s.as_bytes())?;
         self.certs.push(cert);
-        return Ok(self);
+        Ok(self)
     }
     pub fn with_der(mut self, s: &str) -> Result<Builder> {
         let cert: X509 = X509::from_der(s.as_bytes())?;
         self.certs.push(cert);
-        return Ok(self);
+        Ok(self)
     }
     pub fn with_pem_from_file(mut self, mut f: File) -> Result<Builder> {
         let mut bytes_vec: Vec<u8> = vec![];
         f.read_to_end(&mut bytes_vec)?;
         let cert: X509 = X509::from_pem(bytes_vec.as_ref())?;
         self.certs.push(cert);
-        return Ok(self);
+        Ok(self)
     }
     pub fn with_der_from_file(mut self, mut f: File) -> Result<Builder> {
         let mut bytes_vec: Vec<u8> = vec![];
         f.read_to_end(&mut bytes_vec)?;
         let cert: X509 = X509::from_der(bytes_vec.as_ref())?;
         self.certs.push(cert);
-        return Ok(self);
+        Ok(self)
     }
     pub fn build(self) -> Result<X5Chain> {
         let mut iter = self.certs.iter();
         let mut first: &X509 = iter.next().ok_or(anyhow!(
             "at least one certificate must be given to the builder"
         ))?;
-        let mut current_subject: u8 = 0;
-        for second in iter {
+        for (current_subject, second) in (0_u8..).zip(iter) {
             if second.issued(first) != X509VerifyResult::OK {
                 return Err(anyhow!(
                     "x5chain invalid: certificate {} did not issue certificate {}",
@@ -112,7 +111,6 @@ impl Builder {
                 ));
             }
             first = second;
-            current_subject += 1;
         }
         Ok(self.certs.into())
     }
@@ -120,9 +118,7 @@ impl Builder {
 
 #[cfg(test)]
 pub mod tests {
-
-    use crate::x5chain::Builder;
-    use crate::x5chain::X5Chain;
+    use super::*;
 
     #[test]
     pub fn test_get_signing_algorithm() {

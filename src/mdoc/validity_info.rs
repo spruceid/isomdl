@@ -96,7 +96,7 @@ impl TryFrom<Value> for ValidityInfo {
 fn cbor_to_datetime(v: Value) -> Result<DateTime<Utc>> {
     if let Value::Tag(0, inner) = v {
         if let Value::Text(date_str) = inner.as_ref() {
-            DateTime::parse_from_rfc3339(&date_str)
+            DateTime::parse_from_rfc3339(date_str)
                 .map(Into::into)
                 .map_err(Error::UnableToParseDate)
         } else {
