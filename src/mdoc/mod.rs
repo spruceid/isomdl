@@ -317,3 +317,25 @@ impl KeyAuthorizations {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::IssuerSigned;
+    use hex::FromHex;
+
+    static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/issuer_signed.cbor");
+
+    #[test]
+    fn serde_issuer_signed() {
+        let cbor_bytes =
+            <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
+        let signed: IssuerSigned =
+            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
+        let roundtripped_bytes =
+            serde_cbor::to_vec(&signed).expect("unable to encode IssuerSigned as cbor bytes");
+        assert_eq!(
+            cbor_bytes, roundtripped_bytes,
+            "original cbor and re-serialized IssuerSigned do not match"
+        );
+    }
+}
