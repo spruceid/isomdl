@@ -66,9 +66,15 @@ mod test {
 
     #[test]
     fn serde_device_response() {
-        let cbor_bytes = <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");
-        let response: DeviceResponse = serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as a DeviceResponse");
-        let roundtripped_bytes = serde_cbor::to_vec(&response).expect("unable to encode DeviceResponse as cbor bytes");
-        assert_eq!(cbor_bytes, roundtripped_bytes, "original cbor and re-serialized DeviceResponse do not match");
+        let cbor_bytes =
+            <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");
+        let response: DeviceResponse =
+            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as a DeviceResponse");
+        let roundtripped_bytes =
+            serde_cbor::to_vec(&response).expect("unable to encode DeviceResponse as cbor bytes");
+        assert_eq!(
+            cbor_bytes, roundtripped_bytes,
+            "original cbor and re-serialized DeviceResponse do not match"
+        );
     }
 }

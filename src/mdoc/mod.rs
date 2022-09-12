@@ -207,16 +207,10 @@ impl Mdoc {
         fn to_issuer_signed_items(
             elements: HashMap<String, CborValue>,
         ) -> impl Iterator<Item = IssuerSignedItem> {
-            let mut used_ids: HashSet<u64> = HashSet::new();
+            let mut used_ids = HashSet::new();
             elements.into_iter().map(move |(key, value)| {
-                let mut digest_id;
-                loop {
-                    digest_id = rand::thread_rng().gen();
-                    if used_ids.insert(digest_id) {
-                        break;
-                    }
-                }
-                let random: ByteStr = Vec::from(rand::thread_rng().gen::<[u8; 16]>()).into();
+                let digest_id = generate_digest_id(&mut used_ids);
+                let random = Vec::from(rand::thread_rng().gen::<[u8; 16]>()).into();
                 IssuerSignedItem {
                     digest_id,
                     random,
@@ -259,12 +253,31 @@ impl Mdoc {
                 DigestAlgorithm::SHA384 => &ring::digest::SHA384,
                 DigestAlgorithm::SHA512 => &ring::digest::SHA512,
             };
+            let mut used_ids = elements
+                .iter()
+                .map(|item| item.as_ref().digest_id)
+                .collect();
+
+            // Generate X random digests to avoid leaking information.
+            let random_ids = std::iter::repeat_with(|| generate_digest_id(&mut used_ids));
+            let random_bytes = std::iter::repeat_with(|| {
+                std::iter::repeat_with(|| rand::thread_rng().gen::<u8>())
+                    .take(512)
+                    .collect()
+            });
+            let random_digests = random_ids
+                .zip(random_bytes)
+                .map(Result::<_, anyhow::Error>::Ok)
+                .take(rand::thread_rng().gen_range(5..10));
+
             elements
                 .iter()
-                .map(|item| {
-                    let issuer_signed_item_bytes = serde_cbor::to_vec(item)?;
-                    let digest = ring::digest::digest(ring_alg, &issuer_signed_item_bytes);
-                    return Ok((item.as_ref().digest_id, digest.as_ref().to_vec().into()));
+                .map(|item| Ok((item.as_ref().digest_id, serde_cbor::to_vec(item)?)))
+                .chain(random_digests)
+                .map(|result| {
+                    let (digest_id, bytes) = result?;
+                    let digest = ring::digest::digest(ring_alg, &bytes);
+                    return Ok((digest_id, digest.as_ref().to_vec().into()));
                 })
                 .collect()
         }
@@ -276,6 +289,17 @@ impl Mdoc {
             })
             .collect()
     }
+}
+
+fn generate_digest_id(used_ids: &mut HashSet<u64>) -> u64 {
+    let mut digest_id;
+    loop {
+        digest_id = rand::thread_rng().gen();
+        if used_ids.insert(digest_id) {
+            break;
+        }
+    }
+    digest_id
 }
 
 impl KeyAuthorizations {
