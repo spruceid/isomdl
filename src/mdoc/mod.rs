@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::{HashMap, HashSet};
 
-mod bytestr;
+pub mod bytestr;
 mod cose_key;
 mod non_empty_map;
 mod non_empty_vec;
