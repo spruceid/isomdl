@@ -50,9 +50,9 @@ impl X5Chain {
                 .curve_name()
                 .ok_or_else(|| anyhow!("no curve name found on first X509 cert in chain"))?
             {
-                openssl::nid::Nid::ECDSA_WITH_SHA256 => SignatureAlgorithm::ES256,
-                openssl::nid::Nid::ECDSA_WITH_SHA384 => SignatureAlgorithm::ES384,
-                openssl::nid::Nid::ECDSA_WITH_SHA512 => SignatureAlgorithm::ES512,
+                openssl::nid::Nid::X9_62_PRIME256V1 => SignatureAlgorithm::ES256,
+                openssl::nid::Nid::SECP384R1 => SignatureAlgorithm::ES384,
+                openssl::nid::Nid::SECP521R1 => SignatureAlgorithm::ES512,
                 nid => {
                     if let Ok(name) = nid.long_name() {
                         Err(anyhow!("unsupported algorithm: {}", name))?
@@ -73,13 +73,13 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn with_pem(mut self, s: &str) -> Result<Builder> {
-        let cert: X509 = X509::from_pem(s.as_bytes())?;
+    pub fn with_pem(mut self, s: &[u8]) -> Result<Builder> {
+        let cert: X509 = X509::from_pem(s)?;
         self.certs.push(cert);
         Ok(self)
     }
-    pub fn with_der(mut self, s: &str) -> Result<Builder> {
-        let cert: X509 = X509::from_der(s.as_bytes())?;
+    pub fn with_der(mut self, s: &[u8]) -> Result<Builder> {
+        let cert: X509 = X509::from_der(s)?;
         self.certs.push(cert);
         Ok(self)
     }
@@ -103,7 +103,16 @@ impl Builder {
             .next()
             .ok_or_else(|| anyhow!("at least one certificate must be given to the builder"))?;
         for (current_subject, second) in (0_u8..).zip(iter) {
-            if second.issued(first) != X509VerifyResult::OK {
+            if second.issued(first) != X509VerifyResult::OK
+                || !second
+                    .verify(
+                        first
+                            .public_key()
+                            .map_err(|e| anyhow!("unable to get public key of certificate: {}", e))?
+                            .as_ref(),
+                    )
+                    .map_err(|e| anyhow!("unable to verify signature of certificate: {}", e))?
+            {
                 return Err(anyhow!(
                     "x5chain invalid: certificate {} did not issue certificate {}",
                     current_subject + 1,
@@ -117,19 +126,94 @@ impl Builder {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub mod test {
     use super::*;
 
+    static CERT_256: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
+    static CERT_384: &[u8] = include_bytes!("../../test/issuance/384-cert.pem");
+    static CERT_521: &[u8] = include_bytes!("../../test/issuance/521-cert.pem");
+
     #[test]
-    pub fn test_get_signing_algorithm() {
-        //static IGCA_PEM: &str = "./test.pem";
-        //let x5chain = std::fs::read(IGCA_PEM).expect("Could not read file");
-        //let x5chain_copy = x5chain.clone();
-        //let x5chain_string = match std::str::from_utf8(&x5chain_copy) {
-        //    Ok(v) => v,
-        //    Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-        //};
-        //let issuerx5chain = X5Chain::from(vec![x5chain]);
-        todo!()
+    pub fn self_signed_es256() {
+        let x5chain = X5Chain::builder()
+            .with_pem(CERT_256)
+            .expect("unable to add cert")
+            .build()
+            .expect("unable to build x5chain");
+
+        let self_signed = &x5chain[0];
+
+        assert!(self_signed.issued(self_signed) == X509VerifyResult::OK);
+        assert!(self_signed
+            .verify(
+                &self_signed
+                    .public_key()
+                    .expect("unable to get public key of cert")
+            )
+            .expect("unable to verify public key of cert"));
+
+        assert!(match x5chain
+            .key_algorithm()
+            .expect("unable to retrieve public key algorithm")
+        {
+            SignatureAlgorithm::ES256 => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    pub fn self_signed_es384() {
+        let x5chain = X5Chain::builder()
+            .with_pem(CERT_384)
+            .expect("unable to add cert")
+            .build()
+            .expect("unable to build x5chain");
+
+        let self_signed = &x5chain[0];
+
+        assert!(self_signed.issued(self_signed) == X509VerifyResult::OK);
+        assert!(self_signed
+            .verify(
+                &self_signed
+                    .public_key()
+                    .expect("unable to get public key of cert")
+            )
+            .expect("unable to verify public key of cert"));
+
+        assert!(match x5chain
+            .key_algorithm()
+            .expect("unable to retrieve public key algorithm")
+        {
+            SignatureAlgorithm::ES384 => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    pub fn self_signed_es512() {
+        let x5chain = X5Chain::builder()
+            .with_pem(CERT_521)
+            .expect("unable to add cert")
+            .build()
+            .expect("unable to build x5chain");
+
+        let self_signed = &x5chain[0];
+
+        assert!(self_signed.issued(self_signed) == X509VerifyResult::OK);
+        assert!(self_signed
+            .verify(
+                &self_signed
+                    .public_key()
+                    .expect("unable to get public key of cert")
+            )
+            .expect("unable to verify public key of cert"));
+
+        assert!(match x5chain
+            .key_algorithm()
+            .expect("unable to retrieve public key algorithm")
+        {
+            SignatureAlgorithm::ES512 => true,
+            _ => false,
+        });
     }
 }

@@ -129,6 +129,7 @@ impl MdocPreparation {
             .map_err(|error| anyhow!("error getting signer parameters: {error}"))?
             .0;
 
+        // Should/can we assert that the signer is the key identified by the x5chain?
         match (x5chain.key_algorithm()?, signer_algorithm) {
             (SignatureAlgorithm::ES256, SignatureAlgorithm::ES256) => (),
             (SignatureAlgorithm::ES384, SignatureAlgorithm::ES384) => (),
@@ -201,6 +202,26 @@ impl Mdoc {
         };
 
         Ok(preparation_mdoc)
+    }
+
+    pub fn issue<T: SigningPrivateKey + SigningPublicKey>(
+        doc_type: String,
+        namespaces: Namespaces,
+        x5chain: X5Chain,
+        validity_info: ValidityInfo,
+        digest_algorithm: DigestAlgorithm,
+        device_key_info: DeviceKeyInfo,
+        signer: T,
+    ) -> Result<Mdoc> {
+        Self::prepare_mdoc(
+            doc_type,
+            namespaces,
+            x5chain,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+        )?
+        .complete(signer)
     }
 
     pub fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
@@ -320,10 +341,67 @@ impl KeyAuthorizations {
 
 #[cfg(test)]
 mod test {
-    use super::IssuerSigned;
+    use super::*;
     use hex::FromHex;
 
     static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/issuer_signed.cbor");
+
+    static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
+    static ISSUER_KEY: &[u8] = include_bytes!("../../test/issuance/256-key.pem");
+    static COSE_KEY: &str = include_str!("../../test/cose_key/ec_p256.cbor");
+
+    #[test]
+    fn issue_minimal_mdoc() {
+        let doc_type = String::from("org.iso.18013.5.1.mDL");
+
+        let mdl_namespace = String::from("org.iso.18013.5.1");
+        let key = String::from("family_name");
+        let value = String::from("Smith").into();
+        let mdl_elements = [(key, value)].into_iter().collect();
+        let namespaces = [(mdl_namespace.clone(), mdl_elements)]
+            .into_iter()
+            .collect();
+
+        let x5chain = X5Chain::builder()
+            .with_pem(ISSUER_CERT)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let validity_info = ValidityInfo {
+            signed: Default::default(),
+            valid_from: Default::default(),
+            valid_until: Default::default(),
+            expected_update: None,
+        };
+
+        let digest_algorithm = DigestAlgorithm::SHA256;
+
+        let device_key_bytes =
+            <Vec<u8>>::from_hex(COSE_KEY).expect("unable to convert cbor hex to bytes");
+        let device_key = serde_cbor::from_slice(&device_key_bytes).unwrap();
+        let device_key_info = DeviceKeyInfo {
+            device_key,
+            key_authorizations: Some(KeyAuthorizations {
+                namespaces: Some(NonEmptyVec::new(mdl_namespace)),
+                data_elements: None,
+            }),
+            key_info: None,
+        };
+
+        let signer = openssl::pkey::PKey::private_key_from_pem(ISSUER_KEY).unwrap();
+
+        Mdoc::issue(
+            doc_type,
+            namespaces,
+            x5chain,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+            signer,
+        )
+        .expect("failed to issue mdoc");
+    }
 
     #[test]
     fn serde_issuer_signed() {

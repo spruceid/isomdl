@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "Value", into = "Value")]
 pub struct ValidityInfo {
-    signed: DateTime<Utc>,
-    valid_from: DateTime<Utc>,
-    valid_until: DateTime<Utc>,
-    expected_update: Option<DateTime<Utc>>,
+    pub signed: DateTime<Utc>,
+    pub valid_from: DateTime<Utc>,
+    pub valid_until: DateTime<Utc>,
+    pub expected_update: Option<DateTime<Utc>>,
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;

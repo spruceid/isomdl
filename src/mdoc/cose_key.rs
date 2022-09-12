@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
 /// restricted to the requirements of ISO/IEC 18013-5:2021.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "Value", into = "Value")]
 pub enum CoseKey {
     EC2 { crv: EC2Curve, x: Vec<u8>, y: EC2Y },
@@ -12,14 +12,14 @@ pub enum CoseKey {
 }
 
 /// The sign bit or value of the y-coordinate for the EC point.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EC2Y {
     Value(Vec<u8>),
     SignBit(bool),
 }
 
 /// The RFC-8152 identifier of the curve, for EC2 key type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EC2Curve {
     P256,
     P384,
@@ -29,7 +29,7 @@ pub enum EC2Curve {
 }
 
 /// The RFC-8152 identifier of the curve, for OKP key type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OKPCurve {
     X25519,
     X448,
@@ -175,5 +175,28 @@ impl TryFrom<i128> for OKPCurve {
             7 => Ok(OKPCurve::Ed448),
             _ => Err(Error::UnsupportedCurve),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use hex::FromHex;
+
+    static EC_P256: &str = include_str!("../../test/cose_key/ec_p256.cbor");
+
+    #[test]
+    fn ec_p256() {
+        let key_bytes = <Vec<u8>>::from_hex(EC_P256).expect("unable to convert cbor hex to bytes");
+        let key = serde_cbor::from_slice(&key_bytes).unwrap();
+        match &key {
+            CoseKey::EC2 { crv, .. } => assert_eq!(crv, &EC2Curve::P256),
+            _ => panic!("expected an EC2 cose key"),
+        };
+        assert_eq!(
+            serde_cbor::to_vec(&key).unwrap(),
+            key_bytes,
+            "cbor encoding roundtrip failed"
+        );
     }
 }

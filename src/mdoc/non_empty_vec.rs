@@ -11,6 +11,12 @@ pub enum Error {
     Empty,
 }
 
+impl<T: Clone> NonEmptyVec<T> {
+    pub fn new(t: T) -> Self {
+        Self(vec![t])
+    }
+}
+
 impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {
     type Error = Error;
 
