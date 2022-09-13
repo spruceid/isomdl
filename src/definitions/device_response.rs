@@ -1,16 +1,17 @@
-use crate::mdoc::{IssuerSigned, NonEmptyMap, NonEmptyVec, Tag24};
-use aws_nitro_enclaves_cose::CoseSign1;
+use crate::definitions::{
+    helpers::{NonEmptyMap, NonEmptyVec},
+    DeviceSigned, IssuerSigned,
+};
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceResponse {
     version: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     documents: Option<Documents>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     document_errors: Option<DocumentErrors>,
     status: u64,
 }
@@ -23,34 +24,8 @@ pub struct Document {
     doc_type: String,
     issuer_signed: IssuerSigned,
     device_signed: DeviceSigned,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     errors: Option<Errors>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceSigned {
-    #[serde(rename = "nameSpaces")]
-    namespaces: Tag24<DeviceNamespaces>,
-    device_auth: DeviceAuth,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DeviceNamespaces {
-    #[serde(flatten)]
-    namespaces: HashMap<String, DeviceSignedItems>,
-}
-
-pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum DeviceAuth {
-    #[serde(rename_all = "camelCase")]
-    Signature { device_signature: CoseSign1 },
-    /// TODO: Implement CoseMac0
-    #[serde(rename_all = "camelCase")]
-    Mac { device_mac: CborValue },
 }
 
 pub type Errors = NonEmptyMap<String, NonEmptyMap<String, i128>>;
@@ -62,7 +37,7 @@ mod test {
     use super::DeviceResponse;
     use hex::FromHex;
 
-    static DEVICE_RESPONSE_CBOR: &str = include_str!("../test/device_response.cbor");
+    static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
 
     #[test]
     fn serde_device_response() {
