@@ -1,2 +1,3 @@
-pub mod device_response;
-pub mod mdoc;
+pub mod definitions;
+pub mod issuance;
+pub mod presentation;

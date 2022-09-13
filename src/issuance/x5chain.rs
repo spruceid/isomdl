@@ -4,6 +4,9 @@ use openssl::x509::{X509Ref, X509VerifyResult, X509};
 use serde_cbor::Value as CborValue;
 use std::{fs::File, io::Read};
 
+// Temporarily registered, possibly subject to change.
+pub const X5CHAIN_HEADER_LABEL: i128 = 33;
+
 #[derive(Debug, Clone)]
 pub struct X5Chain(Vec<X509>);
 

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value;
+use serde_cbor::Value as CborValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "Value", into = "Value")]
+#[serde(try_from = "CborValue", into = "CborValue")]
 pub struct ByteStr(Vec<u8>);
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -10,7 +10,7 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Expected to parse a CBOR byte string, received: '{0:?}'")]
-    NotAByteString(Value),
+    NotAByteString(CborValue),
 }
 
 impl From<Vec<u8>> for ByteStr {
@@ -31,17 +31,17 @@ impl AsRef<[u8]> for ByteStr {
     }
 }
 
-impl From<ByteStr> for Value {
-    fn from(ByteStr(bytes): ByteStr) -> Value {
-        Value::Bytes(bytes)
+impl From<ByteStr> for CborValue {
+    fn from(ByteStr(bytes): ByteStr) -> CborValue {
+        CborValue::Bytes(bytes)
     }
 }
 
-impl TryFrom<Value> for ByteStr {
+impl TryFrom<CborValue> for ByteStr {
     type Error = Error;
 
-    fn try_from(v: Value) -> Result<ByteStr> {
-        if let Value::Bytes(bytes) = v {
+    fn try_from(v: CborValue) -> Result<ByteStr> {
+        if let CborValue::Bytes(bytes) = v {
             Ok(ByteStr(bytes))
         } else {
             Err(Error::NotAByteString(v))
