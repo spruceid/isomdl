@@ -1,8 +1,11 @@
 use crate::{
     definitions::{
+        device_key::Error as KeyAuthError,
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
-        DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, ValidityInfo,
+        validity_info::{Builder as ValidityInfoBuilder, BuilderError as ValidityBuilderError},
+        CoseKey, DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem,
+        KeyAuthorizations, Mso, ValidityInfo,
     },
     issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
@@ -12,9 +15,10 @@ use aws_nitro_enclaves_cose::{
     header_map::HeaderMap,
     CoseSign1,
 };
+use chrono::{DateTime, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
+use serde_cbor::{Error as CborError, Value as CborValue};
 use std::collections::{HashMap, HashSet};
 
 pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
@@ -33,18 +37,55 @@ pub struct MdocPreparation {
     doc_type: String,
     namespaces: IssuerNamespaces,
     mso: Mso,
-    x5chain: X5Chain,
+}
+
+#[derive(Debug, Default)]
+pub struct Builder {
+    device_key: Option<CoseKey>,
+    doc_type: Option<String>,
+    digest_algorithm: Option<DigestAlgorithm>,
+    key_auth: KeyAuthorizations,
+    key_info: HashMap<i128, CborValue>,
+    namespaces: Namespaces,
+    validity_info: ValidityInfoBuilder,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PreparationError {
+    #[error("missing required parameter: device_key")]
+    DeviceKey,
+    #[error("missing required parameter: digest_algorithm")]
+    DigestAlgorithm,
+    #[error("missing required parameter: doc_type")]
+    DocType,
+    #[error("integer supplied for label is in the range of values that are reserved for future use (RFU)")]
+    LabelRFU,
+    #[error("at least one data element is required in each namespace")]
+    EmptyNamespace,
+    #[error("at least one namespace of data elements is required")]
+    NoNamespaces,
+    #[error("{0}")]
+    Other(String),
+    #[error("unable to encode the value as cbor: {0}")]
+    Cbor(#[from] CborError),
+    #[error(transparent)]
+    KeyAuth(#[from] KeyAuthError),
+    #[error(transparent)]
+    ValidityBuilder(#[from] ValidityBuilderError),
 }
 
 impl Mdoc {
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
+
     pub fn prepare_mdoc(
         doc_type: String,
         namespaces: Namespaces,
-        x5chain: X5Chain,
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
-    ) -> Result<MdocPreparation> {
+    ) -> Result<MdocPreparation, PreparationError> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
             authorizations.validate()?;
         }
@@ -65,7 +106,6 @@ impl Mdoc {
             doc_type,
             namespaces: issuer_namespaces,
             mso,
-            x5chain,
         };
 
         Ok(preparation_mdoc)
@@ -74,31 +114,33 @@ impl Mdoc {
     pub fn issue<T: SigningPrivateKey + SigningPublicKey>(
         doc_type: String,
         namespaces: Namespaces,
-        x5chain: X5Chain,
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
+        x5chain: X5Chain,
         signer: T,
     ) -> Result<Mdoc> {
         Self::prepare_mdoc(
             doc_type,
             namespaces,
-            x5chain,
             validity_info,
             digest_algorithm,
             device_key_info,
         )?
-        .complete(signer)
+        .complete(signer, x5chain)
     }
 }
 
 impl MdocPreparation {
-    pub fn complete<T: SigningPrivateKey + SigningPublicKey>(self, signer: T) -> Result<Mdoc> {
+    pub fn complete<T: SigningPrivateKey + SigningPublicKey>(
+        self,
+        signer: T,
+        x5chain: X5Chain,
+    ) -> Result<Mdoc> {
         let MdocPreparation {
             doc_type,
             namespaces,
             mso,
-            x5chain,
         } = self;
 
         let signer_algorithm = signer
@@ -120,7 +162,7 @@ impl MdocPreparation {
         // encode mso to cbor
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(mso)?)?;
 
-        //headermap should contain alg header and x5chain header
+        // headermap should contain alg header and x5chain header
         let protected_headers: HeaderMap = signer_algorithm.into();
 
         let mut unprotected_headers = HeaderMap::new();
@@ -147,24 +189,23 @@ impl MdocPreparation {
     }
 }
 
-fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
+fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces, PreparationError> {
     namespaces
         .into_iter()
         .map(|(name, elements)| {
             to_issuer_signed_items(elements)
                 .map(Tag24::new)
                 .collect::<Result<Vec<Tag24<IssuerSignedItem>>, _>>()
-                .map_err(|err| anyhow!("unable to encode IssuerSignedItem as cbor: {}", err))
+                .map_err(|err| format!("unable to encode IssuerSignedItem as cbor: {}", err))
+                .map_err(PreparationError::Other)
                 .and_then(|items| {
-                    NonEmptyVec::try_from(items)
-                        .map_err(|_| anyhow!("at least one element required in each namespace"))
+                    NonEmptyVec::try_from(items).map_err(|_| PreparationError::EmptyNamespace)
                 })
                 .map(|elems| (name, elems))
         })
-        .collect::<Result<HashMap<String, NonEmptyVec<Tag24<IssuerSignedItem>>>>>()
+        .collect::<Result<HashMap<_, _>, _>>()
         .and_then(|namespaces| {
-            NonEmptyMap::try_from(namespaces)
-                .map_err(|_| anyhow!("at least one namespace required"))
+            NonEmptyMap::try_from(namespaces).map_err(|_| PreparationError::NoNamespaces)
         })
 }
 
@@ -187,7 +228,7 @@ fn to_issuer_signed_items(
 fn digest_namespaces(
     namespaces: &IssuerNamespaces,
     digest_algorithm: DigestAlgorithm,
-) -> Result<HashMap<String, DigestIds>> {
+) -> Result<HashMap<String, DigestIds>, PreparationError> {
     namespaces
         .iter()
         .map(|(name, elements)| Ok((name.clone(), digest_namespace(elements, digest_algorithm)?)))
@@ -197,7 +238,7 @@ fn digest_namespaces(
 fn digest_namespace(
     elements: &[IssuerSignedItemBytes],
     digest_algorithm: DigestAlgorithm,
-) -> Result<DigestIds> {
+) -> Result<DigestIds, PreparationError> {
     let ring_alg = match digest_algorithm {
         DigestAlgorithm::SHA256 => &ring::digest::SHA256,
         DigestAlgorithm::SHA384 => &ring::digest::SHA384,
@@ -217,7 +258,7 @@ fn digest_namespace(
     });
     let random_digests = random_ids
         .zip(random_bytes)
-        .map(Result::<_, anyhow::Error>::Ok)
+        .map(Result::<_, PreparationError>::Ok)
         .take(rand::thread_rng().gen_range(5..10));
 
     elements
@@ -243,10 +284,151 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
     digest_id
 }
 
+impl Builder {
+    /// Timestamp that the mdoc will be signed at.
+    pub fn signed_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.validity_info = self.validity_info.signed_at(dt);
+        self
+    }
+
+    /// Timestamp that the mdoc will be valid from.
+    pub fn valid_from(mut self, dt: DateTime<Utc>) -> Self {
+        self.validity_info = self.validity_info.valid_from(dt);
+        self
+    }
+
+    /// Timestamp that the mdoc will be valid until.
+    pub fn valid_until(mut self, dt: DateTime<Utc>) -> Self {
+        self.validity_info = self.validity_info.valid_until(dt);
+        self
+    }
+
+    /// Timestamp at which the issuing authority expects to re-sign the MSO.
+    pub fn expected_update_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.validity_info = self.validity_info.expected_update_at(dt);
+        self
+    }
+
+    /// COSE_Key that the mdoc will use for authentication.
+    pub fn with_device_key(mut self, device_key: CoseKey) -> Self {
+        self.device_key = Some(device_key);
+        self
+    }
+
+    /// Document type, for example `"org.iso.18013.5.1.mDL".`.
+    pub fn with_doc_type(mut self, doc_type: String) -> Self {
+        self.doc_type = Some(doc_type);
+        self
+    }
+
+    /// Algorithm used to create element digests.
+    pub fn with_digest_algorithm(mut self, digest_algorithm: DigestAlgorithm) -> Self {
+        self.digest_algorithm = Some(digest_algorithm);
+        self
+    }
+
+    /// Additional information about the device key.
+    ///
+    /// # Errors
+    /// Positive integers are RFU for the label, therefore this function will error if a positive
+    /// label is received.
+    pub fn with_additional_device_key_info(
+        mut self,
+        label: i128,
+        value: CborValue,
+    ) -> Result<Self, PreparationError> {
+        if label >= 0 {
+            return Err(PreparationError::LabelRFU);
+        }
+        self.key_info.insert(label, value);
+        Ok(self)
+    }
+
+    /// Data elements to be issued under the supplied namespace.
+    ///
+    /// Data elements are not merged, therefore if there are existing data elements for the
+    /// supplied namespace, then they will be replaced with the incoming elements.
+    pub fn with_namespace(
+        mut self,
+        namespace: String,
+        data_elements: HashMap<String, CborValue>,
+    ) -> Self {
+        self.namespaces.insert(namespace, data_elements);
+        self
+    }
+
+    /// Authorize the device key to calculate a signature or MAC over all data elements in a
+    /// namespace.
+    pub fn authorize_namespace(mut self, namespace: String) -> Self {
+        if let Some(namespaces) = self.key_auth.namespaces.as_mut() {
+            namespaces.push(namespace);
+        } else {
+            self.key_auth.namespaces = Some(NonEmptyVec::new(namespace));
+        }
+        self
+    }
+
+    /// Authorize the device key to calculate a signature or MAC over a particular data element.
+    pub fn authorize_element(mut self, namespace: String, element: String) -> Self {
+        if let Some(namespaces) = self.key_auth.data_elements.as_mut() {
+            if let Some(elements) = namespaces.get_mut(&namespace) {
+                elements.push(element)
+            }
+        } else {
+            self.key_auth.data_elements =
+                Some(NonEmptyMap::new(namespace, NonEmptyVec::new(element)));
+        }
+        self
+    }
+
+    pub fn prepare(self) -> Result<MdocPreparation, PreparationError> {
+        let doc_type = self.doc_type.ok_or(PreparationError::DocType)?;
+
+        let validity_info = self.validity_info.build()?;
+
+        let digest_algorithm = self
+            .digest_algorithm
+            .ok_or(PreparationError::DigestAlgorithm)?;
+
+        let device_key = self.device_key.ok_or(PreparationError::DeviceKey)?;
+        self.key_auth.validate()?;
+        let key_authorizations = if self.key_auth.is_empty() {
+            None
+        } else {
+            Some(self.key_auth)
+        };
+        let key_info = if self.key_info.is_empty() {
+            None
+        } else {
+            Some(self.key_info)
+        };
+        let device_key_info = DeviceKeyInfo {
+            device_key,
+            key_authorizations,
+            key_info,
+        };
+
+        Mdoc::prepare_mdoc(
+            doc_type,
+            self.namespaces,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+        )
+    }
+
+    pub fn issue<S: SigningPublicKey + SigningPrivateKey>(
+        self,
+        signer: S,
+        x5chain: X5Chain,
+    ) -> Result<Mdoc> {
+        self.prepare()?.complete(signer, x5chain)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::definitions::KeyAuthorizations;
     use hex::FromHex;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
@@ -258,12 +440,18 @@ mod test {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
 
         let mdl_namespace = String::from("org.iso.18013.5.1");
-        let key = String::from("family_name");
-        let value = String::from("Smith").into();
-        let mdl_elements = [(key, value)].into_iter().collect();
-        let namespaces = [(mdl_namespace.clone(), mdl_elements)]
+        let mdl_elements = [("family_name".into(), "Smith".to_string().into())]
             .into_iter()
             .collect();
+
+        let device_key_bytes =
+            <Vec<u8>>::from_hex(COSE_KEY).expect("unable to convert cbor hex to bytes");
+        let device_key = serde_cbor::from_slice(&device_key_bytes).unwrap();
+
+        let now = std::time::SystemTime::now();
+        let until = now + std::time::Duration::from_secs(3600);
+
+        let signer = openssl::pkey::PKey::private_key_from_pem(ISSUER_KEY).unwrap();
 
         let x5chain = X5Chain::builder()
             .with_pem(ISSUER_CERT)
@@ -271,38 +459,16 @@ mod test {
             .build()
             .unwrap();
 
-        let validity_info = ValidityInfo {
-            signed: Default::default(),
-            valid_from: Default::default(),
-            valid_until: Default::default(),
-            expected_update: None,
-        };
-
-        let digest_algorithm = DigestAlgorithm::SHA256;
-
-        let device_key_bytes =
-            <Vec<u8>>::from_hex(COSE_KEY).expect("unable to convert cbor hex to bytes");
-        let device_key = serde_cbor::from_slice(&device_key_bytes).unwrap();
-        let device_key_info = DeviceKeyInfo {
-            device_key,
-            key_authorizations: Some(KeyAuthorizations {
-                namespaces: Some(NonEmptyVec::new(mdl_namespace)),
-                data_elements: None,
-            }),
-            key_info: None,
-        };
-
-        let signer = openssl::pkey::PKey::private_key_from_pem(ISSUER_KEY).unwrap();
-
-        Mdoc::issue(
-            doc_type,
-            namespaces,
-            x5chain,
-            validity_info,
-            digest_algorithm,
-            device_key_info,
-            signer,
-        )
-        .expect("failed to issue mdoc");
+        Mdoc::builder()
+            .with_doc_type(doc_type)
+            .with_namespace(mdl_namespace.clone(), mdl_elements)
+            .with_digest_algorithm(DigestAlgorithm::SHA256)
+            .with_device_key(device_key)
+            .authorize_namespace(mdl_namespace)
+            .valid_from(now.clone().into())
+            .signed_at(now.into())
+            .valid_until(until.into())
+            .issue(signer, x5chain)
+            .expect("failed to issue mdoc");
     }
 }

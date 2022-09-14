@@ -1,3 +1,4 @@
+use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
 use aws_nitro_enclaves_cose::crypto::SignatureAlgorithm;
 use openssl::x509::{X509Ref, X509VerifyResult, X509};
@@ -8,22 +9,22 @@ use std::{fs::File, io::Read};
 pub const X5CHAIN_HEADER_LABEL: i128 = 33;
 
 #[derive(Debug, Clone)]
-pub struct X5Chain(Vec<X509>);
+pub struct X5Chain(NonEmptyVec<X509>);
 
-impl From<Vec<X509>> for X5Chain {
-    fn from(v: Vec<X509>) -> Self {
+impl From<NonEmptyVec<X509>> for X5Chain {
+    fn from(v: NonEmptyVec<X509>) -> Self {
         Self(v)
     }
 }
 
-impl AsRef<Vec<X509>> for X5Chain {
-    fn as_ref(&self) -> &Vec<X509> {
+impl AsRef<NonEmptyVec<X509>> for X5Chain {
+    fn as_ref(&self) -> &NonEmptyVec<X509> {
         &self.0
     }
 }
 
 impl std::ops::Deref for X5Chain {
-    type Target = Vec<X509>;
+    type Target = NonEmptyVec<X509>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -45,9 +46,8 @@ impl X5Chain {
     }
 
     pub fn key_algorithm(&self) -> Result<SignatureAlgorithm> {
-        // Safe to index into chain, as we know there is at least one element from Builder::build.
         Ok(
-            match X509Ref::public_key(&self[0])?
+            match X509Ref::public_key(self.first())?
                 .ec_key()?
                 .group()
                 .curve_name()
@@ -105,7 +105,7 @@ impl Builder {
         let mut first: &X509 = iter
             .next()
             .ok_or_else(|| anyhow!("at least one certificate must be given to the builder"))?;
-        for (current_subject, second) in (0_u8..).zip(iter) {
+        for (current_index, second) in (0_u8..).zip(iter) {
             if second.issued(first) != X509VerifyResult::OK
                 || !second
                     .verify(
@@ -118,13 +118,13 @@ impl Builder {
             {
                 return Err(anyhow!(
                     "x5chain invalid: certificate {} did not issue certificate {}",
-                    current_subject + 1,
-                    current_subject
+                    current_index + 1,
+                    current_index
                 ));
             }
             first = second;
         }
-        Ok(self.certs.into())
+        Ok(NonEmptyVec::try_from(self.certs)?.into())
     }
 }
 

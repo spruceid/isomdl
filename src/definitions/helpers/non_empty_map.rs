@@ -5,6 +5,18 @@ use std::{collections::HashMap, hash::Hash, ops::Deref};
 #[serde(try_from = "HashMap<K, V>", into = "HashMap<K, V>")]
 pub struct NonEmptyMap<K: Hash + Eq + Clone, V: Clone>(HashMap<K, V>);
 
+impl<K: Hash + Eq + Clone, V: Clone> NonEmptyMap<K, V> {
+    pub fn new(key: K, value: V) -> Self {
+        let mut inner = HashMap::new();
+        inner.insert(key, value);
+        Self(inner)
+    }
+
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        self.0.get_mut(key)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("cannot construct a non-empty vec from an empty vec")]

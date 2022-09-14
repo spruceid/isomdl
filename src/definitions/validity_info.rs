@@ -13,6 +13,14 @@ pub struct ValidityInfo {
     pub expected_update: Option<DateTime<Utc>>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Builder {
+    pub signed: Option<DateTime<Utc>>,
+    pub valid_from: Option<DateTime<Utc>>,
+    pub valid_until: Option<DateTime<Utc>>,
+    pub expected_update: Option<DateTime<Utc>>,
+}
+
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +35,16 @@ pub enum Error {
     NotATag(u64, CborValue),
     #[error("Failed to parse date string as rfc3339 date: {0}")]
     UnableToParseDate(ChronoParseError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BuilderError {
+    #[error("missing required parameter: signed")]
+    MissingSignedAt,
+    #[error("missing required parameter: valid_from")]
+    MissingValidFrom,
+    #[error("missing required parameter: valid_until")]
+    MissingValidUntil,
 }
 
 impl From<ValidityInfo> for CborValue {
@@ -107,5 +125,46 @@ fn cbor_to_datetime(v: CborValue) -> Result<DateTime<Utc>> {
         }
     } else {
         Err(Error::NotATag(0, v))
+    }
+}
+
+impl ValidityInfo {
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
+}
+
+impl Builder {
+    pub fn signed_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.signed = Some(dt);
+        self
+    }
+
+    pub fn valid_from(mut self, dt: DateTime<Utc>) -> Self {
+        self.valid_from = Some(dt);
+        self
+    }
+
+    pub fn valid_until(mut self, dt: DateTime<Utc>) -> Self {
+        self.valid_until = Some(dt);
+        self
+    }
+
+    pub fn expected_update_at(mut self, dt: DateTime<Utc>) -> Self {
+        self.expected_update = Some(dt);
+        self
+    }
+
+    // Consumes the builder to construct a ValidityInfo.
+    pub fn build(self) -> Result<ValidityInfo, BuilderError> {
+        let signed = self.signed.ok_or(BuilderError::MissingSignedAt)?;
+        let valid_from = self.valid_from.ok_or(BuilderError::MissingValidFrom)?;
+        let valid_until = self.valid_until.ok_or(BuilderError::MissingValidUntil)?;
+        Ok(ValidityInfo {
+            signed,
+            valid_from,
+            valid_until,
+            expected_update: self.expected_update,
+        })
     }
 }

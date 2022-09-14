@@ -26,6 +26,10 @@ pub struct KeyAuthorizations {
 }
 
 impl KeyAuthorizations {
+    pub fn is_empty(&self) -> bool {
+        self.namespaces.is_none() && self.data_elements.is_none()
+    }
+
     /// If a namespace is present in authorized namespaces then it cannot be present in
     /// authorized data elements.
     pub fn validate(&self) -> Result<(), Error> {
