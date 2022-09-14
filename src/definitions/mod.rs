@@ -1,9 +1,11 @@
+pub mod device_engagement;
 pub mod device_key;
 pub mod device_response;
 pub mod device_signed;
 pub mod helpers;
 pub mod issuer_signed;
 pub mod mso;
+pub mod session;
 pub mod validity_info;
 
 pub use device_key::{CoseKey, DeviceKeyInfo, KeyAuthorizations};
