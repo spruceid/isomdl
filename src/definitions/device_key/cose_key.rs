@@ -1,25 +1,25 @@
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value;
+use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
 
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
 /// restricted to the requirements of ISO/IEC 18013-5:2021.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "Value", into = "Value")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "CborValue", into = "CborValue")]
 pub enum CoseKey {
     EC2 { crv: EC2Curve, x: Vec<u8>, y: EC2Y },
     OKP { crv: OKPCurve, x: Vec<u8> },
 }
 
 /// The sign bit or value of the y-coordinate for the EC point.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EC2Y {
     Value(Vec<u8>),
     SignBit(bool),
 }
 
 /// The RFC-8152 identifier of the curve, for EC2 key type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EC2Curve {
     P256,
     P384,
@@ -29,7 +29,7 @@ pub enum EC2Curve {
 }
 
 /// The RFC-8152 identifier of the curve, for OKP key type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OKPCurve {
     X25519,
     X448,
@@ -43,61 +43,69 @@ pub enum Error {
     #[error("COSE_Key of kty 'EC2' missing y coordinate.")]
     EC2MissingY,
     #[error("Expected to parse a CBOR bool or bstr for y-coordinate, received: '{0:?}'")]
-    InvalidTypeY(Value),
+    InvalidTypeY(CborValue),
     #[error("Expected to parse a CBOR map, received: '{0:?}'")]
-    NotAMap(Value),
+    NotAMap(CborValue),
     #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves.")]
     UnsupportedCurve,
     #[error("This implementation of COSE_Key only supports EC2 and OKP keys.")]
     UnsupportedFormat,
 }
 
-impl From<CoseKey> for Value {
-    fn from(key: CoseKey) -> Value {
+impl From<CoseKey> for CborValue {
+    fn from(key: CoseKey) -> CborValue {
         let mut map = BTreeMap::new();
         match key {
             CoseKey::EC2 { crv, x, y } => {
                 // kty: 1, EC2: 2
-                map.insert(Value::Integer(1), Value::Integer(2));
+                map.insert(CborValue::Integer(1), CborValue::Integer(2));
                 // crv: -1
-                map.insert(Value::Integer(-1), crv.into());
+                map.insert(CborValue::Integer(-1), crv.into());
                 // x: -2
-                map.insert(Value::Integer(-2), Value::Bytes(x));
+                map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
                 // y: -3
-                map.insert(Value::Integer(-3), y.into());
+                map.insert(CborValue::Integer(-3), y.into());
             }
             CoseKey::OKP { crv, x } => {
                 // kty: 1, OKP: 1
-                map.insert(Value::Integer(1), Value::Integer(1));
+                map.insert(CborValue::Integer(1), CborValue::Integer(1));
                 // crv: -1
-                map.insert(Value::Integer(-1), crv.into());
+                map.insert(CborValue::Integer(-1), crv.into());
                 // x: -2
-                map.insert(Value::Integer(-2), Value::Bytes(x));
+                map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
             }
         }
-        Value::Map(map)
+        CborValue::Map(map)
     }
 }
 
-impl TryFrom<Value> for CoseKey {
+impl TryFrom<CborValue> for CoseKey {
     type Error = Error;
 
-    fn try_from(v: Value) -> Result<Self, Error> {
-        if let Value::Map(mut map) = v {
+    fn try_from(v: CborValue) -> Result<Self, Error> {
+        if let CborValue::Map(mut map) = v {
             match (
-                map.remove(&Value::Integer(1)),
-                map.remove(&Value::Integer(-1)),
-                map.remove(&Value::Integer(-2)),
+                map.remove(&CborValue::Integer(1)),
+                map.remove(&CborValue::Integer(-1)),
+                map.remove(&CborValue::Integer(-2)),
             ) {
-                (Some(Value::Integer(2)), Some(Value::Integer(crv_id)), Some(Value::Bytes(x))) => {
+                (
+                    Some(CborValue::Integer(2)),
+                    Some(CborValue::Integer(crv_id)),
+                    Some(CborValue::Bytes(x)),
+                ) => {
                     let crv = crv_id.try_into()?;
                     let y = map
-                        .remove(&Value::Integer(-3))
+                        .remove(&CborValue::Integer(-3))
                         .ok_or(Error::EC2MissingY)?
                         .try_into()?;
                     Ok(Self::EC2 { crv, x, y })
                 }
-                (Some(Value::Integer(1)), Some(Value::Integer(crv_id)), Some(Value::Bytes(x))) => {
+                (
+                    Some(CborValue::Integer(1)),
+                    Some(CborValue::Integer(crv_id)),
+                    Some(CborValue::Bytes(x)),
+                ) => {
                     let crv = crv_id.try_into()?;
                     Ok(Self::OKP { crv, x })
                 }
@@ -109,33 +117,33 @@ impl TryFrom<Value> for CoseKey {
     }
 }
 
-impl From<EC2Y> for Value {
-    fn from(y: EC2Y) -> Value {
+impl From<EC2Y> for CborValue {
+    fn from(y: EC2Y) -> CborValue {
         match y {
-            EC2Y::Value(s) => Value::Bytes(s),
-            EC2Y::SignBit(b) => Value::Bool(b),
+            EC2Y::Value(s) => CborValue::Bytes(s),
+            EC2Y::SignBit(b) => CborValue::Bool(b),
         }
     }
 }
 
-impl TryFrom<Value> for EC2Y {
+impl TryFrom<CborValue> for EC2Y {
     type Error = Error;
 
-    fn try_from(v: Value) -> Result<Self, Error> {
+    fn try_from(v: CborValue) -> Result<Self, Error> {
         match v {
-            Value::Bytes(s) => Ok(EC2Y::Value(s)),
-            Value::Bool(b) => Ok(EC2Y::SignBit(b)),
+            CborValue::Bytes(s) => Ok(EC2Y::Value(s)),
+            CborValue::Bool(b) => Ok(EC2Y::SignBit(b)),
             _ => Err(Error::InvalidTypeY(v)),
         }
     }
 }
 
-impl From<EC2Curve> for Value {
-    fn from(crv: EC2Curve) -> Value {
+impl From<EC2Curve> for CborValue {
+    fn from(crv: EC2Curve) -> CborValue {
         match crv {
-            EC2Curve::P256 => Value::Integer(1),
-            EC2Curve::P384 => Value::Integer(2),
-            EC2Curve::P521 => Value::Integer(3),
+            EC2Curve::P256 => CborValue::Integer(1),
+            EC2Curve::P384 => CborValue::Integer(2),
+            EC2Curve::P521 => CborValue::Integer(3),
         }
     }
 }
@@ -153,13 +161,13 @@ impl TryFrom<i128> for EC2Curve {
     }
 }
 
-impl From<OKPCurve> for Value {
-    fn from(crv: OKPCurve) -> Value {
+impl From<OKPCurve> for CborValue {
+    fn from(crv: OKPCurve) -> CborValue {
         match crv {
-            OKPCurve::X25519 => Value::Integer(4),
-            OKPCurve::X448 => Value::Integer(5),
-            OKPCurve::Ed25519 => Value::Integer(6),
-            OKPCurve::Ed448 => Value::Integer(7),
+            OKPCurve::X25519 => CborValue::Integer(4),
+            OKPCurve::X448 => CborValue::Integer(5),
+            OKPCurve::Ed25519 => CborValue::Integer(6),
+            OKPCurve::Ed448 => CborValue::Integer(7),
         }
     }
 }
@@ -175,5 +183,28 @@ impl TryFrom<i128> for OKPCurve {
             7 => Ok(OKPCurve::Ed448),
             _ => Err(Error::UnsupportedCurve),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use hex::FromHex;
+
+    static EC_P256: &str = include_str!("../../../test/definitions/cose_key/ec_p256.cbor");
+
+    #[test]
+    fn ec_p256() {
+        let key_bytes = <Vec<u8>>::from_hex(EC_P256).expect("unable to convert cbor hex to bytes");
+        let key = serde_cbor::from_slice(&key_bytes).unwrap();
+        match &key {
+            CoseKey::EC2 { crv, .. } => assert_eq!(crv, &EC2Curve::P256),
+            _ => panic!("expected an EC2 cose key"),
+        };
+        assert_eq!(
+            serde_cbor::to_vec(&key).unwrap(),
+            key_bytes,
+            "cbor encoding roundtrip failed"
+        );
     }
 }
