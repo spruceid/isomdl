@@ -1,7 +1,7 @@
 use crate::{
     definitions::{
         device_engagement::RetrievalOptions,
-        helpers::{NonEmptyMap, NonEmptyVec, Tag24},
+        helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
         session::{Curves, EncodedPoints},
         DeviceEngagement, DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem,
@@ -294,7 +294,7 @@ fn get_transport_type_and_version(retrieval_option: RetrievalOptions) -> Result<
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::definitions::KeyAuthorizations;
+    use crate::definitions::{session::generate_ephemeral_keys, BleOptions, KeyAuthorizations};
     use hex::FromHex;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
@@ -352,5 +352,26 @@ mod test {
             signer,
         )
         .expect("failed to issue mdoc");
+    }
+
+    #[test]
+    fn device_engagement() {
+        let crv = Curves::P256;
+        let key_pair = generate_ephemeral_keys(crv.clone());
+        let encoded_point = key_pair.unwrap().1;
+
+        let uuid_bytes: Vec<u8> = vec![1, 2, 3, 4, 5];
+        let address_bytes: Vec<u8> = vec![6, 7, 8, 9, 0];
+
+        let ble_option = BleOptions {
+            peripheral_server_mode: false,
+            central_client_mode: true,
+            peripheral_server_uuid: None,
+            client_central_uuid: Some(ByteStr::from(uuid_bytes)),
+            mdoc_ble_device_address_peripheral_server: Some(ByteStr::from(address_bytes)),
+        };
+
+        prepare_device_engagement(crv, RetrievalOptions::BLEOPTIONS(ble_option), encoded_point)
+            .expect("failed to prepare for device engagement");
     }
 }

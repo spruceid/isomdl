@@ -27,9 +27,9 @@ pub struct DeviceEngagement {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RetrievalOptions {
-    WIFIOPTIONS,
-    BLEOPTIONS,
-    NFCOPTIONS,
+    WIFIOPTIONS(WifiOptions),
+    BLEOPTIONS(BleOptions),
+    NFCOPTIONS(NfcOptions),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -44,14 +44,14 @@ pub struct ServerRetrievalMethods {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BleOptions {
-    peripheral_server_mode: bool,
-    central_client_mode: bool,
+    pub peripheral_server_mode: bool,
+    pub central_client_mode: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pheripheral_server_uuid: Option<ByteStr>,
+    pub peripheral_server_uuid: Option<ByteStr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    client_central_uuid: Option<ByteStr>,
+    pub client_central_uuid: Option<ByteStr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    mdoc_ble_device_address_peripheral_server: Option<ByteStr>,
+    pub mdoc_ble_device_address_peripheral_server: Option<ByteStr>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
