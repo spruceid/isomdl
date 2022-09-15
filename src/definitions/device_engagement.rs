@@ -4,9 +4,10 @@ use serde_cbor::Value as CborValue;
 
 pub type EDeviceKeyBytes = Vec<u8>;
 pub type EReaderKeyBytes = Vec<u8>;
-
+//the u64 represents a cipher suite identifier
 pub type Security = (u64, EDeviceKeyBytes);
 pub type DeviceRetrievalMethods = Vec<DeviceRetrievalMethod>;
+// the first u64 represents a type, the second a version
 pub type DeviceRetrievalMethod = (u64, u64, RetrievalOptions);
 pub type ProtocolInfo = CborValue;
 pub type Oidc = (u64, String, String);
@@ -15,12 +16,12 @@ pub type WebApi = (u64, String, String);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceEngagement {
-    version: String,
-    security: Security,
-    device_retrieval_methods: Option<DeviceRetrievalMethods>,
-    server_retrieval_methods: Option<ServerRetrievalMethods>,
+    pub version: String,
+    pub security: Security,
+    pub device_retrieval_methods: Option<DeviceRetrievalMethods>,
+    pub server_retrieval_methods: Option<ServerRetrievalMethods>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    protocol_info: Option<ProtocolInfo>,
+    pub protocol_info: Option<ProtocolInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

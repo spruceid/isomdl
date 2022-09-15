@@ -1,7 +1,8 @@
+use crate::definitions::device_engagement::EReaderKeyBytes;
+use crate::definitions::device_key::CoseKey;
 use crate::definitions::helpers::bytestr::ByteStr;
-use crate::device_engagement::EReaderKeyBytes;
-use crate::mdoc::CoseKey;
-use crate::session::EphemeralSecrets::{ES256, ES384};
+use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
+use crate::definitions::session::EphemeralSecrets::{Eph256, Eph384};
 use anyhow::Result;
 use ecdsa::EncodedPoint;
 use elliptic_curve::{ecdh::EphemeralSecret, ecdh::SharedSecret, PublicKey};
@@ -15,11 +16,13 @@ pub type DeviceEngagementBytes = Vec<u8>;
 pub type SessionTranscript = (DeviceEngagementBytes, EReaderKeyBytes, Handover);
 pub type NfcHandover = (String, Option<String>);
 
+#[derive(Debug, Clone)]
 pub struct SessionEstablishment {
     e_reader_key: EReaderKey,
     data: ByteStr,
 }
 
+#[derive(Debug, Clone)]
 pub struct SessionData {
     data: ByteStr,
     status: u64,
@@ -36,6 +39,7 @@ pub enum Handover {
     NFCHANDOVER,
 }
 
+#[derive(Debug, Clone)]
 pub enum Curves {
     P256,
     P384,
@@ -47,18 +51,27 @@ pub enum Curves {
 }
 
 pub enum EphemeralSecrets {
-    ES256(EphemeralSecret<NistP256>),
-    ES384(EphemeralSecret<NistP384>),
+    Eph256(EphemeralSecret<NistP256>),
+    Eph384(EphemeralSecret<NistP384>),
 }
 
 pub enum EncodedPoints {
-    NistP256(EncodedPoint<NistP256>),
-    NistP384(EncodedPoint<NistP384>),
+    Ep256(EncodedPoint<NistP256>),
+    Ep384(EncodedPoint<NistP384>),
+}
+
+impl Into<Vec<u8>> for EncodedPoints {
+    fn into(self) -> Vec<u8> {
+        match self {
+            Ep256(encoded_point) => encoded_point.as_bytes().to_vec(),
+            Ep384(encoded_point) => encoded_point.as_bytes().to_vec(),
+        }
+    }
 }
 
 pub enum SharedSecrets {
-    NistP256(SharedSecret<NistP256>),
-    NistP384(SharedSecret<NistP384>),
+    Ss256(SharedSecret<NistP256>),
+    Ss384(SharedSecret<NistP384>),
 }
 
 pub fn generate_ephemeral_keys(crv: Curves) -> Result<(EphemeralSecrets, EncodedPoints), Error> {
@@ -69,8 +82,8 @@ pub fn generate_ephemeral_keys(crv: Curves) -> Result<(EphemeralSecrets, Encoded
             let e_device_key_pub_bytes =
                 ecdsa::EncodedPoint::<NistP256>::from(e_device_key_priv.public_key());
             Ok((
-                EphemeralSecrets::ES256(e_device_key_priv),
-                EncodedPoints::NistP256(e_device_key_pub_bytes),
+                EphemeralSecrets::Eph256(e_device_key_priv),
+                EncodedPoints::Ep256(e_device_key_pub_bytes),
             ))
         }
         Curves::P384 => {
@@ -78,8 +91,8 @@ pub fn generate_ephemeral_keys(crv: Curves) -> Result<(EphemeralSecrets, Encoded
             let e_device_key_pub_bytes =
                 ecdsa::EncodedPoint::<NistP384>::from(e_device_key_priv.public_key());
             Ok((
-                EphemeralSecrets::ES384(e_device_key_priv),
-                EncodedPoints::NistP384(e_device_key_pub_bytes),
+                EphemeralSecrets::Eph384(e_device_key_priv),
+                EncodedPoints::Ep384(e_device_key_pub_bytes),
             ))
         }
         _ => Err(Error::UnsupportedCurve),
@@ -91,16 +104,16 @@ pub fn derive_shared_secret(
     e_device_key_priv: EphemeralSecrets,
 ) -> Result<SharedSecrets> {
     match e_device_key_priv {
-        ES256(private_key) => {
+        Eph256(private_key) => {
             let public_key = PublicKey::from_sec1_bytes(encoded_point.as_ref())?;
             let shared_secret = private_key.diffie_hellman(&public_key);
 
-            Ok(SharedSecrets::NistP256(shared_secret))
+            Ok(SharedSecrets::Ss256(shared_secret))
         }
-        ES384(private_key) => {
+        Eph384(private_key) => {
             let public_key = PublicKey::from_sec1_bytes(encoded_point.as_ref())?;
             let shared_secret = private_key.diffie_hellman(&public_key);
-            Ok(SharedSecrets::NistP384(shared_secret))
+            Ok(SharedSecrets::Ss384(shared_secret))
         }
     }
 }
@@ -108,3 +121,14 @@ pub fn derive_shared_secret(
 pub fn encrypt() {}
 
 pub fn decrypt() {}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn key_generation() {
+        let key_pair = generate_ephemeral_keys(Curves::P256);
+    }
+}

@@ -8,9 +8,11 @@ pub mod mso;
 pub mod session;
 pub mod validity_info;
 
+pub use device_engagement::{BleOptions, DeviceEngagement, NfcOptions, WifiOptions};
 pub use device_key::{CoseKey, DeviceKeyInfo, KeyAuthorizations};
 pub use device_response::{DeviceResponse, Document};
 pub use device_signed::{DeviceAuth, DeviceSigned};
 pub use issuer_signed::{IssuerSigned, IssuerSignedItem};
 pub use mso::{DigestAlgorithm, DigestId, DigestIds, Mso};
+pub use session::{SessionData, SessionEstablishment};
 pub use validity_info::ValidityInfo;
