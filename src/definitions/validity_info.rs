@@ -1,16 +1,21 @@
-use chrono::{format::ParseError as ChronoParseError, DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{
+    ser::{Error as SerError, Serializer},
+    Deserialize, Serialize,
+};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
+use time::{
+    error::Format as FormatError, error::Parse as ParseError,
+    format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset,
+};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(try_from = "CborValue", into = "CborValue")]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "CborValue")]
 pub struct ValidityInfo {
-    pub signed: DateTime<Utc>,
-    pub valid_from: DateTime<Utc>,
-    pub valid_until: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected_update: Option<DateTime<Utc>>,
+    pub signed: OffsetDateTime,
+    pub valid_from: OffsetDateTime,
+    pub valid_until: OffsetDateTime,
+    pub expected_update: Option<OffsetDateTime>,
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -25,36 +30,44 @@ pub enum Error {
     NotATextString(Box<CborValue>),
     #[error("Expected to parse a CBOR tag (number {0}), received: '{1:?}'")]
     NotATag(u64, CborValue),
+    #[error("Failed to format date string as rfc3339 date: {0}")]
+    UnableToFormatDate(#[from] FormatError),
     #[error("Failed to parse date string as rfc3339 date: {0}")]
-    UnableToParseDate(ChronoParseError),
+    UnableToParseDate(#[from] ParseError),
 }
 
-impl From<ValidityInfo> for CborValue {
-    fn from(v: ValidityInfo) -> CborValue {
-        let mut map = BTreeMap::new();
+impl TryFrom<ValidityInfo> for CborValue {
+    type Error = Error;
 
-        let signed_key = CborValue::Text(String::from("signed"));
-        let signed_value = CborValue::Tag(0, Box::new(CborValue::Text(v.signed.to_rfc3339())));
-        map.insert(signed_key, signed_value);
-
-        let valid_from_key = CborValue::Text(String::from("validFrom"));
-        let valid_from_value =
-            CborValue::Tag(0, Box::new(CborValue::Text(v.valid_from.to_rfc3339())));
-        map.insert(valid_from_key, valid_from_value);
-
-        let valid_until_key = CborValue::Text(String::from("validUntil"));
-        let valid_until_value =
-            CborValue::Tag(0, Box::new(CborValue::Text(v.valid_until.to_rfc3339())));
-        map.insert(valid_until_key, valid_until_value);
-
-        if let Some(expected_update) = v.expected_update {
-            let expected_update_key = CborValue::Text(String::from("expectedUpdate"));
-            let expected_update_value =
-                CborValue::Tag(0, Box::new(CborValue::Text(expected_update.to_rfc3339())));
-            map.insert(expected_update_key, expected_update_value);
+    fn try_from(v: ValidityInfo) -> Result<CborValue> {
+        macro_rules! insert_date {
+            ($map:ident, $date:ident, $name:literal) => {
+                let key = CborValue::Text(String::from($name));
+                let value = CborValue::Tag(
+                    0,
+                    Box::new(CborValue::Text(
+                        $date.to_offset(UtcOffset::UTC).format(&Rfc3339)?,
+                    )),
+                );
+                $map.insert(key, value);
+            };
+            ($map:ident, $struct: ident, $field:ident, $name:literal) => {
+                let date = $struct.$field;
+                insert_date!($map, date, $name)
+            };
         }
 
-        CborValue::Map(map)
+        let mut map = BTreeMap::new();
+
+        insert_date!(map, v, signed, "signed");
+        insert_date!(map, v, valid_from, "validFrom");
+        insert_date!(map, v, valid_until, "validUntil");
+
+        if let Some(expected_update) = v.expected_update {
+            insert_date!(map, expected_update, "expectedUpdate");
+        }
+
+        Ok(CborValue::Map(map))
     }
 }
 
@@ -63,21 +76,19 @@ impl TryFrom<CborValue> for ValidityInfo {
 
     fn try_from(v: CborValue) -> Result<ValidityInfo> {
         if let CborValue::Map(mut map) = v {
-            let signed_key = CborValue::Text(String::from("signed"));
-            let signed = map
-                .remove(&signed_key)
-                .ok_or(Error::MissingField(signed_key))
-                .and_then(cbor_to_datetime)?;
-            let valid_from_key = CborValue::Text(String::from("validFrom"));
-            let valid_from = map
-                .remove(&valid_from_key)
-                .ok_or(Error::MissingField(valid_from_key))
-                .and_then(cbor_to_datetime)?;
-            let valid_until_key = CborValue::Text(String::from("validUntil"));
-            let valid_until = map
-                .remove(&valid_until_key)
-                .ok_or(Error::MissingField(valid_until_key))
-                .and_then(cbor_to_datetime)?;
+            macro_rules! extract_date {
+                ($map:ident, $name:literal) => {{
+                    let key = CborValue::Text(String::from($name));
+                    $map.remove(&key)
+                        .ok_or(Error::MissingField(key))
+                        .and_then(cbor_to_datetime)?
+                }};
+            }
+
+            let signed = extract_date!(map, "signed");
+            let valid_from = extract_date!(map, "validFrom");
+            let valid_until = extract_date!(map, "validUntil");
+
             let expected_update_key = CborValue::Text(String::from("expectedUpdate"));
             let expected_update = map
                 .remove(&expected_update_key)
@@ -96,12 +107,21 @@ impl TryFrom<CborValue> for ValidityInfo {
     }
 }
 
-fn cbor_to_datetime(v: CborValue) -> Result<DateTime<Utc>> {
+impl Serialize for ValidityInfo {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        CborValue::try_from(self.clone())
+            .map_err(S::Error::custom)?
+            .serialize(s)
+    }
+}
+
+fn cbor_to_datetime(v: CborValue) -> Result<OffsetDateTime> {
     if let CborValue::Tag(0, inner) = v {
         if let CborValue::Text(date_str) = inner.as_ref() {
-            DateTime::parse_from_rfc3339(date_str)
-                .map(Into::into)
-                .map_err(Error::UnableToParseDate)
+            Ok(OffsetDateTime::parse(date_str, &Rfc3339)?.into())
         } else {
             Err(Error::NotATextString(inner))
         }
