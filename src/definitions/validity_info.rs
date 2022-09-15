@@ -121,7 +121,7 @@ impl Serialize for ValidityInfo {
 fn cbor_to_datetime(v: CborValue) -> Result<OffsetDateTime> {
     if let CborValue::Tag(0, inner) = v {
         if let CborValue::Text(date_str) = inner.as_ref() {
-            Ok(OffsetDateTime::parse(date_str, &Rfc3339)?.into())
+            Ok(OffsetDateTime::parse(date_str, &Rfc3339)?)
         } else {
             Err(Error::NotATextString(inner))
         }

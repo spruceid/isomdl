@@ -227,7 +227,7 @@ fn digest_namespace(
                 DigestAlgorithm::SHA384 => Sha384::digest(bytes).to_vec(),
                 DigestAlgorithm::SHA512 => Sha512::digest(bytes).to_vec(),
             };
-            return Ok((digest_id, digest.into()));
+            Ok((digest_id, digest.into()))
         })
         .collect()
 }
