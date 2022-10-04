@@ -9,20 +9,23 @@ repository = "https://github.com/spruceid/isomdl"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.62"
-aws-nitro-enclaves-cose = "0.5.0"
+anyhow = "1.0"
 ecdsa = { version = "0.14.4", features = ["serde"] }
 openssl = "0.10.41"
-p256 = {version = "0.11.1", features = ["serde"] }
 rand = "0.8.5"
 rand_core = "0.6.3"
-serde = { version = "1.0.143", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11.2", features = ["tags"] }
-serde_json = "1.0.83"
+serde_json = "1.0"
 sha2 = "0.10.5"
-thiserror = "1.0.33"
+thiserror = "1.0"
 time = { version = "0.3.14", features = ["formatting", "parsing"] }
 zeroize = { version = "1.4", features = ["zeroize_derive"] }
+signature = "1.6"
+
+[dependencies.cose-rs]
+git = "ssh://git@github.com/spruceid/cose-rs.git"
 
 [dev-dependencies]
 hex = "0.4.3"
+p256 = "0.11.1"

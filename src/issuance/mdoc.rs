@@ -7,15 +7,15 @@ use crate::{
     issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
 use anyhow::{anyhow, Result};
-use aws_nitro_enclaves_cose::{
-    crypto::{Openssl, SignatureAlgorithm, SigningPrivateKey, SigningPublicKey},
-    header_map::HeaderMap,
-    CoseSign1,
+use cose_rs::{
+    algorithm::SignatureAlgorithm,
+    sign1::{CoseSign1, HeaderMap},
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use signature::{Signature, Signer};
 use std::collections::{HashMap, HashSet};
 
 pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
@@ -72,15 +72,19 @@ impl Mdoc {
         Ok(preparation_mdoc)
     }
 
-    pub fn issue<T: SigningPrivateKey + SigningPublicKey>(
+    pub fn issue<S, Sig>(
         doc_type: String,
         namespaces: Namespaces,
         x5chain: X5Chain,
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
-        signer: T,
-    ) -> Result<Mdoc> {
+        signer: S,
+    ) -> Result<Mdoc>
+    where
+        S: Signer<Sig> + SignatureAlgorithm,
+        Sig: Signature,
+    {
         Self::prepare_mdoc(
             doc_type,
             namespaces,
@@ -94,7 +98,11 @@ impl Mdoc {
 }
 
 impl MdocPreparation {
-    pub fn complete<T: SigningPrivateKey + SigningPublicKey>(self, signer: T) -> Result<Mdoc> {
+    pub fn complete<S, Sig>(self, signer: S) -> Result<Mdoc>
+    where
+        S: Signer<Sig> + SignatureAlgorithm,
+        Sig: Signature,
+    {
         let MdocPreparation {
             doc_type,
             namespaces,
@@ -102,41 +110,17 @@ impl MdocPreparation {
             x5chain,
         } = self;
 
-        let signer_algorithm = signer
-            .get_parameters()
-            .map_err(|error| anyhow!("error getting signer parameters: {error}"))?
-            .0;
-
-        // Should/can we assert that the signer is the key identified by the x5chain?
-        match (x5chain.key_algorithm()?, signer_algorithm) {
-            (SignatureAlgorithm::ES256, SignatureAlgorithm::ES256) => (),
-            (SignatureAlgorithm::ES384, SignatureAlgorithm::ES384) => (),
-            (SignatureAlgorithm::ES512, SignatureAlgorithm::ES512) => (),
-            (chain_alg, signer_alg) => Err(anyhow!(
-                "signature algorithm does not match: expected '{:?}' (from x5chain), found '{:?}' (from signer)"
-                , chain_alg, signer_alg
-            ))?,
-        }
-
         // encode mso to cbor
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(mso)?)?;
 
-        //headermap should contain alg header and x5chain header
-        let protected_headers: HeaderMap = signer_algorithm.into();
+        let mut unprotected_headers = HeaderMap::default();
+        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor()?);
 
-        let mut unprotected_headers = HeaderMap::new();
-        unprotected_headers.insert(
-            serde_cbor::Value::Integer(X5CHAIN_HEADER_LABEL),
-            x5chain.into_cbor()?,
-        );
-
-        let cose_sign1 = CoseSign1::new_with_protected::<Openssl>(
-            &mso_bytes,
-            &protected_headers,
-            &unprotected_headers,
-            &signer,
-        )
-        .map_err(|error| anyhow!("error signing mso: {error}"))?;
+        let cose_sign1 = CoseSign1::builder()
+            .payload(mso_bytes)
+            .unprotected(unprotected_headers)
+            .sign(&signer)
+            .map_err(|error| anyhow!("error signing mso: {error}"))?;
 
         let mdoc = Mdoc {
             doc_type,
@@ -248,10 +232,11 @@ mod test {
     use super::*;
     use crate::definitions::KeyAuthorizations;
     use hex::FromHex;
+    use p256::pkcs8::DecodePrivateKey;
     use time::OffsetDateTime;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
-    static ISSUER_KEY: &[u8] = include_bytes!("../../test/issuance/256-key.pem");
+    static ISSUER_KEY: &str = include_str!("../../test/issuance/256-key.pem");
     static COSE_KEY: &str = include_str!("../../test/definitions/cose_key/ec_p256.cbor");
 
     #[test]
@@ -293,7 +278,9 @@ mod test {
             key_info: None,
         };
 
-        let signer = openssl::pkey::PKey::private_key_from_pem(ISSUER_KEY).unwrap();
+        let signer: p256::ecdsa::SigningKey = p256::SecretKey::from_pkcs8_pem(ISSUER_KEY)
+            .expect("failed to parse pem")
+            .into();
 
         Mdoc::issue(
             doc_type,

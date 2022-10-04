@@ -1,5 +1,5 @@
 use crate::definitions::helpers::{NonEmptyMap, Tag24};
-use aws_nitro_enclaves_cose::CoseSign1;
+use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::HashMap;
