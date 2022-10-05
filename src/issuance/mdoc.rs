@@ -256,22 +256,21 @@ fn prepare_device_engagement(
 
 fn get_cypher_suite_identifier(crv: Curves) -> u64 {
     match crv {
-        P256 => 1,
-        P384 => 2,
-        P521 => 3,
-        X25519 => 4,
-        X448 => 5,
-        Ed25519 => 6,
-        Ed448 => 7,
+        Curves::P256 => 1,
+        Curves::P384 => 2,
+        Curves::P521 => 3,
+        Curves::X25519 => 4,
+        Curves::X448 => 5,
+        Curves::Ed25519 => 6,
+        Curves::Ed448 => 7,
     }
 }
 
 fn get_transport_type_and_version(retrieval_option: RetrievalOptions) -> Result<(u64, u64)> {
     match retrieval_option {
-        NFCOPTIONS => Ok((1, 1)),
-        BLEOPTIONS => Ok((2, 1)),
-        WIFIOPTIONS => Ok((3, 1)),
-        _ => Err(anyhow!("retrieval option not recognized")),
+        RetrievalOptions::NFCOPTIONS => Ok((1, 1)),
+        RetrievalOptions::BLEOPTIONS => Ok((2, 1)),
+        RetrievalOptions::WIFIOPTIONS => Ok((3, 1)),
     }
 }
 

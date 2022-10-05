@@ -1,8 +1,9 @@
-use crate::mdoc::NonEmptyMap;
-use aws_nitro_enclaves_cose::CoseSign1;
+use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
+use cose_rs::CoseSign1;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-pub type ItemsRequestBytes = Vec<u8>;
+pub type ItemsRequestBytes = Tag24<ItemsRequest>;
 pub type DocType = String;
 pub type NameSpace = String;
 pub type IntentToRetain = bool;
@@ -15,14 +16,14 @@ pub type ReaderAuth = CoseSign1;
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRequest {
     version: String,
-    doc_requests: Vec<DocRequest>,
+    doc_requests: NonEmptyVec<DocRequest>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocRequest {
     item_request: ItemsRequestBytes,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     reader_auth: Option<ReaderAuth>,
 }
 
@@ -32,6 +33,6 @@ pub struct ItemsRequest {
     doc_type: DocType,
     #[serde(rename = "nameSpaces")]
     namespaces: Namespaces,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    request_info: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_info: Option<BTreeMap<String, serde_cbor::Value>>,
 }
