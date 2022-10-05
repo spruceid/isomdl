@@ -1,8 +1,11 @@
 use crate::{
     definitions::{
+        device_engagement::RetrievalOptions,
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
-        DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, ValidityInfo,
+        session::{Curves, EncodedPoints},
+        DeviceEngagement, DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem,
+        Mso, ValidityInfo,
     },
     issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
@@ -225,6 +228,51 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
         }
     }
     digest_id
+}
+
+fn prepare_device_engagement(
+    crv: Curves,
+    retrieval_option: RetrievalOptions,
+    encoded_point: EncodedPoints,
+) -> Result<DeviceEngagement> {
+    let cipher_suite_identifier = get_cypher_suite_identifier(crv);
+    let type_and_version = get_transport_type_and_version(retrieval_option.clone())?;
+
+    let device_retrieval_option = (type_and_version.0, type_and_version.1, retrieval_option);
+    let device_retrieval_options = vec![device_retrieval_option];
+
+    let device_engagement = DeviceEngagement {
+        version: "1.0".to_string(),
+        security: (cipher_suite_identifier, encoded_point.into()),
+        device_retrieval_methods: Some(device_retrieval_options),
+        //server_retrieval is not implemented
+        server_retrieval_methods: None,
+        //protocol_info is not implemented
+        protocol_info: None,
+    };
+
+    Ok(device_engagement)
+}
+
+fn get_cypher_suite_identifier(crv: Curves) -> u64 {
+    match crv {
+        P256 => 1,
+        P384 => 2,
+        P521 => 3,
+        X25519 => 4,
+        X448 => 5,
+        Ed25519 => 6,
+        Ed448 => 7,
+    }
+}
+
+fn get_transport_type_and_version(retrieval_option: RetrievalOptions) -> Result<(u64, u64)> {
+    match retrieval_option {
+        NFCOPTIONS => Ok((1, 1)),
+        BLEOPTIONS => Ok((2, 1)),
+        WIFIOPTIONS => Ok((3, 1)),
+        _ => Err(anyhow!("retrieval option not recognized")),
+    }
 }
 
 #[cfg(test)]
