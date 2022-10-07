@@ -15,6 +15,7 @@ use aws_nitro_enclaves_cose::{
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::collections::{HashMap, HashSet};
 
 pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
@@ -198,11 +199,6 @@ fn digest_namespace(
     elements: &[IssuerSignedItemBytes],
     digest_algorithm: DigestAlgorithm,
 ) -> Result<DigestIds> {
-    let ring_alg = match digest_algorithm {
-        DigestAlgorithm::SHA256 => &ring::digest::SHA256,
-        DigestAlgorithm::SHA384 => &ring::digest::SHA384,
-        DigestAlgorithm::SHA512 => &ring::digest::SHA512,
-    };
     let mut used_ids = elements
         .iter()
         .map(|item| item.as_ref().digest_id)
@@ -226,8 +222,12 @@ fn digest_namespace(
         .chain(random_digests)
         .map(|result| {
             let (digest_id, bytes) = result?;
-            let digest = ring::digest::digest(ring_alg, &bytes);
-            return Ok((digest_id, digest.as_ref().to_vec().into()));
+            let digest = match digest_algorithm {
+                DigestAlgorithm::SHA256 => Sha256::digest(bytes).to_vec(),
+                DigestAlgorithm::SHA384 => Sha384::digest(bytes).to_vec(),
+                DigestAlgorithm::SHA512 => Sha512::digest(bytes).to_vec(),
+            };
+            Ok((digest_id, digest.into()))
         })
         .collect()
 }
@@ -248,6 +248,7 @@ mod test {
     use super::*;
     use crate::definitions::KeyAuthorizations;
     use hex::FromHex;
+    use time::OffsetDateTime;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
     static ISSUER_KEY: &[u8] = include_bytes!("../../test/issuance/256-key.pem");
@@ -272,9 +273,9 @@ mod test {
             .unwrap();
 
         let validity_info = ValidityInfo {
-            signed: Default::default(),
-            valid_from: Default::default(),
-            valid_until: Default::default(),
+            signed: OffsetDateTime::now_utc(),
+            valid_from: OffsetDateTime::now_utc(),
+            valid_until: OffsetDateTime::now_utc(),
             expected_update: None,
         };
 
