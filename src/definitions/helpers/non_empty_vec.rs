@@ -15,6 +15,18 @@ impl<T: Clone> NonEmptyVec<T> {
     pub fn new(t: T) -> Self {
         Self(vec![t])
     }
+
+    pub fn maybe_new(v: Vec<T>) -> Option<Self> {
+        Self::try_from(v).ok()
+    }
+
+    pub fn push(&mut self, t: T) {
+        self.0.push(t)
+    }
+
+    pub fn into_inner(self) -> Vec<T> {
+        self.0
+    }
 }
 
 impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {

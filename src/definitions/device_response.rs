@@ -8,12 +8,12 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceResponse {
-    version: String,
+    pub version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    documents: Option<Documents>,
+    pub documents: Option<Documents>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    document_errors: Option<DocumentErrors>,
-    status: Status,
+    pub document_errors: Option<DocumentErrors>,
+    pub status: Status,
 }
 
 pub type Documents = NonEmptyVec<Document>;
@@ -21,16 +21,23 @@ pub type Documents = NonEmptyVec<Document>;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
-    doc_type: String,
-    issuer_signed: IssuerSigned,
-    device_signed: DeviceSigned,
+    pub doc_type: String,
+    pub issuer_signed: IssuerSigned,
+    pub device_signed: DeviceSigned,
     #[serde(skip_serializing_if = "Option::is_none")]
-    errors: Option<Errors>,
+    pub errors: Option<Errors>,
 }
 
-pub type Errors = NonEmptyMap<String, NonEmptyMap<String, i128>>;
+pub type Errors = NonEmptyMap<String, NonEmptyMap<String, DocumentErrorCode>>;
+pub type DocumentErrors = NonEmptyVec<DocumentError>;
+pub type DocumentError = HashMap<String, DocumentErrorCode>;
 
-pub type DocumentErrors = NonEmptyVec<HashMap<String, i128>>;
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "i128", into = "i128")]
+pub enum DocumentErrorCode {
+    DataNotReturned,
+    ApplicationSpecific(i128),
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u64", into = "u64")]
@@ -39,6 +46,31 @@ pub enum Status {
     GeneralError,
     CborDecodingError,
     CborValidationError,
+}
+
+impl DeviceResponse {
+    pub const VERSION: &'static str = "1.0";
+}
+
+impl From<DocumentErrorCode> for i128 {
+    fn from(c: DocumentErrorCode) -> i128 {
+        match c {
+            DocumentErrorCode::DataNotReturned => 0,
+            DocumentErrorCode::ApplicationSpecific(i) => i,
+        }
+    }
+}
+
+impl TryFrom<i128> for DocumentErrorCode {
+    type Error = String;
+
+    fn try_from(n: i128) -> Result<DocumentErrorCode, String> {
+        match n {
+            0 => Ok(DocumentErrorCode::DataNotReturned),
+            i if i < 0 => Ok(DocumentErrorCode::ApplicationSpecific(i)),
+            _ => Err(format!("unsupported or RFU error code used: {n}")),
+        }
+    }
 }
 
 impl From<Status> for u64 {

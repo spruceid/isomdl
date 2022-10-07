@@ -47,6 +47,19 @@ impl KeyAuthorizations {
             Ok(())
         }
     }
+
+    /// Determine whether the key is permitted to sign over the designated element.
+    pub fn permitted(&self, namespace: &String, element_identifier: &String) -> bool {
+        if let Some(namespaces) = self.namespaces.as_ref() {
+            return namespaces.contains(namespace);
+        }
+        if let Some(namespaces) = self.data_elements.as_ref() {
+            if let Some(data_elements) = namespaces.get(namespace).as_ref() {
+                return data_elements.contains(element_identifier);
+            }
+        }
+        false
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -9,6 +9,7 @@ use elliptic_curve::{ecdh::EphemeralSecret, ecdh::SharedSecret, PublicKey};
 use p256::NistP256;
 use p384::NistP384;
 use rand_core::OsRng; // requires 'getrandom' feature
+use serde::{Deserialize, Serialize};
 
 pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
@@ -34,6 +35,7 @@ pub enum Error {
     UnsupportedCurve,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Handover {
     QRHANDOVER,
     NFCHANDOVER,

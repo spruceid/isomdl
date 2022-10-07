@@ -11,6 +11,26 @@ pub enum Error {
     Empty,
 }
 
+impl<K: Hash + Eq + Clone, V: Clone> NonEmptyMap<K, V> {
+    pub fn new(k: K, v: V) -> Self {
+        let mut inner = HashMap::new();
+        inner.insert(k, v);
+        Self(inner)
+    }
+
+    pub fn maybe_new(m: HashMap<K, V>) -> Option<Self> {
+        Self::try_from(m).ok()
+    }
+
+    pub fn insert(&mut self, k: K, v: V) -> Option<V> {
+        self.0.insert(k, v)
+    }
+
+    pub fn into_inner(self) -> HashMap<K, V> {
+        self.0
+    }
+}
+
 impl<K: Hash + Eq + Clone, V: Clone> TryFrom<HashMap<K, V>> for NonEmptyMap<K, V> {
     type Error = Error;
 

@@ -25,9 +25,12 @@ elliptic-curve = "0.12.3"
 time = { version = "0.3.14", features = ["formatting", "parsing"] }
 zeroize = { version = "1.4", features = ["zeroize_derive"] }
 signature = "1.6"
+tracing = "0.1.37"
+uuid = "1.2.1"
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"
+rev = "e8813a4"
 
 [dev-dependencies]
 hex = "0.4.3"

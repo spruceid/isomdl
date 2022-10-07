@@ -1,4 +1,7 @@
-use crate::definitions::helpers::{NonEmptyMap, Tag24};
+use crate::definitions::{
+    helpers::{NonEmptyMap, Tag24},
+    session::SessionTranscript,
+};
 use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -8,16 +11,12 @@ use std::collections::HashMap;
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSigned {
     #[serde(rename = "nameSpaces")]
-    namespaces: Tag24<DeviceNamespaces>,
-    device_auth: DeviceAuth,
+    pub namespaces: DeviceNamespacesBytes,
+    pub device_auth: DeviceAuth,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DeviceNamespaces {
-    #[serde(flatten)]
-    namespaces: HashMap<String, DeviceSignedItems>,
-}
-
+pub type DeviceNamespacesBytes = Tag24<DeviceNamespaces>;
+pub type DeviceNamespaces = HashMap<String, DeviceSignedItems>;
 pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -28,4 +27,29 @@ pub enum DeviceAuth {
     /// TODO: Implement CoseMac0
     #[serde(rename_all = "camelCase")]
     Mac { device_mac: CborValue },
+}
+
+pub type DeviceAuthenticationBytes = Tag24<DeviceAuthentication>;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DeviceAuthentication(
+    &'static str,
+    pub SessionTranscript,
+    pub String,
+    pub DeviceNamespacesBytes,
+);
+
+impl DeviceAuthentication {
+    pub fn new(
+        transcript: SessionTranscript,
+        doc_type: String,
+        namespaces_bytes: DeviceNamespacesBytes,
+    ) -> Self {
+        Self(
+            "DeviceAuthentication",
+            transcript,
+            doc_type,
+            namespaces_bytes,
+        )
+    }
 }

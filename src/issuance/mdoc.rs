@@ -28,6 +28,7 @@ pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
 /// Representation of an issued mdoc.
 pub struct Mdoc {
     doc_type: String,
+    mso: Mso,
     namespaces: IssuerNamespaces,
     issuer_auth: CoseSign1,
 }
@@ -35,8 +36,8 @@ pub struct Mdoc {
 #[derive(Debug, Clone)]
 pub struct MdocPreparation {
     doc_type: String,
-    namespaces: IssuerNamespaces,
     mso: Mso,
+    namespaces: IssuerNamespaces,
     x5chain: X5Chain,
 }
 
@@ -114,7 +115,7 @@ impl MdocPreparation {
         } = self;
 
         // encode mso to cbor
-        let mso_bytes = serde_cbor::to_vec(&Tag24::new(mso)?)?;
+        let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
         let mut unprotected_headers = HeaderMap::default();
         unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor()?);
@@ -127,6 +128,7 @@ impl MdocPreparation {
 
         let mdoc = Mdoc {
             doc_type,
+            mso,
             namespaces,
             issuer_auth: cose_sign1,
         };
