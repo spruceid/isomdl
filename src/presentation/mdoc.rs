@@ -103,12 +103,8 @@ mod test {
             prepare_device_engagement(crv, RetrievalOptions::BLEOPTIONS(ble_option), public_key)
                 .expect("failed to prepare for device engagement");
 
-        println!("device_engagement_bytes {:?}", device_engagement_bytes);
-
         let device_engagement =
             DeviceEngagement::try_from(CborValue::from(device_engagement_bytes));
-
-        println!("device_engagement {:?}", device_engagement);
     }
 
     #[test]
@@ -132,23 +128,7 @@ mod test {
             prepare_device_engagement(crv, RetrievalOptions::BLEOPTIONS(ble_option), public_key)
                 .expect("failed to prepare for device engagement");
 
-        println!("device_engagement_bytes {:?}", device_engagement_bytes);
-        // device_engagement_bytes.
-        // let bytes = CborValue::from(device_engagement_bytes);
-        // print!("bytes: {:?}", bytes);
-
-        // match bytes {
-        //     CborValue::Bytes(f) => {
-        //         let m: Result<DeviceEngagement, serde_cbor::Error> =
-        //             serde_cbor::from_slice(f.as_ref());
-        //         println!("m: {:?}", m.unwrap());
-        //     }
-        //     _ => {}
-        // }
-
-        let som: Result<DeviceEngagement, serde_cbor::Error> =
+        let device_engagement: Result<DeviceEngagement, serde_cbor::Error> =
             serde_cbor::from_slice(device_engagement_bytes.inner_bytes.as_ref());
-        println!("som {:?}", som);
-        //let device_engagement = DeviceEngagement::try_from(bytes);
     }
 }

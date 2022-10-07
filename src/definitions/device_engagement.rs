@@ -222,7 +222,6 @@ impl TryFrom<CborValue> for DeviceEngagement {
 
             Ok(device_engagement)
         } else if let CborValue::Bytes(value) = v {
-            println!("whah");
             Err(Error::InvalidDeviceEngagement)
         } else {
             Err(Error::InvalidDeviceEngagement)
@@ -273,7 +272,6 @@ impl From<RetrievalOptions> for CborValue {
                         ),
                     );
                 }
-                print!("cbor_map: {:?}", map.clone());
 
                 CborValue::Map(map)
             }
@@ -321,7 +319,6 @@ impl TryFrom<CborValue> for BleOptions {
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
         if let CborValue::Map(mut map) = v {
-            println!("map: {:?}", map);
             match (
                 map.remove(&CborValue::Integer(0)),
                 map.remove(&CborValue::Integer(1)),
