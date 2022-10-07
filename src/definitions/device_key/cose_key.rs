@@ -1,3 +1,5 @@
+use aes::cipher::generic_array::{typenum::U8, GenericArray};
+use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
@@ -113,6 +115,40 @@ impl TryFrom<CborValue> for CoseKey {
             }
         } else {
             Err(Error::NotAMap(v))
+        }
+    }
+}
+
+impl TryFrom<CoseKey> for EncodedPoint {
+    type Error = Error;
+    fn try_from(value: CoseKey) -> Result<EncodedPoint, Self::Error> {
+        match value {
+            CoseKey::EC2 { crv, x, y } => {
+                let x_generic_array = GenericArray::from_slice(x.as_ref());
+                match y {
+                    EC2Y::Value(y) => {
+                        let y_generic_array = GenericArray::from_slice(y.as_ref());
+
+                        Ok(EncodedPoint::from_affine_coordinates(
+                            x_generic_array,
+                            y_generic_array,
+                            false,
+                        ))
+                    }
+                    EC2Y::SignBit(y) => {
+                        //TODO: get rid of unwrap
+                        let encoded = EncodedPoint::from_bytes(x_generic_array).unwrap();
+                        Ok(encoded)
+                    }
+                }
+            }
+            CoseKey::OKP { crv, x } => {
+                //TODO: get rid of unwrap
+                let x_generic_array: GenericArray<_, U8> =
+                    GenericArray::clone_from_slice(&x[0..42]);
+                let encoded = EncodedPoint::from_bytes(x_generic_array).unwrap();
+                Ok(encoded)
+            }
         }
     }
 }

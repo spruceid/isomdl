@@ -2,7 +2,7 @@ use crate::mdoc::NonEmptyMap;
 use aws_nitro_enclaves_cose::CoseSign1;
 use serde::{Deserialize, Serialize};
 
-pub type ItemsRequestBytes = Vec<u8>;
+pub type ItemsRequestBytes = Tag24<ItemsRequest>;
 pub type DocType = String;
 pub type NameSpace = String;
 pub type IntentToRetain = bool;

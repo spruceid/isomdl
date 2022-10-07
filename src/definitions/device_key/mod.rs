@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::HashMap;
 
-mod cose_key;
+pub mod cose_key;
 pub use cose_key::CoseKey;
+pub use cose_key::EC2Curve;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

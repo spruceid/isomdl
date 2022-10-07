@@ -9,6 +9,7 @@ pub mod session;
 pub mod validity_info;
 
 pub use device_engagement::{BleOptions, DeviceEngagement, NfcOptions, WifiOptions};
+pub use device_key::cose_key::{EC2Curve, Error, EC2Y};
 pub use device_key::{CoseKey, DeviceKeyInfo, KeyAuthorizations};
 pub use device_response::{DeviceResponse, Document};
 pub use device_signed::{DeviceAuth, DeviceSigned};
