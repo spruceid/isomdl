@@ -1,16 +1,16 @@
 use crate::definitions::helpers::ByteStr;
 use crate::definitions::CoseKey;
 use serde::{Deserialize, Serialize};
+use serde_cbor::Error as SerdeCborError;
 use serde_cbor::Value as CborValue;
 
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
 
 //the u64 represents a cipher suite identifier
-pub type Security = (u64, EDeviceKeyBytes);
+//pub type Security = (u64, EDeviceKeyBytes);
 pub type DeviceRetrievalMethods = Vec<DeviceRetrievalMethod>;
 // the first u64 represents a type, the second a version
-pub type DeviceRetrievalMethod = (u64, u64, RetrievalOptions);
 pub type ProtocolInfo = CborValue;
 pub type Oidc = (u64, String, String);
 pub type WebApi = (u64, String, String);
@@ -20,18 +20,34 @@ use crate::definitions::helpers::Tag24;
 use anyhow::Result;
 use std::{collections::BTreeMap, vec};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+use super::{EC2Curve, EC2Y};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(try_from = "CborValue", into = "CborValue", rename_all = "camelCase")]
 pub struct DeviceEngagement {
     pub version: String,
     pub security: Security,
     pub device_retrieval_methods: Option<DeviceRetrievalMethods>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_retrieval_methods: Option<ServerRetrievalMethods>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_info: Option<ProtocolInfo>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DeviceRetrievalMethod {
+    pub transport_type: u64,
+    pub version: u64,
+    pub retrieval_method: RetrievalOptions,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Security {
+    pub cipher_suite_identifier: u64,
+    pub e_device_key_bytes: EDeviceKeyBytes,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum RetrievalOptions {
     WIFIOPTIONS(WifiOptions),
@@ -39,7 +55,7 @@ pub enum RetrievalOptions {
     NFCOPTIONS(NfcOptions),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerRetrievalMethods {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,7 +64,7 @@ pub struct ServerRetrievalMethods {
     oidc: Option<Oidc>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(try_from = "CborValue", rename_all = "camelCase")]
 pub struct BleOptions {
     pub peripheral_server_mode: bool,
@@ -61,7 +77,7 @@ pub struct BleOptions {
     pub mdoc_ble_device_address_peripheral_server: Option<ByteStr>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiOptions {
     pass_phrase: String,
@@ -70,7 +86,7 @@ pub struct WifiOptions {
     band_info: ByteStr,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NfcOptions {
     max_len_command_data_field: u64,
@@ -90,6 +106,8 @@ pub enum Error {
     CoseKeyError,
     #[error("Something went wrong parsing a tag24")]
     Tag24Error,
+    #[error("Could not deserialize from cbor")]
+    SerdeCborError,
 }
 
 impl From<CoseKeyError> for Error {
@@ -104,6 +122,12 @@ impl From<Tag24Error> for Error {
     }
 }
 
+impl From<SerdeCborError> for Error {
+    fn from(_: SerdeCborError) -> Self {
+        Error::SerdeCborError
+    }
+}
+
 impl From<DeviceEngagement> for CborValue {
     fn from(device_engagement: DeviceEngagement) -> CborValue {
         let mut map = BTreeMap::new();
@@ -114,22 +138,18 @@ impl From<DeviceEngagement> for CborValue {
         map.insert(
             CborValue::Integer(1),
             CborValue::Array(vec![
-                CborValue::Integer(device_engagement.security.0.into()),
-                CborValue::from(device_engagement.security.1),
+                CborValue::Integer(device_engagement.security.cipher_suite_identifier.into()),
+                CborValue::from(device_engagement.security.e_device_key_bytes),
             ]),
         );
         if device_engagement.device_retrieval_methods.is_some() {
-            let device_retrieval_method = device_engagement.device_retrieval_methods.unwrap();
-            let retrieval_options = device_retrieval_method.first().unwrap().clone();
+            let device_retrieval_method = device_engagement
+                .device_retrieval_methods
+                .ok_or(Error::Malformed);
+            //TODO fix unwrap
+            let retrieval_options = device_retrieval_method.unwrap().first().unwrap().clone();
 
-            map.insert(
-                CborValue::Integer(2),
-                CborValue::Array(vec![
-                    CborValue::Integer(retrieval_options.0.into()),
-                    CborValue::Integer(retrieval_options.1.into()),
-                    CborValue::from(retrieval_options.2),
-                ]),
-            );
+            map.insert(CborValue::Integer(2), CborValue::from(retrieval_options));
         }
         // Server retrieval not implemented and should always be none
         if device_engagement.server_retrieval_methods.is_some() {
@@ -148,81 +168,42 @@ impl TryFrom<CborValue> for DeviceEngagement {
     type Error = Error;
     fn try_from(v: CborValue) -> Result<Self, Error> {
         if let CborValue::Map(mut map) = v {
-            let mut device_engagement = DeviceEngagement {
-                version: "1.0".to_string(),
-                security: (
-                    0,
-                    Tag24::<CoseKey>::new(CoseKey::EC2 {
-                        crv: (super::EC2Curve::P256),
-                        x: (vec![0]),
-                        y: super::EC2Y::Value(vec![0]),
-                    })?,
-                ),
-                device_retrieval_methods: None,
+            let device_engagement_version = map.remove(&CborValue::Integer(0));
+            let mut version: String = "".to_string();
+            match device_engagement_version {
+                Some(CborValue::Text(v)) => version = v,
+                _ => {}
+            };
+            let device_engagement_security =
+                map.remove(&CborValue::Integer(1)).ok_or(Error::Malformed)?;
+
+            let security: Security = Security::try_from(device_engagement_security)?;
+
+            //only matching for supported ble_option
+            let device_retrieval_method = DeviceRetrievalMethod::try_from(
+                map.remove(&CborValue::Integer(2)).ok_or(Error::Malformed)?,
+            )?;
+
+            let device_retrieval_methods: DeviceRetrievalMethods = vec![device_retrieval_method];
+
+            let server_retrieval_methods = map.remove(&CborValue::Integer(3));
+            if server_retrieval_methods.is_some() {
+                tracing::warn!("server_retrieval is unimplemented.")
+            }
+            let protocol_info = map.remove(&CborValue::Integer(4));
+            if protocol_info.is_some() {
+                tracing::warn!("protocol_info is RFU and has been ignored in deserialization.")
+            }
+
+            let device_engagement = DeviceEngagement {
+                version: version,
+                security: security,
+                device_retrieval_methods: Some(device_retrieval_methods),
                 server_retrieval_methods: None,
                 protocol_info: None,
             };
 
-            let device_engagement_version = map.remove(&CborValue::Integer(0));
-            match device_engagement_version {
-                Some(CborValue::Text(d)) => device_engagement.version = d,
-                _ => {}
-            };
-            let security = map.remove(&CborValue::Integer(1));
-            match security {
-                Some(CborValue::Array(s)) => {
-                    let u = s.first().ok_or(Error::InvalidDeviceEngagement)?.clone();
-                    match u {
-                        CborValue::Integer(x) => device_engagement.security.0 = x as u64,
-                        _ => {}
-                    }
-                    let p = s.last().ok_or(Error::InvalidDeviceEngagement)?.clone();
-                    match p {
-                        CborValue::Bytes(key_bytes) => {
-                            let cose_key = CoseKey::try_from(CborValue::Bytes(key_bytes))?;
-                            device_engagement.security.1 = Tag24::<CoseKey>::new(cose_key)?;
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {}
-            };
-
-            let device_retrieval_method =
-                map.remove(&CborValue::Integer(2)).ok_or(Error::Malformed)?;
-
-            //only matching for supported ble_option
-            match device_retrieval_method {
-                CborValue::Array(mut device_retrieval) => {
-                    let retrieval = device_retrieval
-                        .first()
-                        .ok_or(Error::InvalidDeviceEngagement)?
-                        .clone();
-                    match retrieval {
-                        CborValue::Map(ble_options) => {}
-                        CborValue::Integer(2) => {}
-                        CborValue::Integer(1) => {}
-                        _ => {}
-                    }
-
-                    //let transport_type = device_retrieval.remove(0);
-                    //let version = device_retrieval.remove(0);
-                    //let retrieval_method = device_retrieval.remove(0);
-                }
-                _ => {}
-            }
-            let server_retrieval_methods = map.remove(&CborValue::Integer(3));
-            if server_retrieval_methods.is_some() {
-                //throw unimplemented error
-            }
-            let protocol_info = map.remove(&CborValue::Integer(4));
-            if protocol_info.is_some() {
-                //throw warning that protocol info will be ignored by reader
-            }
-
             Ok(device_engagement)
-        } else if let CborValue::Bytes(value) = v {
-            Err(Error::InvalidDeviceEngagement)
         } else {
             Err(Error::InvalidDeviceEngagement)
         }
@@ -313,6 +294,83 @@ impl From<RetrievalOptions> for CborValue {
     }
 }
 
+impl TryFrom<CborValue> for DeviceRetrievalMethod {
+    type Error = Error;
+    fn try_from(value: CborValue) -> Result<Self, Self::Error> {
+        if let CborValue::Array(mut list) = value {
+            match (list.remove(0), list.remove(0), list.remove(0)) {
+                (
+                    CborValue::Integer(2),
+                    CborValue::Integer(1),
+                    CborValue::Map(retrieval_methods),
+                ) => {
+                    let ble_option = BleOptions::try_from(CborValue::Map(retrieval_methods))?;
+                    let device_retrieval_method = DeviceRetrievalMethod {
+                        transport_type: 2,
+                        version: 1,
+                        retrieval_method: RetrievalOptions::BLEOPTIONS(ble_option),
+                    };
+                    Ok(device_retrieval_method)
+                }
+                _ => Err(Error::Malformed),
+            }
+        } else {
+            Err(Error::Malformed)
+        }
+    }
+}
+
+impl From<DeviceRetrievalMethod> for CborValue {
+    fn from(drm: DeviceRetrievalMethod) -> Self {
+        let transport_type = CborValue::Integer(drm.transport_type.into());
+        let version = CborValue::Integer(drm.version.into());
+        let retrieval_method = CborValue::from(drm.retrieval_method);
+        CborValue::Array(vec![transport_type, version, retrieval_method])
+    }
+}
+
+impl TryFrom<CborValue> for Security {
+    type Error = Error;
+    fn try_from(device_engagement_security: CborValue) -> Result<Self, Self::Error> {
+        match device_engagement_security {
+            CborValue::Array(sec) => {
+                let mut id: u64 = 0;
+                let cipher_suite_identifier =
+                    sec.first().ok_or(Error::InvalidDeviceEngagement)?.clone();
+                match cipher_suite_identifier {
+                    CborValue::Integer(x) => id = x as u64,
+                    _ => {}
+                }
+                let mdoc_public_key = sec.last().ok_or(Error::InvalidDeviceEngagement)?.clone();
+
+                let mut key = Tag24::<CoseKey>::new(CoseKey::EC2 {
+                    crv: (EC2Curve::P256),
+                    x: (vec![0]),
+                    y: (EC2Y::Value(vec![1])),
+                })?;
+
+                match mdoc_public_key {
+                    CborValue::Tag(tag, key_bytes) => match *key_bytes {
+                        CborValue::Bytes(bytes) => {
+                            let cose_key = serde_cbor::from_slice(bytes.as_ref())?;
+                            key = Tag24::<CoseKey>::new(cose_key)?;
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+
+                let security = Security {
+                    cipher_suite_identifier: id,
+                    e_device_key_bytes: key,
+                };
+                Ok(security)
+            }
+            _ => Err(Error::Malformed),
+        }
+    }
+}
+
 impl TryFrom<CborValue> for BleOptions {
     //only handles central_client BleOptions
     type Error = Error;
@@ -322,20 +380,18 @@ impl TryFrom<CborValue> for BleOptions {
             match (
                 map.remove(&CborValue::Integer(0)),
                 map.remove(&CborValue::Integer(1)),
-                map.remove(&CborValue::Integer(10)),
                 map.remove(&CborValue::Integer(11)),
                 map.remove(&CborValue::Integer(20)),
             ) {
                 (
                     Some(CborValue::Bool(false)),
                     Some(CborValue::Bool(true)),
-                    Some(CborValue::Bytes(server_uuid)),
                     Some(CborValue::Bytes(central_uuid)),
                     Some(CborValue::Bytes(ble_address)),
                 ) => Ok(self::BleOptions {
                     peripheral_server_mode: false,
                     central_client_mode: true,
-                    peripheral_server_uuid: Some(ByteStr::from(server_uuid)),
+                    peripheral_server_uuid: None,
                     client_central_uuid: Some(ByteStr::from(central_uuid)),
                     mdoc_ble_device_address_peripheral_server: Some(ByteStr::from(ble_address)),
                 }),
@@ -345,12 +401,4 @@ impl TryFrom<CborValue> for BleOptions {
             Err(Error::Unimplemented)
         }
     }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn device_engagement_roundtrip() {}
 }

@@ -23,7 +23,6 @@ use p384::NistP384;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use sha2::Sha256;
-use x509_parser::nom::AsBytes;
 
 pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
@@ -34,12 +33,12 @@ pub type NfcHandover = (String, Option<String>);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEstablishment {
     e_reader_key: EReaderKeyBytes,
-    data: Tag24<ByteStr>,
+    data: ByteStr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
-    data: Tag24<ByteStr>,
+    data: ByteStr,
     status: u64,
 }
 
