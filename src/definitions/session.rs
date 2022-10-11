@@ -98,31 +98,6 @@ pub enum SharedSecrets {
     Ss384(SharedSecret<NistP384>),
 }
 
-pub fn generate_ephemeral_keys(crv: Curves) -> Result<(EphemeralSecrets, EncodedPoints), Error> {
-    //return  EDeviceKey.Priv/EReaderKey.Priv, EDeviceKey.Pub/EReaderKey.Pub
-    match crv {
-        Curves::P256 => {
-            let e_device_key_priv = p256::ecdh::EphemeralSecret::random(&mut OsRng);
-            let e_device_key_pub_bytes =
-                ecdsa::EncodedPoint::<NistP256>::from(e_device_key_priv.public_key());
-            Ok((
-                EphemeralSecrets::Eph256(e_device_key_priv),
-                EncodedPoints::Ep256(e_device_key_pub_bytes),
-            ))
-        }
-        Curves::P384 => {
-            let e_device_key_priv = p384::ecdh::EphemeralSecret::random(&mut OsRng);
-            let e_device_key_pub_bytes =
-                ecdsa::EncodedPoint::<NistP384>::from(e_device_key_priv.public_key());
-            Ok((
-                EphemeralSecrets::Eph384(e_device_key_priv),
-                EncodedPoints::Ep384(e_device_key_pub_bytes),
-            ))
-        }
-        _ => Err(Error::UnsupportedCurve),
-    }
-}
-
 pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKey), Error> {
     let private_key = p256::ecdh::EphemeralSecret::random(&mut OsRng);
 
@@ -192,14 +167,7 @@ pub fn derive_session_key(shared_secret: SharedSecret<NistP256>, reader: bool) -
     }
 }
 
-pub fn encrypt(session_key: [u8; 42], sessionData: SessionData) {
-    let key = Aes256Gcm::generate_key(&mut OsRng);
-    let generic_array: GenericArray<_, U8> = GenericArray::clone_from_slice(&session_key[0..42]);
-    //let cipher = Aes256Gcm::new(&generic_array);
-    //let nonce = Nonce::from_slice(b"unique nonce"); // 96-bits; unique per message
-    //let ciphertext = cipher.encrypt(nonce, b"plaintext message".as_ref())?;
-    //let plaintext = cipher.decrypt(nonce, ciphertext.as_ref())?;
-}
+pub fn encrypt() {}
 
 pub fn decrypt() {}
 
@@ -226,9 +194,6 @@ mod test {
         let reader_shared_secret = get_shared_secret(pub_key_device, reader_keys.0)
             .expect("failed to derive secret from public and private key");
         let session_key_device = derive_session_key(device_shared_secret, false);
-        println!("session_key_device: {:?}", session_key_device);
-
         let session_key_reader = derive_session_key(reader_shared_secret, true);
-        println!("session_key_reader: {:?}", session_key_reader);
     }
 }

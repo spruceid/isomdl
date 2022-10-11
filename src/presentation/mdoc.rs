@@ -68,29 +68,7 @@ fn get_transport_type_and_version(retrieval_option: RetrievalOptions) -> Result<
 
 #[cfg(test)]
 mod test {
-
     use super::*;
-
-    #[test]
-    fn device_engagement() {
-        let crv = Curves::P256;
-        let key_pair = create_p256_ephemeral_keys();
-        let public_key = key_pair.unwrap().1;
-
-        let uuid_bytes: Vec<u8> = vec![1, 2, 3, 4, 5];
-        let address_bytes: Vec<u8> = vec![6, 7, 8, 9, 0];
-
-        let ble_option = BleOptions {
-            peripheral_server_mode: false,
-            central_client_mode: true,
-            peripheral_server_uuid: None,
-            client_central_uuid: Some(ByteStr::from(uuid_bytes)),
-            mdoc_ble_device_address_peripheral_server: Some(ByteStr::from(address_bytes)),
-        };
-
-        prepare_device_engagement(crv, RetrievalOptions::BLEOPTIONS(ble_option), public_key)
-            .expect("failed to prepare for device engagement");
-    }
 
     #[test]
     fn device_engagement_cbor_roundtrip() {
