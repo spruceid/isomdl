@@ -7,14 +7,12 @@ use crate::definitions::{
 use anyhow::Result;
 use serde_cbor::Error as SerdeCborError;
 use serde_cbor::Value as CborValue;
-pub type KeyBytes = CborValue;
 
 fn prepare_device_engagement(
     crv: Curves,
     retrieval_option: RetrievalOptions,
     public_key: CoseKey,
 ) -> Result<Tag24<DeviceEngagement>> {
-    let cipher_suite_identifier = get_cypher_suite_identifier(crv);
     let type_and_version = get_transport_type_and_version(retrieval_option.clone())?;
     let e_device_key_bytes = Tag24::<CoseKey>::new(public_key)?;
 
@@ -26,7 +24,7 @@ fn prepare_device_engagement(
     let device_retrieval_options = vec![device_retrieval_option];
 
     let security: Security = Security {
-        cipher_suite_identifier: cipher_suite_identifier,
+        cipher_suite_identifier: 1,
         e_device_key_bytes: e_device_key_bytes,
     };
 

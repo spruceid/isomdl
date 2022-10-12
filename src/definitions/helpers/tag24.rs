@@ -11,7 +11,7 @@ use serde_cbor::{from_slice, to_vec, Error as CborError, Value as CborValue};
 ///
 /// If this struct is created through deserializing CBOR, then the original byte representation is
 /// preserved for future serialising.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Tag24<T> {
     inner: T,
     pub inner_bytes: Vec<u8>,

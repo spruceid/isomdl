@@ -123,7 +123,11 @@ impl TryFrom<CoseKey> for EncodedPoint {
     type Error = Error;
     fn try_from(value: CoseKey) -> Result<EncodedPoint, Self::Error> {
         match value {
-            CoseKey::EC2 { crv, x, y } => {
+            CoseKey::EC2 {
+                crv: EC2Curve::P256,
+                x,
+                y,
+            } => {
                 let x_generic_array = GenericArray::from_slice(x.as_ref());
                 match y {
                     EC2Y::Value(y) => {
@@ -136,8 +140,8 @@ impl TryFrom<CoseKey> for EncodedPoint {
                         ))
                     }
                     EC2Y::SignBit(y) => {
-                        //TODO: get rid of unwrap
-                        let encoded = EncodedPoint::from_bytes(x_generic_array).unwrap();
+                        let encoded = EncodedPoint::from_bytes(x_generic_array)
+                            .map_err(Error::UnsupportedFormat)?;
                         Ok(encoded)
                     }
                 }
@@ -146,9 +150,11 @@ impl TryFrom<CoseKey> for EncodedPoint {
                 //TODO: get rid of unwrap
                 let x_generic_array: GenericArray<_, U8> =
                     GenericArray::clone_from_slice(&x[0..42]);
-                let encoded = EncodedPoint::from_bytes(x_generic_array).unwrap();
+                let encoded =
+                    EncodedPoint::from_bytes(x_generic_array).map_err(Error::UnsupportedFormat)?;
                 Ok(encoded)
             }
+            _ => Err(Error::UnsupportedFormat),
         }
     }
 }

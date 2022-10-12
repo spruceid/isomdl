@@ -15,7 +15,7 @@ pub type ReaderAuth = CoseSign1;
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRequest {
     version: String,
-    doc_requests: Vec<DocRequest>,
+    doc_requests: NonEmptyVec<DocRequest>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -33,5 +33,5 @@ pub struct ItemsRequest {
     #[serde(rename = "nameSpaces")]
     namespaces: Namespaces,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    request_info: Option<String>,
+    request_info: Option<HashMap<String, CborValue>>,
 }

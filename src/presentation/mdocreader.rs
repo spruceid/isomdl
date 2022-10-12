@@ -22,8 +22,10 @@ pub fn establish_session(
     //decode device_engagement
     let device_engagement = DeviceEngagement::try_from(CborValue::from(device_engagement_bytes))?;
 
-    // derive shared secret
+    let mdoc_public_key: DeviceEngagement =
+        serde_cbor::from_slice(device_engagement.security.e_device_key_bytes.as_ref())?;
 
+    // derive shared secret
     //let shared_secret = get_shared_secret(cose_key, encoded_point, e_device_key_priv);
     todo!()
 }

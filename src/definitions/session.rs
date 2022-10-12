@@ -6,7 +6,7 @@ use crate::definitions::device_key::CoseKey;
 use crate::definitions::device_key::EC2Curve;
 use crate::definitions::helpers::bytestr::ByteStr;
 use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
-pub use aes::cipher::generic_array::typenum::U8;
+use aes::cipher::generic_array::typenum::U8;
 use aes::cipher::generic_array::GenericArray;
 use aes_gcm::{
     aead::{Aead, KeyInit, OsRng},
@@ -56,6 +56,10 @@ pub enum Error {
     UnsupportedCurve,
     #[error("Not a NistP256 Shared Secret")]
     SharedSecretError,
+    #[error("42 characters is a valid length for the session key")]
+    SessionKeyError,
+    #[error("Something went wrong generating ephemeral keys")]
+    EphemeralKeyError,
 }
 
 pub enum Handover {
@@ -102,14 +106,10 @@ pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKe
     let private_key = p256::ecdh::EphemeralSecret::random(&mut OsRng);
 
     let encoded_point = ecdsa::EncodedPoint::<NistP256>::from(private_key.public_key());
-    let x_coordinate = encoded_point
-        .x()
-        .expect("something went wrong generating keys");
-    let y_coordinate = encoded_point
-        .y()
-        .expect("something went wrong generating keys");
+    let x_coordinate = encoded_point.x().map_err(Error::EphemeralKeyError);
+    let y_coordinate = encoded_point.y().map_err(Error::EphemeralKeyError);
 
-    let crv = EC2Curve::try_from(1).expect("provide mapped integer for curve");
+    let crv = EC2Curve::try_from(1).map_err(Error::EphemeralKeyError);
     let public_key = CoseKey::EC2 {
         crv: crv,
         x: x_coordinate.to_vec(),
@@ -155,13 +155,11 @@ pub fn derive_session_key(shared_secret: SharedSecret<NistP256>, reader: bool) -
     let sk_reader = "SKReader".as_bytes();
 
     if reader == true {
-        Hkdf::expand(&hkdf, sk_reader, &mut okm)
-            .expect("42 characters is a valid length for the session key");
+        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(Error::SessionKeyError);
 
         okm
     } else {
-        Hkdf::expand(&hkdf, sk_device, &mut okm)
-            .expect("42 characters is a valid length for the session key");
+        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(Error::SessionKeyError);
 
         okm
     }
@@ -180,7 +178,7 @@ mod test {
 
     #[test]
     fn key_generation() {
-        generate_ephemeral_keys(Curves::P384).expect("failed to generate keys");
+        create_ephemeral_keys(Curves::P384).expect("failed to generate keys");
     }
 
     #[test]
