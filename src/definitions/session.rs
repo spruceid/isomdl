@@ -1,3 +1,4 @@
+use super::device_key::cose_key;
 use super::helpers::Tag24;
 use super::DeviceEngagement;
 use crate::definitions::device_engagement::EReaderKeyBytes;
@@ -28,7 +29,7 @@ pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
 pub type DeviceEngagementBytes = Tag24<DeviceEngagement>;
 pub type SessionTranscriptBytes = Tag24<SessionTranscript>;
-pub type NfcHandover = (String, Option<String>);
+pub type NfcHandover = (ByteStr, Option<ByteStr>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEstablishment {
@@ -38,17 +39,12 @@ pub struct SessionEstablishment {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
-    data: ByteStr,
-    status: u64,
+    data: Option<ByteStr>,
+    status: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(try_from = "CborValue")]
-pub struct SessionTranscript(
-    Tag24<DeviceEngagement>,
-    Tag24<CoseKey>,
-    Option<Tag24<ByteStr>>,
-);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTranscript(Tag24<DeviceEngagement>, Tag24<CoseKey>, Handover);
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
@@ -62,9 +58,10 @@ pub enum Error {
     EphemeralKeyError,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Handover {
-    QRHANDOVER(Option<Vec<u8>>),
-    NFCHANDOVER(Option<Vec<u8>>),
+    QR,
+    NFC(NfcHandover),
 }
 
 #[derive(Debug, Clone)]
@@ -106,10 +103,11 @@ pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKe
     let private_key = p256::ecdh::EphemeralSecret::random(&mut OsRng);
 
     let encoded_point = ecdsa::EncodedPoint::<NistP256>::from(private_key.public_key());
-    let x_coordinate = encoded_point.x().map_err(Error::EphemeralKeyError);
-    let y_coordinate = encoded_point.y().map_err(Error::EphemeralKeyError);
+    let p = encoded_point.x();
+    let x_coordinate = encoded_point.x().ok_or(Error::EphemeralKeyError)?;
+    let y_coordinate = encoded_point.y().ok_or(Error::EphemeralKeyError)?;
 
-    let crv = EC2Curve::try_from(1).map_err(Error::EphemeralKeyError);
+    let crv = EC2Curve::try_from(1).map_err(|e| Error::EphemeralKeyError)?;
     let public_key = CoseKey::EC2 {
         crv: crv,
         x: x_coordinate.to_vec(),
@@ -139,7 +137,7 @@ pub fn get_session_transcript_bytes(
         device_engagement_bytes,
         e_reader_key_bytes,
         //Handover is always null for QRHandover
-        None,
+        Handover::QR,
     );
 
     let session_transcript_bytes = Tag24::<SessionTranscript>::new(session_transcript)?;
@@ -155,11 +153,11 @@ pub fn derive_session_key(shared_secret: SharedSecret<NistP256>, reader: bool) -
     let sk_reader = "SKReader".as_bytes();
 
     if reader == true {
-        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(Error::SessionKeyError);
+        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(|e| hkdf::InvalidLength);
 
         okm
     } else {
-        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(Error::SessionKeyError);
+        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(|e| hkdf::InvalidLength);
 
         okm
     }
@@ -172,13 +170,11 @@ pub fn decrypt() {}
 #[cfg(test)]
 mod test {
 
-    use crate::definitions::DeviceEngagement;
-
     use super::*;
 
     #[test]
     fn key_generation() {
-        create_ephemeral_keys(Curves::P384).expect("failed to generate keys");
+        create_p256_ephemeral_keys().expect("failed to generate keys");
     }
 
     #[test]

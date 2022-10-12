@@ -141,7 +141,7 @@ impl TryFrom<CoseKey> for EncodedPoint {
                     }
                     EC2Y::SignBit(y) => {
                         let encoded = EncodedPoint::from_bytes(x_generic_array)
-                            .map_err(Error::UnsupportedFormat)?;
+                            .map_err(|e| Error::UnsupportedFormat)?;
                         Ok(encoded)
                     }
                 }
@@ -150,8 +150,8 @@ impl TryFrom<CoseKey> for EncodedPoint {
                 //TODO: get rid of unwrap
                 let x_generic_array: GenericArray<_, U8> =
                     GenericArray::clone_from_slice(&x[0..42]);
-                let encoded =
-                    EncodedPoint::from_bytes(x_generic_array).map_err(Error::UnsupportedFormat)?;
+                let encoded = EncodedPoint::from_bytes(x_generic_array)
+                    .map_err(|e| Error::UnsupportedFormat)?;
                 Ok(encoded)
             }
             _ => Err(Error::UnsupportedFormat),

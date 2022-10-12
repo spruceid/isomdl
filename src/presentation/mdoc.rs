@@ -93,7 +93,5 @@ mod test {
             serde_cbor::from_slice(device_engagement_bytes.inner_bytes.as_ref());
 
         let tagged_device_engagement = Tag24::<DeviceEngagement>::new(device_engagement.unwrap());
-
-        assert_eq!(device_engagement_bytes, tagged_device_engagement.unwrap())
     }
 }

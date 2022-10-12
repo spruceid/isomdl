@@ -7,10 +7,7 @@ use serde_cbor::Value as CborValue;
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
 
-//the u64 represents a cipher suite identifier
-//pub type Security = (u64, EDeviceKeyBytes);
 pub type DeviceRetrievalMethods = Vec<DeviceRetrievalMethod>;
-// the first u64 represents a type, the second a version
 pub type ProtocolInfo = CborValue;
 pub type Oidc = (u64, String, String);
 pub type WebApi = (u64, String, String);
@@ -22,7 +19,7 @@ use std::{collections::BTreeMap, vec};
 
 use super::{EC2Curve, EC2Y};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "CborValue", into = "CborValue", rename_all = "camelCase")]
 pub struct DeviceEngagement {
     pub version: String,
@@ -41,7 +38,7 @@ pub struct DeviceRetrievalMethod {
     pub retrieval_method: RetrievalOptions,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Security {
     pub cipher_suite_identifier: u64,
     pub e_device_key_bytes: EDeviceKeyBytes,
