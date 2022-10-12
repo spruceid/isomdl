@@ -19,6 +19,7 @@ use chrono::{DateTime, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::{Error as CborError, Value as CborValue};
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::collections::{HashMap, HashSet};
 
 pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
@@ -238,12 +239,7 @@ fn digest_namespaces(
 fn digest_namespace(
     elements: &[IssuerSignedItemBytes],
     digest_algorithm: DigestAlgorithm,
-) -> Result<DigestIds, PreparationError> {
-    let ring_alg = match digest_algorithm {
-        DigestAlgorithm::SHA256 => &ring::digest::SHA256,
-        DigestAlgorithm::SHA384 => &ring::digest::SHA384,
-        DigestAlgorithm::SHA512 => &ring::digest::SHA512,
-    };
+) -> Result<DigestIds> {
     let mut used_ids = elements
         .iter()
         .map(|item| item.as_ref().digest_id)
@@ -267,8 +263,12 @@ fn digest_namespace(
         .chain(random_digests)
         .map(|result| {
             let (digest_id, bytes) = result?;
-            let digest = ring::digest::digest(ring_alg, &bytes);
-            return Ok((digest_id, digest.as_ref().to_vec().into()));
+            let digest = match digest_algorithm {
+                DigestAlgorithm::SHA256 => Sha256::digest(bytes).to_vec(),
+                DigestAlgorithm::SHA384 => Sha384::digest(bytes).to_vec(),
+                DigestAlgorithm::SHA512 => Sha512::digest(bytes).to_vec(),
+            };
+            Ok((digest_id, digest.into()))
         })
         .collect()
 }
@@ -430,6 +430,7 @@ impl Builder {
 mod test {
     use super::*;
     use hex::FromHex;
+    use time::OffsetDateTime;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
     static ISSUER_KEY: &[u8] = include_bytes!("../../test/issuance/256-key.pem");
@@ -443,6 +444,21 @@ mod test {
         let mdl_elements = [("family_name".into(), "Smith".to_string().into())]
             .into_iter()
             .collect();
+
+        let x5chain = X5Chain::builder()
+            .with_pem(ISSUER_CERT)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let validity_info = ValidityInfo {
+            signed: OffsetDateTime::now_utc(),
+            valid_from: OffsetDateTime::now_utc(),
+            valid_until: OffsetDateTime::now_utc(),
+            expected_update: None,
+        };
+
+        let digest_algorithm = DigestAlgorithm::SHA256;
 
         let device_key_bytes =
             <Vec<u8>>::from_hex(COSE_KEY).expect("unable to convert cbor hex to bytes");

@@ -13,7 +13,7 @@ pub struct DeviceResponse {
     documents: Option<Documents>,
     #[serde(skip_serializing_if = "Option::is_none")]
     document_errors: Option<DocumentErrors>,
-    status: u64,
+    status: Status,
 }
 
 pub type Documents = NonEmptyVec<Document>;
@@ -31,6 +31,40 @@ pub struct Document {
 pub type Errors = NonEmptyMap<String, NonEmptyMap<String, i128>>;
 
 pub type DocumentErrors = NonEmptyVec<HashMap<String, i128>>;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u64", into = "u64")]
+pub enum Status {
+    OK,
+    GeneralError,
+    CborDecodingError,
+    CborValidationError,
+}
+
+impl From<Status> for u64 {
+    fn from(s: Status) -> u64 {
+        match s {
+            Status::OK => 0,
+            Status::GeneralError => 10,
+            Status::CborDecodingError => 11,
+            Status::CborValidationError => 12,
+        }
+    }
+}
+
+impl TryFrom<u64> for Status {
+    type Error = String;
+
+    fn try_from(n: u64) -> Result<Status, String> {
+        match n {
+            0 => Ok(Status::OK),
+            10 => Ok(Status::GeneralError),
+            11 => Ok(Status::CborDecodingError),
+            12 => Ok(Status::CborValidationError),
+            _ => Err(format!("unrecognised error code: {n}")),
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {
