@@ -1,10 +1,11 @@
 use crate::definitions::{
     device_engagement::{DeviceRetrievalMethod, RetrievalOptions, Security},
-    helpers::Tag24,
-    session::Curves,
-    CoseKey, DeviceEngagement,
+    helpers::{ByteStr, Tag24},
+    session::{decrypt, derive_session_key, get_shared_secret, Curves},
+    CoseKey, DeviceEngagement, SessionEstablishment,
 };
-use anyhow::Result;
+use anyhow::{Error, Ok, Result};
+use p256::{ecdh::EphemeralSecret, NistP256};
 
 fn prepare_device_engagement(
     retrieval_option: RetrievalOptions,
@@ -61,13 +62,42 @@ fn get_transport_type_and_version(retrieval_option: RetrievalOptions) -> Result<
     }
 }
 
+pub fn process_session_establishment(
+    session_establishment_bytes: Tag24<SessionEstablishment>,
+    e_device_key_priv: EphemeralSecret,
+    message_count: [u8; 4],
+) -> Result<ByteStr> {
+    // derive session keys
+    let session_establishment = session_establishment_bytes.into_inner();
+    let reader_key_bytes = session_establishment.e_reader_key;
+    let shared_secret = get_shared_secret(reader_key_bytes.into_inner(), e_device_key_priv)?;
+    let sk_reader = derive_session_key(&shared_secret, true)?;
+    let _sk_device = derive_session_key(&shared_secret, false)?;
+
+    //decrypt mdoc request
+    let data = decrypt(
+        sk_reader,
+        Vec::<u8>::from(session_establishment.data),
+        message_count,
+        false,
+    )
+    .map_err(|_e| Error::msg("decryption failed"))?;
+
+    //parse mdoc request
+
+    //prepare mdoc response
+
+    //encrypt mdoc responce and prepare session_data
+    Ok(data)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::definitions::{
         device_engagement::RetrievalOptions,
         helpers::{ByteStr, Tag24},
-        session::{create_p256_ephemeral_keys, Curves},
+        session::create_p256_ephemeral_keys,
         BleOptions, DeviceEngagement,
     };
     use serde_cbor::Error as SerdeCborError;
@@ -95,6 +125,6 @@ mod test {
         let device_engagement: Result<DeviceEngagement, SerdeCborError> =
             serde_cbor::from_slice(device_engagement_bytes.inner_bytes.as_ref());
 
-        let tagged_device_engagement = Tag24::<DeviceEngagement>::new(device_engagement.unwrap());
+        let _tagged_device_engagement = Tag24::<DeviceEngagement>::new(device_engagement.unwrap());
     }
 }

@@ -347,7 +347,7 @@ impl TryFrom<CborValue> for Security {
                 })?;
 
                 match mdoc_public_key {
-                    CborValue::Tag(tag, key_bytes) => match *key_bytes {
+                    CborValue::Tag(_tag, key_bytes) => match *key_bytes {
                         CborValue::Bytes(bytes) => {
                             let cose_key = serde_cbor::from_slice(bytes.as_ref())?;
                             key = Tag24::<CoseKey>::new(cose_key)?;

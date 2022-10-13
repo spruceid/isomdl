@@ -7,7 +7,12 @@ use crate::definitions::device_key::EC2Curve;
 use crate::definitions::helpers::bytestr::ByteStr;
 use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
 
-use aes_gcm::aead::OsRng;
+use aes::cipher::generic_array::GenericArray;
+use aes_gcm::{
+    aead::{Aead, KeyInit, OsRng},
+    Aes256Gcm,
+    Nonce, // Or `Aes128Gcm`
+};
 use anyhow::Result;
 use ecdsa::EncodedPoint;
 use elliptic_curve::{ecdh::EphemeralSecret, ecdh::SharedSecret, PublicKey};
@@ -26,14 +31,14 @@ pub type NfcHandover = (ByteStr, Option<ByteStr>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEstablishment {
-    e_reader_key: EReaderKeyBytes,
-    data: ByteStr,
+    pub e_reader_key: EReaderKeyBytes,
+    pub data: ByteStr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
-    data: Option<ByteStr>,
-    status: Option<u64>,
+    pub data: Option<ByteStr>,
+    pub status: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,7 +106,7 @@ pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKe
     let x_coordinate = encoded_point.x().ok_or(Error::EphemeralKeyError)?;
     let y_coordinate = encoded_point.y().ok_or(Error::EphemeralKeyError)?;
 
-    let crv = EC2Curve::try_from(1).map_err(|e| Error::EphemeralKeyError)?;
+    let crv = EC2Curve::try_from(1).map_err(|_e| Error::EphemeralKeyError)?;
     let public_key = CoseKey::EC2 {
         crv: crv,
         x: x_coordinate.to_vec(),
@@ -138,36 +143,88 @@ pub fn get_session_transcript_bytes(
     Ok(session_transcript_bytes)
 }
 
-pub fn derive_session_key(shared_secret: SharedSecret<NistP256>, reader: bool) -> Result<[u8; 42]> {
+pub fn derive_session_key(
+    shared_secret: &SharedSecret<NistP256>,
+    reader: bool,
+) -> Result<[u8; 32]> {
     //Todo: add salt
 
     let hkdf: Hkdf<Sha256, SimpleHmac<Sha256>> = shared_secret.extract(None);
-    let mut okm = [0u8; 42];
+    let mut okm = [0u8; 32];
     let sk_device = "SKDevice".as_bytes();
     let sk_reader = "SKReader".as_bytes();
 
     if reader == true {
-        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(|e| Error::InvalidLength)?;
+        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(|_e| Error::InvalidLength)?;
 
         Ok(okm)
     } else {
-        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(|e| Error::InvalidLength)?;
+        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(|_e| Error::InvalidLength)?;
 
         Ok(okm)
     }
 }
 
-pub fn encrypt() {}
+pub fn encrypt(
+    session_key: [u8; 32],
+    data: ByteStr,
+    message_count: [u8; 4],
+    reader: bool,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    let initialization_vector = get_initialization_vector(message_count, reader)?;
+    let key = GenericArray::from_slice(&session_key);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = Nonce::from_slice(&initialization_vector);
 
-pub fn decrypt() {}
+    let ciphertext = cipher.encrypt(nonce, data.as_ref())?;
+
+    Ok(ciphertext)
+}
+
+pub fn decrypt(
+    session_key: [u8; 32],
+    encrypted_data: Vec<u8>,
+    message_count: [u8; 4],
+    reader: bool,
+) -> Result<ByteStr, aes_gcm::Error> {
+    let initialization_vector = get_initialization_vector(message_count, reader)?;
+    let nonce = Nonce::from_slice(&initialization_vector);
+    let key = GenericArray::from_slice(&session_key);
+    let cipher = Aes256Gcm::new(key);
+
+    let plaintext = cipher.decrypt(nonce, encrypted_data.as_ref())?;
+
+    Ok(ByteStr::from(plaintext))
+}
+
+pub fn get_initialization_vector(
+    message_count: [u8; 4],
+    reader: bool,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    let mdoc_reader_identifier: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let mdoc_identifier: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+
+    let mut initialisation_vector: Vec<u8> = vec![];
+    if reader {
+        initialisation_vector.extend_from_slice(&mdoc_reader_identifier);
+        initialisation_vector.extend_from_slice(&message_count);
+    } else {
+        initialisation_vector.extend_from_slice(&mdoc_identifier);
+        initialisation_vector.extend_from_slice(&message_count);
+    }
+
+    Ok(initialisation_vector)
+}
 
 #[cfg(test)]
 mod test {
 
     use super::*;
+    use byteorder::{BigEndian, ByteOrder};
 
     #[test]
     fn key_generation() {
+        //todo fully test the exchange of keys and the resulting session keys e2e
         create_p256_ephemeral_keys().expect("failed to generate keys");
     }
 
@@ -181,7 +238,47 @@ mod test {
             .expect("failed to derive secrets from public and private key");
         let reader_shared_secret = get_shared_secret(pub_key_device, reader_keys.0)
             .expect("failed to derive secret from public and private key");
-        let session_key_device = derive_session_key(device_shared_secret, false);
-        let session_key_reader = derive_session_key(reader_shared_secret, true);
+
+        let _session_key_device = derive_session_key(&device_shared_secret, false);
+        let _session_key_reader = derive_session_key(&reader_shared_secret, true);
+    }
+
+    #[test]
+    fn test_encryption_decryption() {
+        let reader_keys = create_p256_ephemeral_keys().expect("failed to generate reader keys");
+        let device_keys = create_p256_ephemeral_keys().expect("failed to generate device keys");
+        let pub_key_reader = reader_keys.1;
+        let pub_key_device = device_keys.1;
+        let device_shared_secret = get_shared_secret(pub_key_reader, device_keys.0)
+            .expect("failed to derive secrets from public and private key");
+        let reader_shared_secret = get_shared_secret(pub_key_device, reader_keys.0)
+            .expect("failed to derive secret from public and private key");
+
+        let _session_key_device = derive_session_key(&device_shared_secret, false).unwrap();
+
+        let session_key_reader = derive_session_key(&reader_shared_secret, true).unwrap();
+
+        let message = "a message to encrypt!".as_bytes().to_vec();
+        let msg = ByteStr::from(message);
+
+        //encrypt with reader key
+        let mut message_count_bytes = [0; 4];
+        BigEndian::write_u32(&mut message_count_bytes, 1);
+
+        let encrypted_message = encrypt(
+            session_key_reader.clone(),
+            msg.clone(),
+            message_count_bytes,
+            true,
+        );
+
+        let decrypted_message = decrypt(
+            session_key_reader,
+            encrypted_message.unwrap(),
+            message_count_bytes,
+            true,
+        );
+
+        assert_eq!(msg, decrypted_message.unwrap());
     }
 }
