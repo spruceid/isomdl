@@ -1,15 +1,12 @@
 use crate::definitions::{
-    device_engagement::{self, BleOptions, DeviceRetrievalMethod, RetrievalOptions, Security},
-    helpers::{ByteStr, Tag24},
-    session::{create_p256_ephemeral_keys, Curves, EncodedPoints},
-    CoseKey, DeviceEngagement, SessionData, SessionEstablishment,
+    device_engagement::{DeviceRetrievalMethod, RetrievalOptions, Security},
+    helpers::Tag24,
+    session::Curves,
+    CoseKey, DeviceEngagement,
 };
 use anyhow::Result;
-use serde_cbor::Error as SerdeCborError;
-use serde_cbor::Value as CborValue;
 
 fn prepare_device_engagement(
-    crv: Curves,
     retrieval_option: RetrievalOptions,
     public_key: CoseKey,
 ) -> Result<Tag24<DeviceEngagement>> {
@@ -67,10 +64,16 @@ fn get_transport_type_and_version(retrieval_option: RetrievalOptions) -> Result<
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::definitions::{
+        device_engagement::RetrievalOptions,
+        helpers::{ByteStr, Tag24},
+        session::{create_p256_ephemeral_keys, Curves},
+        BleOptions, DeviceEngagement,
+    };
+    use serde_cbor::Error as SerdeCborError;
 
     #[test]
     fn device_engagement_cbor_roundtrip() {
-        let crv = Curves::P256;
         let key_pair = create_p256_ephemeral_keys();
         let public_key = key_pair.unwrap().1;
 
@@ -86,7 +89,7 @@ mod test {
         };
 
         let device_engagement_bytes =
-            prepare_device_engagement(crv, RetrievalOptions::BLEOPTIONS(ble_option), public_key)
+            prepare_device_engagement(RetrievalOptions::BLEOPTIONS(ble_option), public_key)
                 .expect("failed to prepare for device engagement");
 
         let device_engagement: Result<DeviceEngagement, SerdeCborError> =

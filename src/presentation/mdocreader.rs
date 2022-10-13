@@ -1,15 +1,10 @@
-use crate::definitions::session::get_shared_secret;
 use crate::definitions::DeviceEngagement;
 use crate::definitions::{
-    device_engagement,
     session::{create_p256_ephemeral_keys, DeviceEngagementBytes, SharedSecrets},
     SessionEstablishment,
 };
-use anyhow::{Error, Result};
-use hex_literal::hex;
-use hkdf::Hkdf;
+use anyhow::Result;
 use serde_cbor::Value as CborValue;
-use sha2::Sha256;
 
 pub fn establish_session(
     device_engagement_bytes: DeviceEngagementBytes,

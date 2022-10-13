@@ -1,4 +1,3 @@
-use super::device_key::cose_key;
 use super::helpers::Tag24;
 use super::DeviceEngagement;
 use crate::definitions::device_engagement::EReaderKeyBytes;
@@ -7,13 +6,8 @@ use crate::definitions::device_key::CoseKey;
 use crate::definitions::device_key::EC2Curve;
 use crate::definitions::helpers::bytestr::ByteStr;
 use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
-use aes::cipher::generic_array::typenum::U8;
-use aes::cipher::generic_array::GenericArray;
-use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm,
-    Nonce, // Or `Aes128Gcm`
-};
+
+use aes_gcm::aead::OsRng;
 use anyhow::Result;
 use ecdsa::EncodedPoint;
 use elliptic_curve::{ecdh::EphemeralSecret, ecdh::SharedSecret, PublicKey};
@@ -22,7 +16,6 @@ use hmac::SimpleHmac;
 use p256::NistP256;
 use p384::NistP384;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use sha2::Sha256;
 
 pub type EReaderKey = CoseKey;
@@ -52,10 +45,12 @@ pub enum Error {
     UnsupportedCurve,
     #[error("Not a NistP256 Shared Secret")]
     SharedSecretError,
-    #[error("42 characters is a valid length for the session key")]
+    #[error("Could not derive Shared Secret")]
     SessionKeyError,
     #[error("Something went wrong generating ephemeral keys")]
     EphemeralKeyError,
+    #[error("42 characters is a valid length for the session key")]
+    InvalidLength,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,7 +98,6 @@ pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKe
     let private_key = p256::ecdh::EphemeralSecret::random(&mut OsRng);
 
     let encoded_point = ecdsa::EncodedPoint::<NistP256>::from(private_key.public_key());
-    let p = encoded_point.x();
     let x_coordinate = encoded_point.x().ok_or(Error::EphemeralKeyError)?;
     let y_coordinate = encoded_point.y().ok_or(Error::EphemeralKeyError)?;
 
@@ -144,7 +138,7 @@ pub fn get_session_transcript_bytes(
     Ok(session_transcript_bytes)
 }
 
-pub fn derive_session_key(shared_secret: SharedSecret<NistP256>, reader: bool) -> [u8; 42] {
+pub fn derive_session_key(shared_secret: SharedSecret<NistP256>, reader: bool) -> Result<[u8; 42]> {
     //Todo: add salt
 
     let hkdf: Hkdf<Sha256, SimpleHmac<Sha256>> = shared_secret.extract(None);
@@ -153,13 +147,13 @@ pub fn derive_session_key(shared_secret: SharedSecret<NistP256>, reader: bool) -
     let sk_reader = "SKReader".as_bytes();
 
     if reader == true {
-        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(|e| hkdf::InvalidLength);
+        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(|e| Error::InvalidLength)?;
 
-        okm
+        Ok(okm)
     } else {
-        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(|e| hkdf::InvalidLength);
+        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(|e| Error::InvalidLength)?;
 
-        okm
+        Ok(okm)
     }
 }
 

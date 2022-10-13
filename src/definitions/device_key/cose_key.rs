@@ -52,6 +52,8 @@ pub enum Error {
     UnsupportedCurve,
     #[error("This implementation of COSE_Key only supports EC2 and OKP keys.")]
     UnsupportedFormat,
+    #[error("Could not reconstruct coordinates from the provided COSE_Key")]
+    InvalidCoseKey,
 }
 
 impl From<CoseKey> for CborValue {
@@ -140,21 +142,27 @@ impl TryFrom<CoseKey> for EncodedPoint {
                         ))
                     }
                     EC2Y::SignBit(y) => {
-                        let encoded = EncodedPoint::from_bytes(x_generic_array)
-                            .map_err(|e| Error::UnsupportedFormat)?;
+                        let mut bytes = x.clone();
+                        if y {
+                            bytes.insert(0, 3)
+                        } else {
+                            bytes.insert(0, 2)
+                        }
+
+                        let encoded =
+                            EncodedPoint::from_bytes(bytes).map_err(|e| Error::InvalidCoseKey)?;
                         Ok(encoded)
                     }
                 }
             }
             CoseKey::OKP { crv, x } => {
-                //TODO: get rid of unwrap
                 let x_generic_array: GenericArray<_, U8> =
                     GenericArray::clone_from_slice(&x[0..42]);
-                let encoded = EncodedPoint::from_bytes(x_generic_array)
-                    .map_err(|e| Error::UnsupportedFormat)?;
+                let encoded =
+                    EncodedPoint::from_bytes(x_generic_array).map_err(|e| Error::InvalidCoseKey)?;
                 Ok(encoded)
             }
-            _ => Err(Error::UnsupportedFormat),
+            _ => Err(Error::InvalidCoseKey),
         }
     }
 }
