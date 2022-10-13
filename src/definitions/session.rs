@@ -108,7 +108,7 @@ pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKe
 
     let crv = EC2Curve::try_from(1).map_err(|_e| Error::EphemeralKeyError)?;
     let public_key = CoseKey::EC2 {
-        crv: crv,
+        crv,
         x: x_coordinate.to_vec(),
         y: EC2Y::Value(y_coordinate.to_vec()),
     };
@@ -154,7 +154,7 @@ pub fn derive_session_key(
     let sk_device = "SKDevice".as_bytes();
     let sk_reader = "SKReader".as_bytes();
 
-    if reader == true {
+    if reader {
         Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(|_e| Error::InvalidLength)?;
 
         Ok(okm)
@@ -266,7 +266,7 @@ mod test {
         BigEndian::write_u32(&mut message_count_bytes, 1);
 
         let encrypted_message = encrypt(
-            session_key_reader.clone(),
+            session_key_reader,
             msg.clone(),
             message_count_bytes,
             true,

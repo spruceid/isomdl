@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct ByteStr(Vec<u8>);
 

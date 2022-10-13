@@ -5,7 +5,7 @@ use crate::definitions::{
     CoseKey, DeviceEngagement, SessionEstablishment,
 };
 use anyhow::{Error, Ok, Result};
-use p256::{ecdh::EphemeralSecret, NistP256};
+use p256::{ecdh::EphemeralSecret};
 
 fn prepare_device_engagement(
     retrieval_option: RetrievalOptions,
@@ -23,13 +23,13 @@ fn prepare_device_engagement(
 
     let security: Security = Security {
         cipher_suite_identifier: 1,
-        e_device_key_bytes: e_device_key_bytes,
+        e_device_key_bytes,
     };
 
     let device_engagement = DeviceEngagement {
         //version 1.0 is the only version to date
         version: "1.0".to_string(),
-        security: security,
+        security,
         device_retrieval_methods: Some(device_retrieval_options),
         //server_retrieval is not implemented
         server_retrieval_methods: None,

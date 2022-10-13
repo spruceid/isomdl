@@ -52,7 +52,7 @@ pub enum RetrievalOptions {
     NFCOPTIONS(NfcOptions),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerRetrievalMethods {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,7 +61,7 @@ pub struct ServerRetrievalMethods {
     oidc: Option<Oidc>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", rename_all = "camelCase")]
 pub struct BleOptions {
     pub peripheral_server_mode: bool,
@@ -74,7 +74,7 @@ pub struct BleOptions {
     pub mdoc_ble_device_address_peripheral_server: Option<ByteStr>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WifiOptions {
     pass_phrase: String,
@@ -83,7 +83,7 @@ pub struct WifiOptions {
     band_info: ByteStr,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct NfcOptions {
     max_len_command_data_field: u64,
@@ -193,8 +193,8 @@ impl TryFrom<CborValue> for DeviceEngagement {
             }
 
             let device_engagement = DeviceEngagement {
-                version: version,
-                security: security,
+                version,
+                security,
                 device_retrieval_methods: Some(device_retrieval_methods),
                 server_retrieval_methods: None,
                 protocol_info: None,
