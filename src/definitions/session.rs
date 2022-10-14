@@ -131,6 +131,6 @@ mod test {
 
     #[test]
     fn key_generation() {
-        let key_pair = generate_ephemeral_keys(Curves::P256);
+        let _key_pair = generate_ephemeral_keys(Curves::P256);
     }
 }

@@ -184,17 +184,15 @@ impl Holder {
                                     device_namespaces.insert(namespace.clone(), device_signed);
                                 }
                             }
+                        } else if let Some(returned_errors) = errors.get_mut(&namespace) {
+                            returned_errors
+                                .insert(element_identifier, DocumentErrorCode::DataNotReturned);
                         } else {
-                            if let Some(returned_errors) = errors.get_mut(&namespace) {
-                                returned_errors
-                                    .insert(element_identifier, DocumentErrorCode::DataNotReturned);
-                            } else {
-                                let returned_errors = NonEmptyMap::new(
-                                    element_identifier,
-                                    DocumentErrorCode::DataNotReturned,
-                                );
-                                errors.insert(namespace.clone(), returned_errors);
-                            }
+                            let returned_errors = NonEmptyMap::new(
+                                element_identifier,
+                                DocumentErrorCode::DataNotReturned,
+                            );
+                            errors.insert(namespace.clone(), returned_errors);
                         }
                     }
                 } else {
