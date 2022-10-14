@@ -287,7 +287,7 @@ impl PreparedDeviceResponse {
         }
     }
 
-    /// Identifies that the response ready to be finalised.
+    /// Identifies that the response ready to be finalized.
     ///
     /// If false, then there are still items that need to be authorized.
     pub fn is_complete(&self) -> bool {
@@ -304,9 +304,9 @@ impl PreparedDeviceResponse {
             .map(|doc| doc.prepared_cose_sign1.signature_payload())
     }
 
-    pub fn finalise_next_signature(&mut self, signature: Vec<u8>) {
+    pub fn finalize_next_signature(&mut self, signature: Vec<u8>) {
         let signed_doc = match self.prepared_documents.pop() {
-            Some(doc) => doc.finalise(signature),
+            Some(doc) => doc.finalize(signature),
             None => {
                 tracing::error!(
                     "received a signature for finalising when there are no more prepared docs"
@@ -317,10 +317,10 @@ impl PreparedDeviceResponse {
         self.signed_documents.push(signed_doc);
     }
 
-    pub fn finalise_response(self) -> DeviceResponse {
+    pub fn finalize_response(self) -> DeviceResponse {
         if !self.is_complete() {
-            tracing::warn!("attempt to finalise PreparedDeviceResponse before all prepared documents had been authorized");
-            return PreparedDeviceResponse::empty(Status::GeneralError).finalise_response();
+            tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
+            return PreparedDeviceResponse::empty(Status::GeneralError).finalize_response();
         }
 
         DeviceResponse {
@@ -333,7 +333,7 @@ impl PreparedDeviceResponse {
 }
 
 impl PreparedDocument {
-    fn finalise(self, signature: Vec<u8>) -> DeviceResponseDoc {
+    fn finalize(self, signature: Vec<u8>) -> DeviceResponseDoc {
         let Self {
             issuer_signed,
             device_namespaces,
@@ -342,7 +342,7 @@ impl PreparedDocument {
             doc_type,
             ..
         } = self;
-        let cose_sign1 = prepared_cose_sign1.finalise(signature);
+        let cose_sign1 = prepared_cose_sign1.finalize(signature);
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,
             device_auth: DeviceAuth::Signature {

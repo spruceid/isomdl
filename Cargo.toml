@@ -30,7 +30,7 @@ uuid = "1.2.1"
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"
-rev = "e8813a4"
+rev = "f9205d4"
 
 [dev-dependencies]
 hex = "0.4.3"
