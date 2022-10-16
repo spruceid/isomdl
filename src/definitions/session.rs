@@ -21,7 +21,7 @@ use hmac::SimpleHmac;
 use p256::NistP256;
 use p384::NistP384;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
@@ -157,11 +157,14 @@ pub fn derive_session_key(
     device_engagement_bytes: DeviceEngagementBytes,
     reader: bool,
 ) -> Result<[u8; 32]> {
+    let mut hasher = Sha256::new();
     let session_transcript_bytes =
         get_session_transcript_bytes(public_key_reader, device_engagement_bytes)?.inner_bytes;
 
+    hasher.update(session_transcript_bytes);
+
     let hkdf: Hkdf<Sha256, SimpleHmac<Sha256>> =
-        shared_secret.extract(Some(session_transcript_bytes.as_ref()));
+        shared_secret.extract(Some(hasher.finalize().as_ref()));
     let mut okm = [0u8; 32];
     let sk_device = "SKDevice".as_bytes();
     let sk_reader = "SKReader".as_bytes();
