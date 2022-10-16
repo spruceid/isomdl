@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "Vec<T>", into = "Vec<T>")]
 pub struct NonEmptyVec<T: Clone>(Vec<T>);
 

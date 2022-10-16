@@ -15,9 +15,10 @@ use aes_gcm::{
 };
 use anyhow::Result;
 use ecdsa::EncodedPoint;
-use elliptic_curve::{ecdh::EphemeralSecret, ecdh::SharedSecret, PublicKey};
+use elliptic_curve::{
+    ecdh::EphemeralSecret, ecdh::SharedSecret, generic_array::sequence::Concat, PublicKey,
+};
 use hkdf::Hkdf;
-use hmac::SimpleHmac;
 use p256::NistP256;
 use p384::NistP384;
 use serde::{Deserialize, Serialize};
@@ -42,7 +43,11 @@ pub struct SessionData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionTranscript(Tag24<DeviceEngagement>, Tag24<CoseKey>, Handover);
+pub struct SessionTranscript(
+    pub Tag24<DeviceEngagement>,
+    pub Tag24<CoseKey>,
+    pub Handover,
+);
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
@@ -54,8 +59,6 @@ pub enum Error {
     SessionKeyError,
     #[error("Something went wrong generating ephemeral keys")]
     EphemeralKeyError,
-    #[error("42 characters is a valid length for the session key")]
-    InvalidLength,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,7 +129,7 @@ pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKe
 
 pub fn get_shared_secret(
     cose_key: CoseKey,
-    e_device_key_priv: EphemeralSecret<NistP256>,
+    e_device_key_priv: &EphemeralSecret<NistP256>,
 ) -> Result<SharedSecret<NistP256>> {
     let encoded_point: EncodedPoint<NistP256> = EncodedPoint::<NistP256>::try_from(cose_key)?;
     let public_key = PublicKey::from_sec1_bytes(encoded_point.as_ref())?;
@@ -134,112 +137,97 @@ pub fn get_shared_secret(
     Ok(shared_secret)
 }
 
-pub fn get_session_transcript_bytes(
-    public_key: CoseKey,
-    device_engagement_bytes: DeviceEngagementBytes,
-) -> Result<SessionTranscriptBytes> {
-    let e_reader_key_bytes = Tag24::<CoseKey>::new(public_key)?;
-
-    let session_transcript = SessionTranscript(
-        device_engagement_bytes,
-        e_reader_key_bytes,
-        //Handover is always null for QRHandover
-        Handover::QR,
-    );
-
-    let session_transcript_bytes = Tag24::<SessionTranscript>::new(session_transcript)?;
-    Ok(session_transcript_bytes)
-}
-
 pub fn derive_session_key(
     shared_secret: &SharedSecret<NistP256>,
-    public_key_reader: CoseKey,
-    device_engagement_bytes: DeviceEngagementBytes,
+    session_transcript: &Tag24<SessionTranscript>,
     reader: bool,
-) -> Result<[u8; 32]> {
-    let mut hasher = Sha256::new();
-    let session_transcript_bytes =
-        get_session_transcript_bytes(public_key_reader, device_engagement_bytes)?.inner_bytes;
-
-    hasher.update(session_transcript_bytes);
-
-    let hkdf: Hkdf<Sha256, SimpleHmac<Sha256>> =
-        shared_secret.extract(Some(hasher.finalize().as_ref()));
+) -> Aes256Gcm {
+    let salt = Sha256::digest(&session_transcript.inner_bytes);
+    let hkdf = shared_secret.extract::<Sha256>(Some(salt.as_ref()));
     let mut okm = [0u8; 32];
     let sk_device = "SKDevice".as_bytes();
     let sk_reader = "SKReader".as_bytes();
 
+    // Safe to unwrap as error will only occur if okm.len() is greater than 255 * 32;
     if reader {
-        Hkdf::expand(&hkdf, sk_reader, &mut okm).map_err(|_e| Error::InvalidLength)?;
-
-        Ok(okm)
+        Hkdf::expand(&hkdf, sk_reader, &mut okm).unwrap();
     } else {
-        Hkdf::expand(&hkdf, sk_device, &mut okm).map_err(|_e| Error::InvalidLength)?;
-
-        Ok(okm)
-    }
-}
-
-pub fn encrypt(
-    session_key: [u8; 32],
-    data: ByteStr,
-    message_count: [u8; 4],
-    reader: bool,
-) -> Result<Vec<u8>, aes_gcm::Error> {
-    let initialization_vector = get_initialization_vector(message_count, reader)?;
-    let key = GenericArray::from_slice(&session_key);
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(&initialization_vector);
-
-    let ciphertext = cipher.encrypt(nonce, data.as_ref())?;
-
-    Ok(ciphertext)
-}
-
-pub fn decrypt(
-    session_key: [u8; 32],
-    encrypted_data: Vec<u8>,
-    message_count: [u8; 4],
-    reader: bool,
-) -> Result<ByteStr, aes_gcm::Error> {
-    let initialization_vector = get_initialization_vector(message_count, reader)?;
-    let nonce = Nonce::from_slice(&initialization_vector);
-    let key = GenericArray::from_slice(&session_key);
-    let cipher = Aes256Gcm::new(key);
-
-    let plaintext = cipher.decrypt(nonce, encrypted_data.as_ref())?;
-
-    Ok(ByteStr::from(plaintext))
-}
-
-pub fn get_initialization_vector(
-    message_count: [u8; 4],
-    reader: bool,
-) -> Result<Vec<u8>, aes_gcm::Error> {
-    let mdoc_reader_identifier: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-    let mdoc_identifier: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
-
-    let mut initialisation_vector: Vec<u8> = vec![];
-    if reader {
-        initialisation_vector.extend_from_slice(&mdoc_reader_identifier);
-        initialisation_vector.extend_from_slice(&message_count);
-    } else {
-        initialisation_vector.extend_from_slice(&mdoc_identifier);
-        initialisation_vector.extend_from_slice(&message_count);
+        Hkdf::expand(&hkdf, sk_device, &mut okm).unwrap();
     }
 
-    Ok(initialisation_vector)
+    Aes256Gcm::new(&okm.into())
+}
+
+pub fn encrypt_mdoc_data(
+    sk_device: &Aes256Gcm,
+    ciphertext: &[u8],
+    message_count: &mut u32,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    encrypt(sk_device, ciphertext, message_count, false)
+}
+
+pub fn encrypt_reader_data(
+    sk_reader: &Aes256Gcm,
+    ciphertext: &[u8],
+    message_count: &mut u32,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    encrypt(sk_reader, ciphertext, message_count, true)
+}
+
+fn encrypt(
+    session_key: &Aes256Gcm,
+    plaintext: &[u8],
+    message_count: &mut u32,
+    reader: bool,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    let initialization_vector = get_initialization_vector(message_count, reader);
+    let nonce = Nonce::from(initialization_vector);
+    session_key.encrypt(&nonce, plaintext)
+}
+
+pub fn decrypt_mdoc_data(
+    sk_device: &Aes256Gcm,
+    ciphertext: &[u8],
+    message_count: &mut u32,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    decrypt(sk_device, ciphertext, message_count, false)
+}
+
+pub fn decrypt_reader_data(
+    sk_reader: &Aes256Gcm,
+    ciphertext: &[u8],
+    message_count: &mut u32,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    decrypt(sk_reader, ciphertext, message_count, true)
+}
+
+fn decrypt(
+    session_key: &Aes256Gcm,
+    ciphertext: &[u8],
+    message_count: &mut u32,
+    reader: bool,
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    let initialization_vector = get_initialization_vector(message_count, reader);
+    let nonce = Nonce::from(initialization_vector);
+    session_key.decrypt(&nonce, ciphertext)
+}
+
+pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 12] {
+    *message_count += 1;
+    let counter = GenericArray::from(message_count.to_be_bytes());
+    let identifier = if reader {
+        GenericArray::from([0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8])
+    } else {
+        GenericArray::from([0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 1u8])
+    };
+
+    identifier.concat(counter).into()
 }
 
 #[cfg(test)]
 mod test {
-
-    use crate::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethod};
-    use crate::presentation::mdoc::prepare_device_engagement;
-
     use super::*;
-    use crate::definitions::BleOptions;
-    use byteorder::{BigEndian, ByteOrder};
+    use crate::definitions::device_engagement::Security;
 
     #[test]
     fn key_generation() {
@@ -254,56 +242,47 @@ mod test {
         let pub_key_reader = reader_keys.1;
         let pub_key_device = device_keys.1;
 
-        let device_shared_secret = get_shared_secret(pub_key_reader.clone(), device_keys.0)
+        let device_shared_secret = get_shared_secret(pub_key_reader.clone(), &device_keys.0)
             .expect("failed to derive secrets from public and private key");
-        let reader_shared_secret = get_shared_secret(pub_key_device.clone(), reader_keys.0)
+        let reader_shared_secret = get_shared_secret(pub_key_device.clone(), &reader_keys.0)
             .expect("failed to derive secret from public and private key");
 
-        let uuid = uuid::Uuid::now_v1(&[0, 1, 2, 3, 4, 5]);
+        let device_key_bytes = Tag24::new(pub_key_device).unwrap();
+        let reader_key_bytes = Tag24::new(pub_key_reader).unwrap();
 
-        let ble_option = BleOptions {
-            peripheral_server_mode: None,
-            central_client_mode: Some(CentralClientMode { uuid }),
+        let device_engagement = DeviceEngagement {
+            version: "1.0".into(),
+            security: Security(1, device_key_bytes),
+            device_retrieval_methods: None,
+            server_retrieval_methods: None,
+            protocol_info: None,
         };
 
-        let device_engagement_bytes = prepare_device_engagement(
-            DeviceRetrievalMethod::BLE(ble_option),
-            pub_key_reader.clone(),
-        )
-        .expect("failed to prepare for device engagement");
-
-        let _session_key_device = derive_session_key(
-            &device_shared_secret,
-            pub_key_reader.clone(),
-            device_engagement_bytes.clone(),
-            false,
-        )
-        .unwrap();
-
-        let session_key_reader = derive_session_key(
-            &reader_shared_secret,
-            pub_key_reader,
+        let device_engagement_bytes = Tag24::new(device_engagement).unwrap();
+        let session_transcript = Tag24::new(SessionTranscript(
             device_engagement_bytes,
-            true,
-        )
+            reader_key_bytes,
+            Handover::QR,
+        ))
         .unwrap();
+        let _session_key_device =
+            derive_session_key(&device_shared_secret, &session_transcript, false);
 
-        let message = "a message to encrypt!".as_bytes().to_vec();
-        let msg = ByteStr::from(message);
+        let session_key_reader =
+            derive_session_key(&reader_shared_secret, &session_transcript, true);
 
-        //encrypt with reader key
-        let mut message_count_bytes = [0; 4];
-        BigEndian::write_u32(&mut message_count_bytes, 1);
+        let plaintext = "a message to encrypt!".as_bytes();
 
-        let encrypted_message = encrypt(session_key_reader, msg.clone(), message_count_bytes, true);
+        let mut message_count = 0;
 
-        let decrypted_message = decrypt(
-            session_key_reader,
-            encrypted_message.unwrap(),
-            message_count_bytes,
-            true,
-        );
+        let ciphertext =
+            encrypt_reader_data(&session_key_reader, plaintext, &mut message_count).unwrap();
 
-        assert_eq!(msg, decrypted_message.unwrap());
+        let mut message_count = 0;
+
+        let decrypted_plaintext =
+            decrypt_reader_data(&session_key_reader, &ciphertext, &mut message_count).unwrap();
+
+        assert_eq!(plaintext, decrypted_plaintext);
     }
 }

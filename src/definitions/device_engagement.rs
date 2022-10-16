@@ -18,7 +18,7 @@ pub type ProtocolInfo = CborValue;
 pub type Oidc = (u64, String, String);
 pub type WebApi = (u64, String, String);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue", rename_all = "camelCase")]
 pub struct DeviceEngagement {
     pub version: String,
@@ -38,11 +38,8 @@ pub enum DeviceRetrievalMethod {
     NFC(NfcOptions),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Security {
-    pub cipher_suite_identifier: u64,
-    pub e_device_key_bytes: EDeviceKeyBytes,
-}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Security(pub u64, pub EDeviceKeyBytes);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -137,8 +134,8 @@ impl From<DeviceEngagement> for CborValue {
         map.insert(
             CborValue::Integer(1),
             CborValue::Array(vec![
-                CborValue::Integer(device_engagement.security.cipher_suite_identifier.into()),
-                CborValue::from(device_engagement.security.e_device_key_bytes),
+                device_engagement.security.0.into(),
+                device_engagement.security.1.into(),
             ]),
         );
         if let Some(methods) = device_engagement.device_retrieval_methods {
@@ -171,7 +168,8 @@ impl TryFrom<CborValue> for DeviceEngagement {
             let device_engagement_security =
                 map.remove(&CborValue::Integer(1)).ok_or(Error::Malformed)?;
 
-            let security: Security = Security::try_from(device_engagement_security)?;
+            let security: Security = serde_cbor::value::from_value(device_engagement_security)
+                .map_err(|_| Error::Malformed)?;
 
             let device_retrieval_methods = map
                 .remove(&CborValue::Integer(2))
@@ -258,27 +256,6 @@ impl From<DeviceRetrievalMethod> for CborValue {
             DeviceRetrievalMethod::WIFI(opts) => opts.into(),
         };
         CborValue::Array(vec![transport_type, version, retrieval_method])
-    }
-}
-
-impl TryFrom<CborValue> for Security {
-    type Error = Error;
-    fn try_from(device_engagement_security: CborValue) -> Result<Self, Self::Error> {
-        match device_engagement_security {
-            CborValue::Array(sec) => {
-                let [id, key]: [CborValue; 2] = sec.try_into().map_err(|_| Error::Malformed)?;
-
-                let cipher_suite_identifier = serde_cbor::value::from_value(id)
-                    .map_err(|_| Error::InvalidDeviceEngagement)?;
-                let e_device_key_bytes =
-                    key.try_into().map_err(|_| Error::InvalidDeviceEngagement)?;
-                Ok(Security {
-                    cipher_suite_identifier,
-                    e_device_key_bytes,
-                })
-            }
-            _ => Err(Error::Malformed),
-        }
     }
 }
 
