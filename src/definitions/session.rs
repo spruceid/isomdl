@@ -153,11 +153,15 @@ pub fn get_session_transcript_bytes(
 
 pub fn derive_session_key(
     shared_secret: &SharedSecret<NistP256>,
+    public_key_reader: CoseKey,
+    device_engagement_bytes: DeviceEngagementBytes,
     reader: bool,
 ) -> Result<[u8; 32]> {
-    //Todo: add salt
+    let session_transcript_bytes =
+        get_session_transcript_bytes(public_key_reader, device_engagement_bytes)?.inner_bytes;
 
-    let hkdf: Hkdf<Sha256, SimpleHmac<Sha256>> = shared_secret.extract(None);
+    let hkdf: Hkdf<Sha256, SimpleHmac<Sha256>> =
+        shared_secret.extract(Some(session_transcript_bytes.as_ref()));
     let mut okm = [0u8; 32];
     let sk_device = "SKDevice".as_bytes();
     let sk_reader = "SKReader".as_bytes();
@@ -227,7 +231,11 @@ pub fn get_initialization_vector(
 #[cfg(test)]
 mod test {
 
+    use crate::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethod};
+    use crate::presentation::mdoc::prepare_device_engagement;
+
     use super::*;
+    use crate::definitions::BleOptions;
     use byteorder::{BigEndian, ByteOrder};
 
     #[test]
@@ -237,34 +245,45 @@ mod test {
     }
 
     #[test]
-    fn test_derive_session_key() {
-        let reader_keys = create_p256_ephemeral_keys().expect("failed to generate reader keys");
-        let device_keys = create_p256_ephemeral_keys().expect("failed to generate device keys");
-        let pub_key_reader = reader_keys.1;
-        let pub_key_device = device_keys.1;
-        let device_shared_secret = get_shared_secret(pub_key_reader, device_keys.0)
-            .expect("failed to derive secrets from public and private key");
-        let reader_shared_secret = get_shared_secret(pub_key_device, reader_keys.0)
-            .expect("failed to derive secret from public and private key");
-
-        let _session_key_device = derive_session_key(&device_shared_secret, false);
-        let _session_key_reader = derive_session_key(&reader_shared_secret, true);
-    }
-
-    #[test]
     fn test_encryption_decryption() {
         let reader_keys = create_p256_ephemeral_keys().expect("failed to generate reader keys");
         let device_keys = create_p256_ephemeral_keys().expect("failed to generate device keys");
         let pub_key_reader = reader_keys.1;
         let pub_key_device = device_keys.1;
-        let device_shared_secret = get_shared_secret(pub_key_reader, device_keys.0)
+
+        let device_shared_secret = get_shared_secret(pub_key_reader.clone(), device_keys.0)
             .expect("failed to derive secrets from public and private key");
-        let reader_shared_secret = get_shared_secret(pub_key_device, reader_keys.0)
+        let reader_shared_secret = get_shared_secret(pub_key_device.clone(), reader_keys.0)
             .expect("failed to derive secret from public and private key");
 
-        let _session_key_device = derive_session_key(&device_shared_secret, false).unwrap();
+        let uuid = uuid::Uuid::now_v1(&[0, 1, 2, 3, 4, 5]);
 
-        let session_key_reader = derive_session_key(&reader_shared_secret, true).unwrap();
+        let ble_option = BleOptions {
+            peripheral_server_mode: None,
+            central_client_mode: Some(CentralClientMode { uuid }),
+        };
+
+        let device_engagement_bytes = prepare_device_engagement(
+            DeviceRetrievalMethod::BLE(ble_option),
+            pub_key_reader.clone(),
+        )
+        .expect("failed to prepare for device engagement");
+
+        let _session_key_device = derive_session_key(
+            &device_shared_secret,
+            pub_key_reader.clone(),
+            device_engagement_bytes.clone(),
+            false,
+        )
+        .unwrap();
+
+        let session_key_reader = derive_session_key(
+            &reader_shared_secret,
+            pub_key_reader,
+            device_engagement_bytes,
+            true,
+        )
+        .unwrap();
 
         let message = "a message to encrypt!".as_bytes().to_vec();
         let msg = ByteStr::from(message);

@@ -17,15 +17,27 @@ pub fn establish_session(
     let _reader_public_key = key_pair.1;
 
     //decode device_engagement
-    let device_engagement = DeviceEngagement::try_from(CborValue::from(device_engagement_bytes))?;
+    let device_engagement =
+        DeviceEngagement::try_from(CborValue::from(device_engagement_bytes.clone()))?;
     let mdoc_public_key = device_engagement.security.e_device_key_bytes;
 
     // derive shared secret
-    let shared_secret = get_shared_secret(mdoc_public_key.into_inner(), reader_private_key)?;
+    let shared_secret =
+        get_shared_secret(mdoc_public_key.clone().into_inner(), reader_private_key)?;
 
     //derive session keys
-    let _sk_reader = derive_session_key(&shared_secret, true)?;
-    let _sk_device = derive_session_key(&shared_secret, false)?;
+    let _sk_reader = derive_session_key(
+        &shared_secret,
+        _reader_public_key,
+        device_engagement_bytes.clone(),
+        true,
+    )?;
+    let _sk_device = derive_session_key(
+        &shared_secret,
+        mdoc_public_key.into_inner(),
+        device_engagement_bytes,
+        false,
+    )?;
 
     //prepare mdoc request for session establishment
     //encrypt mdoc request + add unencrypted reader_public_key

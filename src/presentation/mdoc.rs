@@ -1,7 +1,7 @@
 use crate::definitions::{
     device_engagement::{DeviceRetrievalMethod, Security},
     helpers::{ByteStr, NonEmptyVec, Tag24},
-    session::{decrypt, derive_session_key, get_shared_secret},
+    session::{decrypt, derive_session_key, get_shared_secret, DeviceEngagementBytes},
     CoseKey, DeviceEngagement, SessionEstablishment,
 };
 use anyhow::{Error, Ok, Result};
@@ -39,13 +39,25 @@ pub fn process_session_establishment(
     session_establishment_bytes: Tag24<SessionEstablishment>,
     e_device_key_priv: EphemeralSecret,
     message_count: [u8; 4],
+    device_engagement_bytes: DeviceEngagementBytes,
 ) -> Result<ByteStr> {
     // derive session keys
     let session_establishment = session_establishment_bytes.into_inner();
-    let reader_key_bytes = session_establishment.e_reader_key;
-    let shared_secret = get_shared_secret(reader_key_bytes.into_inner(), e_device_key_priv)?;
-    let sk_reader = derive_session_key(&shared_secret, true)?;
-    let _sk_device = derive_session_key(&shared_secret, false)?;
+    let reader_key_bytes = session_establishment.e_reader_key.into_inner();
+    let shared_secret = get_shared_secret(reader_key_bytes.clone(), e_device_key_priv)?;
+
+    let sk_reader = derive_session_key(
+        &shared_secret,
+        reader_key_bytes.clone(),
+        device_engagement_bytes.clone(),
+        true,
+    )?;
+    let _sk_device = derive_session_key(
+        &shared_secret,
+        reader_key_bytes,
+        device_engagement_bytes,
+        false,
+    )?;
 
     //decrypt mdoc request
     let data = decrypt(
