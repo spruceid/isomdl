@@ -59,20 +59,10 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "Option<NfcHandover>", into = "Option<NfcHandover>")]
 pub enum Handover {
     QR,
     NFC(NfcHandover),
-}
-
-#[derive(Debug, Clone)]
-pub enum Curves {
-    P256,
-    P384,
-    P521,
-    X25519,
-    X448,
-    Ed25519,
-    Ed448,
 }
 
 pub enum EphemeralSecrets {
@@ -85,18 +75,36 @@ pub enum EncodedPoints {
     Ep384(EncodedPoint<NistP384>),
 }
 
-impl Into<Vec<u8>> for EncodedPoints {
-    fn into(self) -> Vec<u8> {
-        match self {
+pub enum SharedSecrets {
+    Ss256(SharedSecret<NistP256>),
+    Ss384(SharedSecret<NistP384>),
+}
+
+impl From<EncodedPoints> for Vec<u8> {
+    fn from(ep: EncodedPoints) -> Vec<u8> {
+        match ep {
             Ep256(encoded_point) => encoded_point.as_bytes().to_vec(),
             Ep384(encoded_point) => encoded_point.as_bytes().to_vec(),
         }
     }
 }
 
-pub enum SharedSecrets {
-    Ss256(SharedSecret<NistP256>),
-    Ss384(SharedSecret<NistP384>),
+impl From<Option<NfcHandover>> for Handover {
+    fn from(o: Option<NfcHandover>) -> Handover {
+        match o {
+            Some(nfc) => Handover::NFC(nfc),
+            None => Handover::QR,
+        }
+    }
+}
+
+impl From<Handover> for Option<NfcHandover> {
+    fn from(h: Handover) -> Option<NfcHandover> {
+        match h {
+            Handover::NFC(nfc) => Some(nfc),
+            Handover::QR => None,
+        }
+    }
 }
 
 pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKey), Error> {
@@ -265,12 +273,7 @@ mod test {
         let mut message_count_bytes = [0; 4];
         BigEndian::write_u32(&mut message_count_bytes, 1);
 
-        let encrypted_message = encrypt(
-            session_key_reader,
-            msg.clone(),
-            message_count_bytes,
-            true,
-        );
+        let encrypted_message = encrypt(session_key_reader, msg.clone(), message_count_bytes, true);
 
         let decrypted_message = decrypt(
             session_key_reader,

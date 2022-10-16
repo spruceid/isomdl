@@ -158,8 +158,8 @@ impl TryFrom<CoseKey> for EncodedPoint {
             CoseKey::OKP { crv: _, x } => {
                 let x_generic_array: GenericArray<_, U8> =
                     GenericArray::clone_from_slice(&x[0..42]);
-                let encoded =
-                    EncodedPoint::from_bytes(x_generic_array).map_err(|_e| Error::InvalidCoseKey)?;
+                let encoded = EncodedPoint::from_bytes(x_generic_array)
+                    .map_err(|_e| Error::InvalidCoseKey)?;
                 Ok(encoded)
             }
             _ => Err(Error::InvalidCoseKey),
