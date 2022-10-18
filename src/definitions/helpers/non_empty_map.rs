@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, hash::Hash, ops::Deref};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "HashMap<K, V>", into = "HashMap<K, V>")]
 pub struct NonEmptyMap<K: Hash + Eq + Clone, V: Clone>(HashMap<K, V>);
 

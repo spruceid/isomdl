@@ -22,11 +22,18 @@ serde_json = "1.0"
 sha2 = "0.10.5"
 thiserror = "1.0"
 elliptic-curve = "0.12.3"
+hkdf = "0.12.3"
+hex-literal = "0.3.4"
+aes-gcm = "0.10.1"
+hmac = "0.12.1"
+aes = "0.8.1"
+sec1 = "0.3.0"
+uuid = { version = "1.2", features = ["v1", "std", "rng"] }
 time = { version = "0.3.14", features = ["formatting", "parsing"] }
 zeroize = { version = "1.4", features = ["zeroize_derive"] }
 signature = "1.6"
-tracing = "0.1.37"
-uuid = "1.2.1"
+tracing = "0.1"
+base64 = "0.13"
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"

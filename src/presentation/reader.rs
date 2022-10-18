@@ -9,7 +9,6 @@
 //! 3. The reader must authenticate that the `DeviceKey` is authorized by `KeyAuthorizations` to
 //!    sign over the data elements present in `DeviceNameSpaces`.
 
-
-pub fn handle_response(session_transcript: SessionTranscript, response: DeviceResponse) -> Something {
-
-}
+//pub fn handle_response(session_transcript: SessionTranscript, response: DeviceResponse) -> Something {
+//
+//}

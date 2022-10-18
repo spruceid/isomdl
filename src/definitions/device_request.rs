@@ -1,7 +1,7 @@
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec, Tag24};
 use cose_rs::CoseSign1;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 pub type ItemsRequestBytes = Tag24<ItemsRequest>;
 pub type DocType = String;
@@ -34,7 +34,7 @@ pub struct ItemsRequest {
     #[serde(rename = "nameSpaces")]
     pub namespaces: Namespaces,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_info: Option<BTreeMap<String, serde_cbor::Value>>,
+    pub request_info: Option<HashMap<String, serde_cbor::Value>>,
 }
 
 impl DeviceRequest {
