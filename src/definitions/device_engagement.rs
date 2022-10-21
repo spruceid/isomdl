@@ -420,3 +420,39 @@ impl From<ServerRetrievalMethods> for CborValue {
         CborValue::Map(map)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::definitions::session::create_p256_ephemeral_keys;
+    use uuid::Uuid;
+
+    #[test]
+    fn device_engagement_cbor_roundtrip() {
+        let key_pair = create_p256_ephemeral_keys(0).unwrap();
+        let public_key = Tag24::new(key_pair.1).unwrap();
+
+        let uuid = Uuid::now_v1(&[0, 1, 2, 3, 4, 5]);
+
+        let ble_option = BleOptions {
+            peripheral_server_mode: None,
+            central_client_mode: Some(CentralClientMode { uuid }),
+        };
+
+        let device_retrieval_methods =
+            Some(NonEmptyVec::new(DeviceRetrievalMethod::BLE(ble_option)));
+
+        let device_engagement = DeviceEngagement {
+            version: "1.0".into(),
+            security: Security(1, public_key),
+            device_retrieval_methods,
+            server_retrieval_methods: None,
+            protocol_info: None,
+        };
+
+        let bytes = serde_cbor::to_vec(&device_engagement).unwrap();
+        let roundtripped = serde_cbor::from_slice(&bytes).unwrap();
+
+        assert_eq!(device_engagement, roundtripped)
+    }
+}
