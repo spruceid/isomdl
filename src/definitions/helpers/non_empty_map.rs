@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, hash::Hash, ops::Deref};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "HashMap<K, V>", into = "HashMap<K, V>")]
 pub struct NonEmptyMap<K: Hash + Eq + Clone, V: Clone>(HashMap<K, V>);
 
@@ -9,6 +9,26 @@ pub struct NonEmptyMap<K: Hash + Eq + Clone, V: Clone>(HashMap<K, V>);
 pub enum Error {
     #[error("cannot construct a non-empty vec from an empty vec")]
     Empty,
+}
+
+impl<K: Hash + Eq + Clone, V: Clone> NonEmptyMap<K, V> {
+    pub fn new(k: K, v: V) -> Self {
+        let mut inner = HashMap::new();
+        inner.insert(k, v);
+        Self(inner)
+    }
+
+    pub fn maybe_new(m: HashMap<K, V>) -> Option<Self> {
+        Self::try_from(m).ok()
+    }
+
+    pub fn insert(&mut self, k: K, v: V) -> Option<V> {
+        self.0.insert(k, v)
+    }
+
+    pub fn into_inner(self) -> HashMap<K, V> {
+        self.0
+    }
 }
 
 impl<K: Hash + Eq + Clone, V: Clone> TryFrom<HashMap<K, V>> for NonEmptyMap<K, V> {

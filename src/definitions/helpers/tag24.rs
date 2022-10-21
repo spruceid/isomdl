@@ -11,7 +11,7 @@ use serde_cbor::{from_slice, to_vec, Error as CborError, Value as CborValue};
 ///
 /// If this struct is created through deserializing CBOR, then the original byte representation is
 /// preserved for future serialising.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag24<T> {
     inner: T,
     pub inner_bytes: Vec<u8>,
@@ -90,5 +90,20 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
         CborValue::deserialize(d)?
             .try_into()
             .map_err(D::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Tag24;
+
+    #[test]
+    #[should_panic]
+    // A Tag24 cannot be serialised directly into a non-cbor format as it will lose the tag.
+    fn non_cbor_roundtrip() {
+        let original = Tag24::new(String::from("some data")).unwrap();
+        let json = serde_json::to_vec(&original).unwrap();
+        let roundtripped = serde_json::from_slice(&json).unwrap();
+        assert_eq!(original, roundtripped)
     }
 }
