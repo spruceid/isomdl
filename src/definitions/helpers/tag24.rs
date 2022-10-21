@@ -92,3 +92,18 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
             .map_err(D::Error::custom)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Tag24;
+
+    #[test]
+    #[should_panic]
+    // A Tag24 cannot be serialised directly into a non-cbor format as it will lose the tag.
+    fn non_cbor_roundtrip() {
+        let original = Tag24::new(String::from("some data")).unwrap();
+        let json = serde_json::to_vec(&original).unwrap();
+        let roundtripped = serde_json::from_slice(&json).unwrap();
+        assert_eq!(original, roundtripped)
+    }
+}

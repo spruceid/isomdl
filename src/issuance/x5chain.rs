@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use aws_nitro_enclaves_cose::crypto::SignatureAlgorithm;
+use cose_rs::algorithm::Algorithm;
 use openssl::x509::{X509Ref, X509VerifyResult, X509};
 use serde_cbor::Value as CborValue;
 use std::{fs::File, io::Read};
@@ -44,7 +44,7 @@ impl X5Chain {
             .map(CborValue::Array)
     }
 
-    pub fn key_algorithm(&self) -> Result<SignatureAlgorithm> {
+    pub fn key_algorithm(&self) -> Result<Algorithm> {
         // Safe to index into chain, as we know there is at least one element from Builder::build.
         Ok(
             match X509Ref::public_key(&self[0])?
@@ -53,9 +53,9 @@ impl X5Chain {
                 .curve_name()
                 .ok_or_else(|| anyhow!("no curve name found on first X509 cert in chain"))?
             {
-                openssl::nid::Nid::X9_62_PRIME256V1 => SignatureAlgorithm::ES256,
-                openssl::nid::Nid::SECP384R1 => SignatureAlgorithm::ES384,
-                openssl::nid::Nid::SECP521R1 => SignatureAlgorithm::ES512,
+                openssl::nid::Nid::X9_62_PRIME256V1 => Algorithm::ES256,
+                openssl::nid::Nid::SECP384R1 => Algorithm::ES384,
+                openssl::nid::Nid::SECP521R1 => Algorithm::ES512,
                 nid => {
                     if let Ok(name) = nid.long_name() {
                         Err(anyhow!("unsupported algorithm: {}", name))?
@@ -155,13 +155,12 @@ pub mod test {
             )
             .expect("unable to verify public key of cert"));
 
-        assert!(match x5chain
-            .key_algorithm()
-            .expect("unable to retrieve public key algorithm")
-        {
-            SignatureAlgorithm::ES256 => true,
-            _ => false,
-        });
+        assert!(matches!(
+            x5chain
+                .key_algorithm()
+                .expect("unable to retrieve public key algorithm"),
+            Algorithm::ES256
+        ));
     }
 
     #[test]
@@ -183,13 +182,12 @@ pub mod test {
             )
             .expect("unable to verify public key of cert"));
 
-        assert!(match x5chain
-            .key_algorithm()
-            .expect("unable to retrieve public key algorithm")
-        {
-            SignatureAlgorithm::ES384 => true,
-            _ => false,
-        });
+        assert!(matches!(
+            x5chain
+                .key_algorithm()
+                .expect("unable to retrieve public key algorithm"),
+            Algorithm::ES384
+        ));
     }
 
     #[test]
@@ -211,12 +209,11 @@ pub mod test {
             )
             .expect("unable to verify public key of cert"));
 
-        assert!(match x5chain
-            .key_algorithm()
-            .expect("unable to retrieve public key algorithm")
-        {
-            SignatureAlgorithm::ES512 => true,
-            _ => false,
-        });
+        assert!(matches!(
+            x5chain
+                .key_algorithm()
+                .expect("unable to retrieve public key algorithm"),
+            Algorithm::ES512
+        ));
     }
 }

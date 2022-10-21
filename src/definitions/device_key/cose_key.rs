@@ -1,4 +1,5 @@
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
+use cose_rs::algorithm::Algorithm;
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -54,6 +55,34 @@ pub enum Error {
     UnsupportedFormat,
     #[error("Could not reconstruct coordinates from the provided COSE_Key")]
     InvalidCoseKey,
+}
+
+impl CoseKey {
+    pub fn signature_algorithm(&self) -> Option<Algorithm> {
+        match self {
+            CoseKey::EC2 {
+                crv: EC2Curve::P256,
+                ..
+            } => Some(Algorithm::ES256),
+            CoseKey::EC2 {
+                crv: EC2Curve::P384,
+                ..
+            } => Some(Algorithm::ES384),
+            CoseKey::EC2 {
+                crv: EC2Curve::P521,
+                ..
+            } => Some(Algorithm::ES512),
+            CoseKey::OKP {
+                crv: OKPCurve::Ed448,
+                ..
+            } => Some(Algorithm::EdDSA),
+            CoseKey::OKP {
+                crv: OKPCurve::Ed25519,
+                ..
+            } => Some(Algorithm::EdDSA),
+            _ => None,
+        }
+    }
 }
 
 impl From<CoseKey> for CborValue {

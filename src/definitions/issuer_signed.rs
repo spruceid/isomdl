@@ -2,7 +2,7 @@ use crate::definitions::{
     helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
     DigestId,
 };
-use aws_nitro_enclaves_cose::CoseSign1;
+use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 

@@ -7,9 +7,9 @@ use crate::definitions::device_key::EC2Curve;
 use crate::definitions::helpers::bytestr::ByteStr;
 use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
 
-use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{generic_array::GenericArray, typenum::U32};
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm,
     Nonce, // Or `Aes128Gcm`
 };
@@ -21,6 +21,7 @@ use elliptic_curve::{
 use hkdf::Hkdf;
 use p256::NistP256;
 use p384::NistP384;
+use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -39,7 +40,38 @@ pub struct SessionEstablishment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
     pub data: Option<ByteStr>,
-    pub status: Option<u64>,
+    pub status: Option<Status>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "u64", into = "u64")]
+pub enum Status {
+    SessionEncryptionError,
+    CborDecodingError,
+    SessionTermination,
+}
+
+impl From<Status> for u64 {
+    fn from(s: Status) -> u64 {
+        match s {
+            Status::SessionEncryptionError => 10,
+            Status::CborDecodingError => 11,
+            Status::SessionTermination => 20,
+        }
+    }
+}
+
+impl TryFrom<u64> for Status {
+    type Error = String;
+
+    fn try_from(n: u64) -> Result<Status, String> {
+        match n {
+            10 => Ok(Status::SessionEncryptionError),
+            11 => Ok(Status::CborDecodingError),
+            20 => Ok(Status::SessionTermination),
+            _ => Err(format!("unrecognised error code: {n}")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,8 +142,11 @@ impl From<Handover> for Option<NfcHandover> {
     }
 }
 
-pub fn create_p256_ephemeral_keys() -> Result<(EphemeralSecret<NistP256>, CoseKey), Error> {
-    let private_key = p256::ecdh::EphemeralSecret::random(&mut OsRng);
+// TODO: Make this function cryptographically secure.
+pub fn create_p256_ephemeral_keys(
+    seed: u64,
+) -> Result<(EphemeralSecret<NistP256>, CoseKey), Error> {
+    let private_key = p256::ecdh::EphemeralSecret::random(&mut StdRng::seed_from_u64(seed));
 
     let encoded_point = ecdsa::EncodedPoint::<NistP256>::from(private_key.public_key());
     let x_coordinate = encoded_point.x().ok_or(Error::EphemeralKeyError)?;
@@ -141,7 +176,7 @@ pub fn derive_session_key(
     shared_secret: &SharedSecret<NistP256>,
     session_transcript: &Tag24<SessionTranscript>,
     reader: bool,
-) -> Aes256Gcm {
+) -> GenericArray<u8, U32> {
     let salt = Sha256::digest(&session_transcript.inner_bytes);
     let hkdf = shared_secret.extract::<Sha256>(Some(salt.as_ref()));
     let mut okm = [0u8; 32];
@@ -155,38 +190,38 @@ pub fn derive_session_key(
         Hkdf::expand(&hkdf, sk_device, &mut okm).unwrap();
     }
 
-    Aes256Gcm::new(&okm.into())
+    okm.into()
 }
 
-pub fn encrypt_mdoc_data(
-    sk_device: &Aes256Gcm,
-    ciphertext: &[u8],
+pub fn encrypt_device_data(
+    sk_device: &GenericArray<u8, U32>,
+    plaintext: &[u8],
     message_count: &mut u32,
 ) -> Result<Vec<u8>, aes_gcm::Error> {
-    encrypt(sk_device, ciphertext, message_count, false)
+    encrypt(sk_device, plaintext, message_count, false)
 }
 
 pub fn encrypt_reader_data(
-    sk_reader: &Aes256Gcm,
-    ciphertext: &[u8],
+    sk_reader: &GenericArray<u8, U32>,
+    plaintext: &[u8],
     message_count: &mut u32,
 ) -> Result<Vec<u8>, aes_gcm::Error> {
-    encrypt(sk_reader, ciphertext, message_count, true)
+    encrypt(sk_reader, plaintext, message_count, true)
 }
 
 fn encrypt(
-    session_key: &Aes256Gcm,
+    session_key: &GenericArray<u8, U32>,
     plaintext: &[u8],
     message_count: &mut u32,
     reader: bool,
 ) -> Result<Vec<u8>, aes_gcm::Error> {
     let initialization_vector = get_initialization_vector(message_count, reader);
     let nonce = Nonce::from(initialization_vector);
-    session_key.encrypt(&nonce, plaintext)
+    Aes256Gcm::new(session_key).encrypt(&nonce, plaintext)
 }
 
-pub fn decrypt_mdoc_data(
-    sk_device: &Aes256Gcm,
+pub fn decrypt_device_data(
+    sk_device: &GenericArray<u8, U32>,
     ciphertext: &[u8],
     message_count: &mut u32,
 ) -> Result<Vec<u8>, aes_gcm::Error> {
@@ -194,7 +229,7 @@ pub fn decrypt_mdoc_data(
 }
 
 pub fn decrypt_reader_data(
-    sk_reader: &Aes256Gcm,
+    sk_reader: &GenericArray<u8, U32>,
     ciphertext: &[u8],
     message_count: &mut u32,
 ) -> Result<Vec<u8>, aes_gcm::Error> {
@@ -202,14 +237,14 @@ pub fn decrypt_reader_data(
 }
 
 fn decrypt(
-    session_key: &Aes256Gcm,
+    session_key: &GenericArray<u8, U32>,
     ciphertext: &[u8],
     message_count: &mut u32,
     reader: bool,
 ) -> Result<Vec<u8>, aes_gcm::Error> {
     let initialization_vector = get_initialization_vector(message_count, reader);
     let nonce = Nonce::from(initialization_vector);
-    session_key.decrypt(&nonce, ciphertext)
+    Aes256Gcm::new(session_key).decrypt(&nonce, ciphertext)
 }
 
 pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 12] {
@@ -232,13 +267,13 @@ mod test {
     #[test]
     fn key_generation() {
         //todo fully test the exchange of keys and the resulting session keys e2e
-        create_p256_ephemeral_keys().expect("failed to generate keys");
+        create_p256_ephemeral_keys(0).expect("failed to generate keys");
     }
 
     #[test]
     fn test_encryption_decryption() {
-        let reader_keys = create_p256_ephemeral_keys().expect("failed to generate reader keys");
-        let device_keys = create_p256_ephemeral_keys().expect("failed to generate device keys");
+        let reader_keys = create_p256_ephemeral_keys(0).expect("failed to generate reader keys");
+        let device_keys = create_p256_ephemeral_keys(1).expect("failed to generate device keys");
         let pub_key_reader = reader_keys.1;
         let pub_key_device = device_keys.1;
 

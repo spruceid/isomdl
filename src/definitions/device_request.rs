@@ -1,6 +1,7 @@
-use crate::mdoc::NonEmptyMap;
-use aws_nitro_enclaves_cose::CoseSign1;
+use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec, Tag24};
+use cose_rs::CoseSign1;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub type ItemsRequestBytes = Tag24<ItemsRequest>;
 pub type DocType = String;
@@ -14,24 +15,28 @@ pub type ReaderAuth = CoseSign1;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRequest {
-    version: String,
-    doc_requests: NonEmptyVec<DocRequest>,
+    pub version: String,
+    pub doc_requests: NonEmptyVec<DocRequest>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocRequest {
-    item_request: ItemsRequestBytes,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    reader_auth: Option<ReaderAuth>,
+    pub items_request: ItemsRequestBytes,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reader_auth: Option<ReaderAuth>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemsRequest {
-    doc_type: DocType,
+    pub doc_type: DocType,
     #[serde(rename = "nameSpaces")]
-    namespaces: Namespaces,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    request_info: Option<HashMap<String, CborValue>>,
+    pub namespaces: Namespaces,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_info: Option<HashMap<String, serde_cbor::Value>>,
+}
+
+impl DeviceRequest {
+    pub const VERSION: &'static str = "1.0";
 }
