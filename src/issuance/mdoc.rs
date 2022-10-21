@@ -24,10 +24,10 @@ pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
 #[serde(rename_all = "camelCase")]
 /// Representation of an issued mdoc.
 pub struct Mdoc {
-    doc_type: String,
-    mso: Mso,
-    namespaces: IssuerNamespaces,
-    issuer_auth: CoseSign1,
+    pub doc_type: String,
+    pub mso: Mso,
+    pub namespaces: IssuerNamespaces,
+    pub issuer_auth: CoseSign1,
 }
 
 #[derive(Debug, Clone)]
@@ -246,9 +246,13 @@ mod test {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
 
         let mdl_namespace = String::from("org.iso.18013.5.1");
-        let key = String::from("family_name");
-        let value = String::from("Smith").into();
-        let mdl_elements = [(key, value)].into_iter().collect();
+        let mdl_elements = [
+            ("family_name".to_string(), "Smith".to_string().into()),
+            ("given_name".to_string(), "Alice".to_string().into()),
+            ("document_number".to_string(), "I8889680".to_string().into()),
+        ]
+        .into_iter()
+        .collect();
         let namespaces = [(mdl_namespace.clone(), mdl_elements)]
             .into_iter()
             .collect();

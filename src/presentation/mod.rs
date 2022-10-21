@@ -19,6 +19,7 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
     }
 }
 
+impl Stringify for device::Document {}
 impl Stringify for device::SessionManagerInit {}
 impl Stringify for device::SessionManagerEngaged {}
 impl Stringify for device::SessionManager {}

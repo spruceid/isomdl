@@ -1,17 +1,21 @@
-use crate::definitions::{
-    device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
-    device_request::DeviceRequest,
-    device_response::{
-        Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
-        Errors as NamespaceErrors, Status,
+use crate::{
+    definitions::{
+        device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
+        device_request::DeviceRequest,
+        device_response::{
+            Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
+            Errors as NamespaceErrors, Status,
+        },
+        device_signed::{
+            DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned,
+            DeviceSignedItems,
+        },
+        helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
+        issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
+        session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
+        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment, SessionTranscript,
     },
-    device_signed::{
-        DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned, DeviceSignedItems,
-    },
-    helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
-    issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
-    session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
-    CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment, SessionTranscript,
+    issuance::Mdoc,
 };
 use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
 use serde::{Deserialize, Serialize};
@@ -585,6 +589,44 @@ impl PreparedDocument {
             issuer_signed,
             device_signed,
             errors,
+        }
+    }
+}
+
+impl From<Mdoc> for Document {
+    fn from(mdoc: Mdoc) -> Document {
+        fn extract(
+            v: NonEmptyVec<IssuerSignedItemBytes>,
+        ) -> NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes> {
+            v.into_inner()
+                .into_iter()
+                .map(|i| (i.as_ref().element_identifier.clone(), i))
+                .collect::<HashMap<_, _>>()
+                .try_into()
+                // Can unwrap as there is always at least one element in a NonEmptyVec.
+                .unwrap()
+        }
+
+        let Mdoc {
+            mso,
+            namespaces,
+            issuer_auth,
+            ..
+        } = mdoc;
+        let namespaces = namespaces
+            .into_inner()
+            .into_iter()
+            .map(|(ns, v)| (ns, extract(v)))
+            .collect::<HashMap<_, _>>()
+            .try_into()
+            // Can unwrap as there is always at least one element in a NonEmptyMap.
+            .unwrap();
+
+        Document {
+            id: Uuid::now_v1(&[0, 0, 0, 0, 0, 0]),
+            mso,
+            namespaces,
+            issuer_auth,
         }
     }
 }
