@@ -160,8 +160,11 @@ impl SessionManagerInit {
     pub fn qr_engagement(self) -> (SessionManagerEngaged, String) {
         let mut qr_code_uri = String::from("mdoc:");
         let config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
+        let de_bytes = serde_cbor::to_vec(&self.device_engagement)
+            // TODO: Remove unwrap.
+            .unwrap();
         base64::encode_config_buf(
-            &self.device_engagement.inner_bytes,
+            &de_bytes,
             config,
             &mut qr_code_uri,
         );
