@@ -157,12 +157,10 @@ impl SessionManagerInit {
     }
 
     /// Begin device engagement using QR code.
-    pub fn qr_engagement(self) -> (SessionManagerEngaged, String) {
+    pub fn qr_engagement(self) -> anyhow::Result<(SessionManagerEngaged, String)> {
         let mut qr_code_uri = String::from("mdoc:");
         let config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let de_bytes = serde_cbor::to_vec(&self.device_engagement)
-            // TODO: Remove unwrap.
-            .unwrap();
+        let de_bytes = serde_cbor::to_vec(&self.device_engagement)?;
         base64::encode_config_buf(&de_bytes, config, &mut qr_code_uri);
         let sm = SessionManagerEngaged {
             documents: self.documents,
@@ -170,7 +168,7 @@ impl SessionManagerInit {
             e_device_key_seed: self.e_device_key_seed,
             handover: Handover::QR,
         };
-        (sm, qr_code_uri)
+        Ok((sm, qr_code_uri))
     }
 }
 
