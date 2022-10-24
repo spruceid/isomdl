@@ -157,21 +157,18 @@ impl SessionManagerInit {
     }
 
     /// Begin device engagement using QR code.
-    pub fn qr_engagement(self) -> (SessionManagerEngaged, String) {
+    pub fn qr_engagement(self) -> anyhow::Result<(SessionManagerEngaged, String)> {
         let mut qr_code_uri = String::from("mdoc:");
         let config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        base64::encode_config_buf(
-            &self.device_engagement.inner_bytes,
-            config,
-            &mut qr_code_uri,
-        );
+        let de_bytes = serde_cbor::to_vec(&self.device_engagement)?;
+        base64::encode_config_buf(&de_bytes, config, &mut qr_code_uri);
         let sm = SessionManagerEngaged {
             documents: self.documents,
             device_engagement: self.device_engagement,
             e_device_key_seed: self.e_device_key_seed,
             handover: Handover::QR,
         };
-        (sm, qr_code_uri)
+        Ok((sm, qr_code_uri))
     }
 }
 
@@ -434,8 +431,7 @@ impl SessionManager {
             &mut self.reader_message_counter,
         )
         .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
-        let req = serde_cbor::from_slice(&decrypted_request)?;
-        let prepared_response = self.prepare_response(req);
+        let prepared_response = self.prepare_response(&decrypted_request);
         self.state = State::Signing(prepared_response);
         Ok(())
     }
