@@ -163,11 +163,7 @@ impl SessionManagerInit {
         let de_bytes = serde_cbor::to_vec(&self.device_engagement)
             // TODO: Remove unwrap.
             .unwrap();
-        base64::encode_config_buf(
-            &de_bytes,
-            config,
-            &mut qr_code_uri,
-        );
+        base64::encode_config_buf(&de_bytes, config, &mut qr_code_uri);
         let sm = SessionManagerEngaged {
             documents: self.documents,
             device_engagement: self.device_engagement,
@@ -437,8 +433,7 @@ impl SessionManager {
             &mut self.reader_message_counter,
         )
         .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
-        let req = serde_cbor::from_slice(&decrypted_request)?;
-        let prepared_response = self.prepare_response(req);
+        let prepared_response = self.prepare_response(&decrypted_request);
         self.state = State::Signing(prepared_response);
         Ok(())
     }

@@ -2,7 +2,10 @@ use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
     helpers::{NonEmptyVec, Tag24},
-    session::{self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover},
+    session::{
+        self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
+        SessionEstablishment,
+    },
     DeviceEngagement, DeviceResponse, SessionData, SessionTranscript,
 };
 use anyhow::{anyhow, Result};
@@ -31,7 +34,10 @@ pub enum Error {
 // TODO: Refactor for more general implementation. This implementation will work for a simple test
 // reader application, but it is not at all configurable.
 impl SessionManager {
-    pub fn establish_session(qr_code: String) -> Result<Self> {
+    pub fn establish_session(
+        qr_code: String,
+        namespaces: device_request::Namespaces,
+    ) -> Result<(Self, Vec<u8>)> {
         let encoded_de = qr_code.strip_prefix("mdoc:").ok_or(Error::InvalidQrCode)?;
         let base64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
         let decoded_de =
@@ -54,7 +60,7 @@ impl SessionManager {
 
         let session_transcript = Tag24::new(SessionTranscript(
             device_engagement_bytes,
-            e_reader_key_public,
+            e_reader_key_public.clone(),
             // TODO: Support NFC handover.
             Handover::QR,
         ))?;
@@ -63,13 +69,22 @@ impl SessionManager {
         let sk_reader = derive_session_key(&shared_secret, &session_transcript, true).into();
         let sk_device = derive_session_key(&shared_secret, &session_transcript, false).into();
 
-        Ok(Self {
+        let mut session_manager = Self {
             session_transcript,
             sk_device,
             device_message_counter: 0,
             sk_reader,
             reader_message_counter: 0,
-        })
+        };
+
+        let request = session_manager.build_request(namespaces)?;
+        let session = SessionEstablishment {
+            data: request.into(),
+            e_reader_key: e_reader_key_public,
+        };
+        let session_request = serde_cbor::to_vec(&session)?;
+
+        Ok((session_manager, session_request))
     }
 
     pub fn first_central_client_uuid(&self) -> Option<&Uuid> {
@@ -92,8 +107,17 @@ impl SessionManager {
             })
     }
 
+    pub fn new_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
+        let request = self.build_request(namespaces)?;
+        let session = SessionData {
+            data: Some(request.into()),
+            status: None,
+        };
+        serde_cbor::to_vec(&session).map_err(Into::into)
+    }
+
     // TODO: Support requesting specific doc types.
-    pub fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
+    fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
         let items_request = ItemsRequest {
             doc_type: "org.iso.18013.5.1.mDL".into(),
             namespaces,
@@ -109,19 +133,12 @@ impl SessionManager {
             doc_requests: NonEmptyVec::new(doc_request),
         };
         let device_request_bytes = serde_cbor::to_vec(&device_request)?;
-        let session_data = SessionData {
-            data: Some(
-                session::encrypt_reader_data(
-                    &self.sk_reader.into(),
-                    &device_request_bytes,
-                    &mut self.reader_message_counter,
-                )
-                .map_err(|e| anyhow!("unable to encrypt request: {}", e))?
-                .into(),
-            ),
-            status: None,
-        };
-        serde_cbor::to_vec(&session_data).map_err(Into::into)
+        session::encrypt_reader_data(
+            &self.sk_reader.into(),
+            &device_request_bytes,
+            &mut self.reader_message_counter,
+        )
+        .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
     // TODO: Handle any doc type.
