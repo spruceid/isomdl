@@ -44,6 +44,13 @@ impl<T: Serialize> Tag24<T> {
     }
 }
 
+impl<T: de::DeserializeOwned> Tag24<T> {
+    pub fn from_bytes(inner_bytes: Vec<u8>) -> Result<Tag24<T>> {
+        let inner = from_slice(&inner_bytes).map_err(Error::UnableToDecode)?;
+        Ok(Self { inner, inner_bytes })
+    }
+}
+
 impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
     type Error = Error;
 
