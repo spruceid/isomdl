@@ -348,7 +348,7 @@ pub struct MdlDataElementsRaw {
 
     /// Sex
     /// mDL holder’s sex using values as defined in ISO/IEC 5218 .
-    sex: Option<Sex>,
+    sex: Sex,
 
     /// Height (cm)^a
     /// mDL holder’s height in centimetres
@@ -677,7 +677,7 @@ pub struct MdlDataElements {
 
     /// Sex
     /// mDL holder’s sex using values as defined in ISO/IEC 5218 .
-    sex: Option<Sex>,
+    sex: Sex,
 
     /// Height (cm)^a
     /// mDL holder’s height in centimetres
@@ -717,6 +717,7 @@ pub struct MdlDataElements {
     age_birth_year: Option<Uint>,
 
     /// Age attestation: Nearest “true” attestation above request
+    /// Only mandatory age attestation fields have been included, refer to AAMVA mDL Implementation Guidelines for recommendations
     /// See 7.2.5
     age_over_18: bool,
     age_over_21: bool,
@@ -925,7 +926,6 @@ impl MdlDataElements {
             resident_address: None,
             portrait_capture_date: None,
             age_birth_year: None,
-            sex: None,
             issuing_jurisdiction: None,
             nationality: None,
             resident_city: None,
@@ -937,6 +937,7 @@ impl MdlDataElements {
             given_name_national_character: None,
             signature_usual_mark: None,
             //aamva data elements
+            sex,
             domestic_driving_privileges,
             family_name_truncation,
             given_name_truncation,
@@ -1034,57 +1035,58 @@ impl MdlDataElements {
         }
     }
 
-    // /// Attempt to convert from JSON
-    // pub fn from_json(json: Value) -> Result<MdlDataElementsError, Self> {
-    //     let json_object = json.as_object().or_else(|| MdlDataElementsError::NotObject(json));
-    //     json_object
+    /// Attempt to convert from JSON
+    pub fn from_json(json: Value) -> Result<MdlDataElementsError, Self> {
+        let json_object = json
+            .as_object()
+            .or_else(|| MdlDataElementsError::NotObject(json));
 
-    //     // Self::new(family_name: Latin1UpTo150Chars,
-    //     //           given_name: Latin1UpTo150Chars,
-    //     //           birth_date: Tdate,
-    //     //           issue_date: Either<Tdate, FullDate>,
-    //     //           expiry_date: Either<Tdate, FullDate>,
-    //     //           issuing_country: CountryCode,
-    //     //           issuing_authority: Latin1UpTo150Chars,
-    //     //           document_number: Latin1UpTo150Chars,
-    //     //           portrait: LocalBstr,
-    //     //           driving_privileges: DrivingPrivileges,
-    //     //           un_distinguishing_sign: UnDistinguishingSign) -> Self {
-
-    //     _
-    // }
+        let mdl = Self::new(
+            family_name,
+            given_name,
+            birth_date,
+            issue_date,
+            expiry_date,
+            issuing_country,
+            issuing_authority,
+            document_number,
+            portrait,
+            driving_privileges,
+            un_distinguishing_sign,
+        );
+    }
 }
 
 #[cfg(test)]
 mod mdl_data_elements_tests {
-    // use super::*;
+    use super::*;
 
-    // #[test]
-    // fn test_mdl_data_elements() {
-    //     let cddl = mdl_data_elements_cddl();
-    //     println!("Raw CDDL:\n{}\n", cddl);
-    //     assert!(cddl_from_str(&mut lexer_from_str(&cddl), &cddl, true).is_ok());
+    #[test]
+    fn test_mdl_data_elements() {
+        let cddl = mdl_data_elements_cddl();
+        println!("Raw CDDL:\n{}\n", cddl);
+        assert!(cddl_from_str(&mut lexer_from_str(&cddl), &cddl, true).is_ok());
 
-    //     let json = r#"{
-    //       "family_name": "Bob",
-    //       "given_name": "Alicé",
-    //       "birth_date": "2022-11-11T22:22:50.52Z",
-    //       "issue_date": "2022-11-11T22:22:50.52Z",
-    //       "expiry_date": "2022-11-11T22:22:50.52Z",
-    //       "issuing_country": "USA",
-    //       "issuing_authority": "Some Issuing Authority",
-    //       "document_number": "1234",
-    //       "portrait": "0xFFFFF",
-    //       "driving_privileges": [],
-    //       "un_distinguishing_sign": "USA",
-    //       "eye_colour": "unknown",
-    //       "hair_colour": "unknown",
-    //       "nationality": "US",
-    //       "issuing_jurisdiction": "US-NY"
-    //     }"#;
+        let json = r#"{
+          "family_name": "Bob",
+          "given_name": "Alicé",
+          "birth_date": "2022-11-11T22:22:50.52Z",
+          "issue_date": "2022-11-11T22:22:50.52Z",
+          "expiry_date": "2022-11-11T22:22:50.52Z",
+          "issuing_country": "USA",
+          "issuing_authority": "Some Issuing Authority",
+          "document_number": "1234",
+          "portrait": "0xFFFFF",
+          "driving_privileges": [],
+          "un_distinguishing_sign": "USA",
+          "eye_colour": "unknown",
+          "hair_colour": "unknown",
+          "nationality": "US",
+          "issuing_jurisdiction": "US-NY"
+        }"#;
 
-    //     assert!(validate_json_from_str(&cddl, json).map(|_| true).unwrap())
-    // }
+        assert!(validate_json_from_str(&cddl, json).map(|_| true).unwrap())
+    }
 }
 
 pub fn mdl_data_elements_cddl() -> String {
