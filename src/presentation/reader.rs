@@ -27,8 +27,8 @@ pub struct SessionManager {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("the qr code had the wrong prefix or the contained data could not be decoded")]
-    InvalidQrCode,
+    #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
+    InvalidQrCode(anyhow::Error),
 }
 
 // TODO: Refactor for more general implementation. This implementation will work for a simple test
@@ -38,12 +38,8 @@ impl SessionManager {
         qr_code: String,
         namespaces: device_request::Namespaces,
     ) -> Result<(Self, Vec<u8>)> {
-        let encoded_de = qr_code.strip_prefix("mdoc:").ok_or(Error::InvalidQrCode)?;
-        let base64_config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let decoded_de =
-            base64::decode_config(encoded_de, base64_config).map_err(|_| Error::InvalidQrCode)?;
-        let device_engagement_bytes: Tag24<DeviceEngagement> =
-            serde_cbor::from_slice(&decoded_de).map_err(|_| Error::InvalidQrCode)?;
+        let device_engagement_bytes =
+            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(Error::InvalidQrCode)?;
 
         //generate own keys
         let key_pair = create_p256_ephemeral_keys(rand::random())?;

@@ -205,6 +205,24 @@ impl TryFrom<CborValue> for DeviceEngagement {
     }
 }
 
+impl Tag24<DeviceEngagement> {
+    const BASE64_CONFIG: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
+
+    pub fn to_qr_code_uri(&self) -> Result<String, serde_cbor::Error> {
+        let mut qr_code_uri = String::from("mdoc:");
+        base64::encode_config_buf(&self.inner_bytes, Self::BASE64_CONFIG, &mut qr_code_uri);
+        Ok(qr_code_uri)
+    }
+
+    pub fn from_qr_code_uri(qr_code_uri: &str) -> anyhow::Result<Self> {
+        let encoded_de = qr_code_uri
+            .strip_prefix("mdoc:")
+            .ok_or_else(|| anyhow::anyhow!("qr code has invalid prefix"))?;
+        let decoded_de = base64::decode_config(encoded_de, Self::BASE64_CONFIG)?;
+        Tag24::<DeviceEngagement>::from_bytes(decoded_de).map_err(Into::into)
+    }
+}
+
 impl DeviceRetrievalMethod {
     pub fn version(&self) -> u64 {
         1
@@ -454,5 +472,13 @@ mod test {
         let roundtripped = serde_cbor::from_slice(&bytes).unwrap();
 
         assert_eq!(device_engagement, roundtripped)
+    }
+
+    #[test]
+    fn device_engagement_qr_code_roundtrip() {
+        const EXAMPLE_QR_CODE: &'static str = "mdoc:owBjMS4wAYIB2BhYS6QBAiABIVgglyWXuAyJ6iRNc8OlYXenvkJt23rJPdtIhlawXqr-yf0iWCC1GQSH8tIwTYVwha_ZoPL20_saYXrGIbrCm133H0ki-QKBgwIBowD1AfQKUH2RiuAEbUVzrsrOiUnSPDw";
+        let de = Tag24::<DeviceEngagement>::from_qr_code_uri(EXAMPLE_QR_CODE).unwrap();
+        let roundtripped = de.to_qr_code_uri().unwrap();
+        assert_eq!(EXAMPLE_QR_CODE, roundtripped);
     }
 }
