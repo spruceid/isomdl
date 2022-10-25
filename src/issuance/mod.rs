@@ -1,5 +1,5 @@
-mod mdoc;
-mod x5chain;
+pub mod mdoc;
+pub mod x5chain;
 
-pub use mdoc::{Mdoc, MdocPreparation, Namespaces};
+pub use mdoc::{Mdoc, Namespaces};
 pub use x5chain::{Builder, X5Chain};
