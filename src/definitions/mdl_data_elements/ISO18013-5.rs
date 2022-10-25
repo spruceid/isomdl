@@ -718,7 +718,9 @@ pub struct MdlDataElements {
 
     /// Age attestation: Nearest “true” attestation above request
     /// See 7.2.5
-    age_over_nn: bool,
+    age_over_18: bool,
+    age_over_21: bool,
+    age_over_65: bool,
 
     /// TODO: ISO 3166-2:2020
     /// Issuing jurisdiction
@@ -1001,7 +1003,9 @@ impl MdlDataElements {
             portrait_capture_date: portrait_capture_date,
             age_in_years: self.age_in_years,
             age_birth_year: self.age_birth_year,
-            age_over_nn: self.age_over_nn,
+            age_over_18: self.age_over_18,
+            age_over_21: self.age_over_21,
+            age_over_65: self.age_over_65,
             issuing_jurisdiction: issuing_jurisdiction,
             nationality: nationality,
             resident_city: self.resident_city,
