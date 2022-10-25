@@ -453,11 +453,8 @@ mod test {
         let uuid = Uuid::now_v1(&[0, 1, 2, 3, 4, 5]);
 
         let ble_option = BleOptions {
-            peripheral_server_mode: Some(PeripheralServerMode {
-                uuid,
-                ble_device_address: None,
-            }),
-            central_client_mode: None,
+            peripheral_server_mode: None,
+            central_client_mode: Some(CentralClientMode { uuid }),
         };
 
         let device_retrieval_methods =
