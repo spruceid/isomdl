@@ -32,6 +32,7 @@ pub type SessionTranscriptBytes = Tag24<SessionTranscript>;
 pub type NfcHandover = (ByteStr, Option<ByteStr>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionEstablishment {
     pub e_reader_key: EReaderKeyBytes,
     pub data: ByteStr,

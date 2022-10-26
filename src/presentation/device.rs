@@ -637,3 +637,14 @@ impl From<Mdoc> for Document {
         }
     }
 }
+
+// TODO: Remove!
+pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let der = include_str!("../../remove_me/key");
+    let der_bytes = base64::decode(der)?;
+    let key: p256::ecdsa::SigningKey = p256::SecretKey::from_sec1_der(&der_bytes)?.into();
+    use signature::Signer;
+    key.try_sign(payload)
+        .map(|sig| sig.to_vec())
+        .map_err(Into::into)
+}
