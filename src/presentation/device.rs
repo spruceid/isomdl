@@ -90,10 +90,10 @@ type DocType = String;
 // non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
 pub struct Document {
-    id: Uuid,
-    issuer_auth: CoseSign1,
-    mso: Mso,
-    namespaces: Namespaces,
+    pub id: Uuid,
+    pub issuer_auth: CoseSign1,
+    pub mso: Mso,
+    pub namespaces: Namespaces,
 }
 
 #[derive(Debug, Clone)]
@@ -120,9 +120,9 @@ struct PreparedDocument {
     errors: Option<NamespaceErrors>,
 }
 
-type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
-type Namespace = String;
-type ElementIdentifier = String;
+pub type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
+pub type Namespace = String;
+pub type ElementIdentifier = String;
 
 impl SessionManagerInit {
     /// Initialise the SessionManager.

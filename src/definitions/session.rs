@@ -91,6 +91,8 @@ pub enum Error {
     SessionKeyError,
     #[error("Something went wrong generating ephemeral keys")]
     EphemeralKeyError,
+    #[error("Cannot make a valid mdoc uri out of input")]
+    MdocUriError,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +265,28 @@ pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 
 mod test {
     use super::*;
     use crate::definitions::device_engagement::Security;
+    use crate::definitions::device_engagement::{
+        BleOptions, CentralClientMode, DeviceRetrievalMethod, DeviceRetrievalMethods,
+    };
+    use crate::definitions::device_request::DeviceRequest;
+    use crate::definitions::device_request::ItemsRequest;
+    use crate::definitions::helpers::NonEmptyMap;
+    use crate::definitions::issuer_signed::{self, IssuerSignedItemBytes};
+    use crate::definitions::session::SessionEstablishment;
+    use crate::definitions::IssuerSigned;
+    use crate::definitions::{DeviceResponse, Mso};
+    use crate::presentation::{
+        device::{
+            Document, ElementIdentifier, Namespace, SessionManager, SessionManagerEngaged,
+            SessionManagerInit, State,
+        },
+        Stringify,
+    };
+    use cose_rs::CoseSign1;
+    use hex::FromHex;
+    use issuer_signed::IssuerSignedItem;
+    use serde_cbor::Value as CborValue;
+    use uuid::Uuid;
 
     #[test]
     fn key_generation() {
@@ -319,5 +343,63 @@ mod test {
             decrypt_reader_data(&session_key_reader, &ciphertext, &mut message_count).unwrap();
 
         assert_eq!(plaintext, decrypted_plaintext);
+    }
+
+    #[test]
+    fn test_initialise_session() {
+        //creating a dummy Document to pass into SessionManagerInit
+        //Document is normally recovered from mobile app storage
+        let uuid = Uuid::now_v1(&[0, 1, 2, 3, 4, 5]);
+        static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/definitions/issuer_signed.cbor");
+        let cbor_bytes =
+            <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
+        let signed: IssuerSigned =
+            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
+        let mso_bytes = signed
+            .issuer_auth
+            .payload()
+            .expect("expected a COSE_Sign1 with attached payload, found detached payload");
+        let mso: Tag24<Mso> =
+            serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
+
+        let issuer_signed_item = IssuerSignedItem {
+            digest_id: 1,
+            element_identifier: "name".to_string(),
+            element_value: CborValue::Text("John Doe".to_string()),
+            random: ByteStr::from(vec![0, 0, 0, 0]),
+        };
+        let issuer_signed_item_bytes =
+            Tag24::<IssuerSignedItem>::new(issuer_signed_item).expect("invalid IssuerSignedItem");
+        let key_value = NonEmptyMap::new("name".to_string(), issuer_signed_item_bytes);
+        let namespace = NonEmptyMap::new("org.iso.18013.5.1.mDL".into(), key_value);
+
+        let document = Document {
+            id: uuid,
+            issuer_auth: signed.issuer_auth,
+            mso: mso.into_inner(),
+            namespaces: namespace,
+        };
+
+        //initialise session
+        let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
+            peripheral_server_mode: None,
+            central_client_mode: Some(CentralClientMode { uuid }),
+        }));
+        let session = SessionManagerInit::initialise(
+            NonEmptyMap::new("org.iso.18013.5.1.mDL".into(), document),
+            Some(drms),
+            None,
+        )
+        .expect("could not start a session");
+        let (engaged_state, qr_code_uri) =
+            session.qr_engagement().expect("unexpected qr engagement");
+        let state = engaged_state.stringify().expect("not a string");
+        let mut map = serde_json::Map::new();
+        map.insert("state".into(), state.into());
+        map.insert("qrCodeUri".into(), qr_code_uri.into());
+        let json = serde_json::Value::Object(map);
+        let json_string = serde_json::to_string(&json).map_err(|_e| Error::MdocUriError);
+        //ToDo: what to assert to validate string
+        println!("{}", json_string.unwrap());
     }
 }
