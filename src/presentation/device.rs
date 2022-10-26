@@ -30,7 +30,7 @@ use uuid::Uuid;
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
-    e_device_key_seed: u64,
+    e_device_key: Vec<u8>,
     device_engagement: Tag24<DeviceEngagement>,
 }
 
@@ -39,7 +39,7 @@ pub struct SessionManagerInit {
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
     documents: Documents,
-    e_device_key_seed: u64,
+    e_device_key: Vec<u8>,
     device_engagement: Tag24<DeviceEngagement>,
     handover: Handover,
 }
@@ -133,9 +133,8 @@ impl SessionManagerInit {
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
         server_retrieval_methods: Option<ServerRetrievalMethods>,
     ) -> Result<Self, Error> {
-        let e_device_key_seed: u64 = rand::random();
-        let (_, e_device_key_pub) = session::create_p256_ephemeral_keys(e_device_key_seed)
-            .map_err(Error::EKeyGeneration)?;
+        let (e_device_key, e_device_key_pub) =
+            session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;
         let e_device_key_bytes =
             Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
         let security = Security(1, e_device_key_bytes);
@@ -153,7 +152,7 @@ impl SessionManagerInit {
 
         Ok(Self {
             documents,
-            e_device_key_seed,
+            e_device_key: e_device_key.to_be_bytes().to_vec(),
             device_engagement,
         })
     }
@@ -176,7 +175,7 @@ impl SessionManagerInit {
         let sm = SessionManagerEngaged {
             documents: self.documents,
             device_engagement: self.device_engagement,
-            e_device_key_seed: self.e_device_key_seed,
+            e_device_key: self.e_device_key,
             handover: Handover::QR,
         };
         Ok((sm, qr_code_uri))
@@ -189,6 +188,7 @@ impl SessionManagerEngaged {
         session_establishment: SessionEstablishment,
     ) -> anyhow::Result<SessionManager> {
         let e_reader_key = session_establishment.e_reader_key;
+        println!("{:?}", e_reader_key);
         let session_transcript = Tag24::new(SessionTranscript(
             self.device_engagement,
             e_reader_key.clone(),
@@ -196,10 +196,9 @@ impl SessionManagerEngaged {
         ))
         .map_err(Error::Tag24CborEncoding)?;
 
-        let (e_device_key_private, _) = session::create_p256_ephemeral_keys(self.e_device_key_seed)
-            .map_err(Error::EKeyGeneration)?;
+        let e_device_key = p256::SecretKey::from_be_bytes(self.e_device_key.as_ref())?;
 
-        let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key_private)
+        let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key.into())
             .map_err(Error::SharedSecretGeneration)?;
 
         let sk_reader = derive_session_key(&shared_secret, &session_transcript, true).into();

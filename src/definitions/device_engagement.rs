@@ -481,4 +481,11 @@ mod test {
         let roundtripped = de.to_qr_code_uri().unwrap();
         assert_eq!(EXAMPLE_QR_CODE, roundtripped);
     }
+
+    #[test]
+    fn debug() {
+        const EXAMPLE_QR_CODE: &'static str = "mdoc:owBjMS4wAYIB2BhYS6QBAiABIVggNOEBYR3DbvxSp1ubj6Es-mJw4OE9HiYpA-oXQrvTEpQiWCCRw5JuGMtCkCGf5V9bMcvGkBv3Dheg98Ar5iiUCFiq2wKBgwIBowD0AfULUAAAAAAAAAAAAAASNFZ4kQE";
+        let de = Tag24::<DeviceEngagement>::from_qr_code_uri(EXAMPLE_QR_CODE).unwrap();
+        panic!("{:?}", de.as_ref().security.1.inner_bytes);
+    }
 }
