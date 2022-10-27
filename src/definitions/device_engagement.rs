@@ -447,7 +447,7 @@ mod test {
 
     #[test]
     fn device_engagement_cbor_roundtrip() {
-        let key_pair = create_p256_ephemeral_keys(0).unwrap();
+        let key_pair = create_p256_ephemeral_keys().unwrap();
         let public_key = Tag24::new(key_pair.1).unwrap();
 
         let uuid = Uuid::now_v1(&[0, 1, 2, 3, 4, 5]);

@@ -42,7 +42,7 @@ impl SessionManager {
             Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(Error::InvalidQrCode)?;
 
         //generate own keys
-        let key_pair = create_p256_ephemeral_keys(rand::random())?;
+        let key_pair = create_p256_ephemeral_keys()?;
         let e_reader_key_private = key_pair.0;
         let e_reader_key_public = Tag24::new(key_pair.1)?;
 
@@ -51,8 +51,10 @@ impl SessionManager {
         let e_device_key = &device_engagement.security.1;
 
         // derive shared secret
-        let shared_secret =
-            get_shared_secret(e_device_key.clone().into_inner(), &e_reader_key_private)?;
+        let shared_secret = get_shared_secret(
+            e_device_key.clone().into_inner(),
+            &e_reader_key_private.into(),
+        )?;
 
         let session_transcript = Tag24::new(SessionTranscript(
             device_engagement_bytes,
@@ -62,8 +64,8 @@ impl SessionManager {
         ))?;
 
         //derive session keys
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true).into();
-        let sk_device = derive_session_key(&shared_secret, &session_transcript, false).into();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true)?.into();
+        let sk_device = derive_session_key(&shared_secret, &session_transcript, false)?.into();
 
         let mut session_manager = Self {
             session_transcript,
