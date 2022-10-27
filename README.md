@@ -14,8 +14,8 @@ For presentation purposes:
 -use presentation/reader.rs for the verifier interactions
 
 
-Issuance:
-To issue an mdoc call Mdoc::issue(doc_type: String,namespaces: HashMap<String, HashMap<String, CborValue>>, // where CborValue is serde_cbor::Valuex5chain: X5Chain,validity_info: ValidityInfo,digest_algorithm: DigestAlgorithm, //enum for SHA variantsdevice_key_info: DeviceKeyInfo,signer: Signer+SignatureAlgorithm,)
+##Issuance:
+To issue an mdoc call `Mdoc::issue(doc_type: String,namespaces: HashMap<String, HashMap<String, CborValue>>, // where CborValue is serde_cbor::Valuex5chain: X5Chain,validity_info: ValidityInfo,digest_algorithm: DigestAlgorithm, //enum for SHA variantsdevice_key_info: DeviceKeyInfo,signer: Signer+SignatureAlgorithm,)`
 
 doc_type is always expected to be "org.iso.18013.5.1.mDL" 
 
@@ -35,22 +35,19 @@ key_authorizations within the device_key_info specifies the namespaces and/or da
 signer contains the issuer_key as an ecdsa::SigningKey, used to sign over the entire mobile_security_object.
 
 //WIP
-Presentation
-Device:
+##Presentation
+###Device:
 If you are implementing functionality for an mDL holder, call on functions in presentation/device.rs
 
 expose a QR code to initiate an mdl presentation session by first calling:
-1. SessionMagagerInit::initialise(
-        documents: Documents,
-        device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
-        server_retrieval_methods: Option<ServerRetrievalMethods>,)
+1. `SessionMagagerInit::initialise(documents: Documents,device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,server_retrieval_methods: Option<ServerRetrievalMethods>,)`
 
 documents: load in one or more Documents that contain the mDL
 device_retrieval_methods: Specify BLE to be your device_retrieval_method
 server_retrieval_methods: set to None
 
 2. and then calling 
-SessionManager::qr_engagement()
+`SessionManager::qr_engagement()`
 
 qr_engagement() returns a SessionManagerEngaged that you can use to process a SessionEstablishment message once received from the Reader.
 When receiving the SessionEstablishment, process it by calling:
@@ -64,20 +61,17 @@ the sessionmanager decodes and decrypts the request and prepares a response
 
 //TODO
 
-
-Reader:
-If you are implmenting functionality for an mdl verifier, call on functions in preentation/reader.rs
+###Reader:
+If you are implementing functionality for an mdl verifier, call on functions in preentation/reader.rs
 
 A reader establishes a mDL presentation session by first scanning an mDL holder's qr code. The reader uses the embedded information to send out a SessionEstablishment message:
 
-1. SessionManager::establish_session(
-        qr_code: String,
-        namespaces: device_request::Namespaces,)
+1. `SessionManager::establish_session(qr_code: String,namespaces: device_request::Namespaces,)`
 
 qr_code: the base64 url-encoded string read from the qr code when scanning
 namespaces: the namespaces (and data fields) that the verifier wants to request from the mDL holder. This can be any subset of valid mDL data elements as specified in ISO18013-5
 
-//Todo
+//TODO
 
 2. SessionManager::handle_response()
 
