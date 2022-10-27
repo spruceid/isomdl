@@ -158,11 +158,11 @@ impl SessionManagerInit {
     }
 
     pub fn ble_ident(&self) -> anyhow::Result<[u8; 16]> {
-        let e_device_key_bytes = &self.device_engagement.as_ref().security.1.inner_bytes;
+        let e_device_key_bytes = serde_cbor::to_vec(&self.device_engagement.as_ref().security.1)?;
 
         let mut okm = [0u8; 16];
 
-        Hkdf::<Sha256>::new(None, e_device_key_bytes)
+        Hkdf::<Sha256>::new(None, &e_device_key_bytes)
             .expand("BLEIdent".as_bytes(), &mut okm)
             .map_err(|e| anyhow::anyhow!("unable to perform HKDF: {}", e))?;
 
@@ -188,7 +188,6 @@ impl SessionManagerEngaged {
         session_establishment: SessionEstablishment,
     ) -> anyhow::Result<SessionManager> {
         let e_reader_key = session_establishment.e_reader_key;
-        println!("{:?}", e_reader_key);
         let session_transcript = Tag24::new(SessionTranscript(
             self.device_engagement,
             e_reader_key.clone(),
@@ -201,8 +200,8 @@ impl SessionManagerEngaged {
         let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key.into())
             .map_err(Error::SharedSecretGeneration)?;
 
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true).into();
-        let sk_device = derive_session_key(&shared_secret, &session_transcript, false).into();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true)?.into();
+        let sk_device = derive_session_key(&shared_secret, &session_transcript, false)?.into();
 
         let mut sm = SessionManager {
             documents: self.documents,
@@ -637,9 +636,9 @@ impl From<Mdoc> for Document {
     }
 }
 
-// TODO: Remove!
+// TODO: Remove this function. This adds a temporary way to sign DeviceRequest for test mdocs.
 pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let der = include_str!("../../remove_me/key");
+    let der = include_str!("../../test/issuance/device_key.b64");
     let der_bytes = base64::decode(der)?;
     let key: p256::ecdsa::SigningKey = p256::SecretKey::from_sec1_der(&der_bytes)?.into();
     use signature::Signer;

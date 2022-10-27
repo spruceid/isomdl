@@ -232,14 +232,14 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
     use crate::definitions::KeyAuthorizations;
-    use hex::FromHex;
+    use elliptic_curve::sec1::ToEncodedPoint;
     use p256::pkcs8::DecodePrivateKey;
     use time::OffsetDateTime;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
     static ISSUER_KEY: &str = include_str!("../../test/issuance/256-key.pem");
-    static COSE_KEY: &str = include_str!("../../test/definitions/cose_key/ec_p256.cbor");
 
     #[test]
     fn issue_minimal_mdoc() {
@@ -272,9 +272,18 @@ mod test {
 
         let digest_algorithm = DigestAlgorithm::SHA256;
 
-        let device_key_bytes =
-            <Vec<u8>>::from_hex(COSE_KEY).expect("unable to convert cbor hex to bytes");
-        let device_key = serde_cbor::from_slice(&device_key_bytes).unwrap();
+        let der = include_str!("../../test/issuance/device_key.b64");
+        let der_bytes = base64::decode(der).unwrap();
+        let key = p256::SecretKey::from_sec1_der(&der_bytes).unwrap();
+        let pub_key = key.public_key();
+        let ec = pub_key.to_encoded_point(false);
+        let x = ec.x().unwrap().to_vec();
+        let y = EC2Y::Value(ec.y().unwrap().to_vec());
+        let device_key = CoseKey::EC2 {
+            crv: EC2Curve::P256,
+            x,
+            y,
+        };
         let device_key_info = DeviceKeyInfo {
             device_key,
             key_authorizations: Some(KeyAuthorizations {
@@ -288,7 +297,7 @@ mod test {
             .expect("failed to parse pem")
             .into();
 
-        Mdoc::issue(
+        let mdoc = Mdoc::issue(
             doc_type,
             namespaces,
             x5chain,
@@ -298,5 +307,9 @@ mod test {
             signer,
         )
         .expect("failed to issue mdoc");
+
+        // use crate::presentation::Stringify;
+        // let doc: crate::presentation::device::Document = mdoc.into();
+        // println!("example mdoc: {}", doc.stringify().unwrap())
     }
 }

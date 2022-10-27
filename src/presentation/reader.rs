@@ -64,8 +64,8 @@ impl SessionManager {
         ))?;
 
         //derive session keys
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true).into();
-        let sk_device = derive_session_key(&shared_secret, &session_transcript, false).into();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true)?.into();
+        let sk_device = derive_session_key(&shared_secret, &session_transcript, false)?.into();
 
         let mut session_manager = Self {
             session_transcript,
