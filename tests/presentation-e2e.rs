@@ -94,7 +94,6 @@ fn presentation_integration_test() {
 
     //specify requested data
     let mut data_element = HashMap::<String, bool>::new();
-    println!("identifiers {:?}", identifiers.clone());
     for id in identifiers {
         data_element.insert(id, false);
     }

@@ -227,7 +227,7 @@ mod test {
         let data_elements = NonEmptyMap::try_from(data_element).unwrap();
 
         let namespaces = NonEmptyMap::new("org.iso.18013.5.1".to_string(), data_elements);
-        let qr_code_uri = "mdoc:2BhYdKMAYzEuMAGCAdgYWEukAQIgASFYIOyWvr3w5jdDOpm9HLKAkv1LzK9puc0ji36J64Wl3g5uIlggrlctEVoucY98p2eDJbJeSj_AyFlP0gaQZFelHbjivbsCgYMCAaMA9AH1C1D4djy6WdMR7baWAAECAwQF".to_string();
+        let qr_code_uri = "mdoc:owBjMS4wAYIB2BhYS6QBAiABIVggwkkbFpvu3xld1P-9hxXFzg2XXzWwhmp_B3we80niPRQiWCDG78CIFASvvtV-ZdgCUjIU1XcCR77bZYQRw5QFAju9kAKBgwIBowD0AfULUOEUJR5Z3RHtop4AAQIDBAU".to_string();
 
         let _session_manager = SessionManager::establish_session(qr_code_uri, namespaces)
             .expect("failed to establish reader session");
