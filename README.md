@@ -29,7 +29,7 @@ To issue an mdoc call
 a valid validity_info object looks as follows: 
     ValidityInfo {signed: OffsetDateTime (UTC),valid_from: OffsetDateTime (UTC),valid_until: OffsetDateTime (UTC),expected_update: Option<OffsetDateTime (UTC)>,};
 
-- digest_algorithm specifiest he hashing algortihm for protecting data elements during transport. This library supports SHA-256, SHA-384 and SHA-512.
+- digest_algorithm specifies the hashing algortihm for protecting data elements during transport. This library supports SHA-256, SHA-384 and SHA-512.
 
 - device_key_info contains at a minimum a device_key (the public part of the key pair used for mdoc authentication: "SDeviceKey.Pub"). It must be formatted as an RFC 8152 COSE_KEY. 
 key_authorizations within the device_key_info specifies the namespaces and/or data_elements that the keys are authorized to authenticate.
