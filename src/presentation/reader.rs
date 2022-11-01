@@ -204,3 +204,34 @@ impl SessionManager {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::definitions::helpers::NonEmptyMap;
+    use crate::presentation::reader::SessionManager;
+    use std::collections::HashMap;
+    #[test]
+    fn test_establish_session() {
+        //specify requested data
+        let identifiers = vec![
+            "family_name".to_string(),
+            "issue_date".to_string(),
+            "expiry_date".to_string(),
+            "document_number".to_string(),
+            "portrait".to_string(),
+            "driving_privileges".to_string(),
+        ];
+        let mut data_element = HashMap::<String, bool>::new();
+        for id in identifiers {
+            data_element.insert(id, false);
+        }
+
+        let data_elements = NonEmptyMap::try_from(data_element).unwrap();
+
+        let namespaces = NonEmptyMap::new("org.iso.18013.5.1".to_string(), data_elements);
+        let qr_code_uri = "mdoc:2BhYdKMAYzEuMAGCAdgYWEukAQIgASFYIOyWvr3w5jdDOpm9HLKAkv1LzK9puc0ji36J64Wl3g5uIlggrlctEVoucY98p2eDJbJeSj_AyFlP0gaQZFelHbjivbsCgYMCAaMA9AH1C1D4djy6WdMR7baWAAECAwQF".to_string();
+
+        let _session_manager = SessionManager::establish_session(qr_code_uri, namespaces)
+            .expect("failed to establish reader session");
+    }
+}

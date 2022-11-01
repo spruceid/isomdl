@@ -268,21 +268,14 @@ mod test {
     use crate::definitions::device_engagement::{
         BleOptions, CentralClientMode, DeviceRetrievalMethod, DeviceRetrievalMethods,
     };
-    use crate::definitions::device_request::DeviceRequest;
-    use crate::definitions::device_request::ItemsRequest;
     use crate::definitions::helpers::NonEmptyMap;
-    use crate::definitions::issuer_signed::{self, IssuerSignedItemBytes};
-    use crate::definitions::session::SessionEstablishment;
+    use crate::definitions::issuer_signed::{self};
     use crate::definitions::IssuerSigned;
-    use crate::definitions::{DeviceResponse, Mso};
+    use crate::definitions::Mso;
     use crate::presentation::{
-        device::{
-            Document, ElementIdentifier, Namespace, SessionManager, SessionManagerEngaged,
-            SessionManagerInit, State,
-        },
+        device::{Document, SessionManagerInit},
         Stringify,
     };
-    use cose_rs::CoseSign1;
     use hex::FromHex;
     use issuer_signed::IssuerSignedItem;
     use serde_cbor::Value as CborValue;

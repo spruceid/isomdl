@@ -626,3 +626,99 @@ impl From<Mdoc> for Document {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::definitions::device_engagement::{
+        BleOptions, CentralClientMode, DeviceRetrievalMethod, DeviceRetrievalMethods,
+    };
+    use crate::definitions::helpers::NonEmptyMap;
+    use crate::definitions::helpers::Tag24;
+    use crate::definitions::issuer_signed::{self};
+    use crate::definitions::IssuerSigned;
+    use crate::definitions::{DeviceResponse, Mso};
+    use crate::presentation::device::{Document, SessionManagerInit};
+    use hex::FromHex;
+    use issuer_signed::IssuerSignedItem;
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_initialise_session() {
+        //creating a dummy device::Document to pass into SessionManagerInit from a ISO test vector
+        //Document is normally recovered from mobile app storage
+        static DEVICE_RESPONSE_CBOR: &str =
+            include_str!("../../test/definitions/device_response.cbor");
+        let device_response_bytes =
+            <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");
+
+        let device_response_input: DeviceResponse = serde_cbor::from_slice(&device_response_bytes)
+            .expect("unable to decode cbor as an IssuerSigned");
+        let documents_input = device_response_input
+            .documents
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
+
+        let nmspc = documents_input.issuer_signed.namespaces.unwrap();
+        let iso_mdl_nmspc =
+            Vec::<Tag24<IssuerSignedItem>>::from(nmspc.get("org.iso.18013.5.1").unwrap().clone());
+
+        let mut identifiers: Vec<String> = vec![];
+        let mut values: Vec<Tag24<IssuerSignedItem>> = vec![];
+        let mut np = HashMap::<String, Tag24<IssuerSignedItem>>::new();
+
+        for item in iso_mdl_nmspc {
+            let it = item.into_inner();
+            identifiers.push(it.element_identifier.clone());
+            values.push(Tag24::<IssuerSignedItem>::new(it).unwrap());
+        }
+
+        for (i, _el) in identifiers.iter().enumerate() {
+            let key = identifiers.get(i).unwrap().clone();
+            let value = values.get(i).unwrap().clone();
+            np.insert(key, value);
+        }
+
+        let document_namespace_elements = NonEmptyMap::try_from(np).unwrap();
+
+        let uuid = Uuid::now_v1(&[0, 1, 2, 3, 4, 5]);
+        static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/definitions/issuer_signed.cbor");
+        let cbor_bytes =
+            <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
+        let signed: IssuerSigned =
+            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
+        let mso_bytes = signed
+            .issuer_auth
+            .payload()
+            .expect("expected a COSE_Sign1 with attached payload, found detached payload");
+        let mso: Tag24<Mso> =
+            serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
+
+        let document_namespace =
+            NonEmptyMap::new("org.iso.18013.5.1".into(), document_namespace_elements);
+
+        let document = Document {
+            id: uuid,
+            issuer_auth: signed.issuer_auth,
+            mso: mso.into_inner(),
+            namespaces: document_namespace,
+        };
+
+        let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
+            peripheral_server_mode: None,
+            central_client_mode: Some(CentralClientMode { uuid }),
+        }));
+
+        //initialise session for device
+        let session = SessionManagerInit::initialise(
+            NonEmptyMap::new("org.iso.18013.5.1.mDL".into(), document),
+            Some(drms),
+            None,
+        )
+        .expect("could not start a session");
+        let (_engaged_state, _qr_code_uri) =
+            session.qr_engagement().expect("unexpected qr engagement");
+    }
+}
