@@ -18,8 +18,10 @@ use crate::{
     issuance::Mdoc,
 };
 use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
+use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
+use sha2::Sha256;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -28,7 +30,7 @@ use uuid::Uuid;
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
-    e_device_key_seed: u64,
+    e_device_key: Vec<u8>,
     device_engagement: Tag24<DeviceEngagement>,
 }
 
@@ -37,7 +39,7 @@ pub struct SessionManagerInit {
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
     documents: Documents,
-    e_device_key_seed: u64,
+    e_device_key: Vec<u8>,
     device_engagement: Tag24<DeviceEngagement>,
     handover: Handover,
 }
@@ -131,9 +133,8 @@ impl SessionManagerInit {
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
         server_retrieval_methods: Option<ServerRetrievalMethods>,
     ) -> Result<Self, Error> {
-        let e_device_key_seed: u64 = rand::random();
-        let (_, e_device_key_pub) = session::create_p256_ephemeral_keys(e_device_key_seed)
-            .map_err(Error::EKeyGeneration)?;
+        let (e_device_key, e_device_key_pub) =
+            session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;
         let e_device_key_bytes =
             Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
         let security = Security(1, e_device_key_bytes);
@@ -151,21 +152,30 @@ impl SessionManagerInit {
 
         Ok(Self {
             documents,
-            e_device_key_seed,
+            e_device_key: e_device_key.to_be_bytes().to_vec(),
             device_engagement,
         })
     }
 
+    pub fn ble_ident(&self) -> anyhow::Result<[u8; 16]> {
+        let e_device_key_bytes = serde_cbor::to_vec(&self.device_engagement.as_ref().security.1)?;
+
+        let mut okm = [0u8; 16];
+
+        Hkdf::<Sha256>::new(None, &e_device_key_bytes)
+            .expand("BLEIdent".as_bytes(), &mut okm)
+            .map_err(|e| anyhow::anyhow!("unable to perform HKDF: {}", e))?;
+
+        Ok(okm)
+    }
+
     /// Begin device engagement using QR code.
     pub fn qr_engagement(self) -> anyhow::Result<(SessionManagerEngaged, String)> {
-        let mut qr_code_uri = String::from("mdoc:");
-        let config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
-        let de_bytes = serde_cbor::to_vec(&self.device_engagement)?;
-        base64::encode_config_buf(&de_bytes, config, &mut qr_code_uri);
+        let qr_code_uri = self.device_engagement.to_qr_code_uri()?;
         let sm = SessionManagerEngaged {
             documents: self.documents,
             device_engagement: self.device_engagement,
-            e_device_key_seed: self.e_device_key_seed,
+            e_device_key: self.e_device_key,
             handover: Handover::QR,
         };
         Ok((sm, qr_code_uri))
@@ -185,14 +195,13 @@ impl SessionManagerEngaged {
         ))
         .map_err(Error::Tag24CborEncoding)?;
 
-        let (e_device_key_private, _) = session::create_p256_ephemeral_keys(self.e_device_key_seed)
-            .map_err(Error::EKeyGeneration)?;
+        let e_device_key = p256::SecretKey::from_be_bytes(self.e_device_key.as_ref())?;
 
-        let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key_private)
+        let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key.into())
             .map_err(Error::SharedSecretGeneration)?;
 
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true).into();
-        let sk_device = derive_session_key(&shared_secret, &session_transcript, false).into();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true)?.into();
+        let sk_device = derive_session_key(&shared_secret, &session_transcript, false)?.into();
 
         let mut sm = SessionManager {
             documents: self.documents,
