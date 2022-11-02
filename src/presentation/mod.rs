@@ -24,3 +24,18 @@ impl Stringify for device::SessionManagerInit {}
 impl Stringify for device::SessionManagerEngaged {}
 impl Stringify for device::SessionManager {}
 impl Stringify for reader::SessionManager {}
+
+use crate::definitions::{device_key::cose_key::CoseKey, helpers::Tag24};
+use hkdf::Hkdf;
+use sha2::Sha256;
+
+fn calculate_ble_ident(e_device_key: &Tag24<CoseKey>) -> Result<[u8; 16]> {
+    let e_device_key_bytes = serde_cbor::to_vec(e_device_key)?;
+    let mut ble_ident = [0u8; 16];
+
+    Hkdf::<Sha256>::new(None, &e_device_key_bytes)
+        .expand("BLEIdent".as_bytes(), &mut ble_ident)
+        .map_err(|e| anyhow::anyhow!("unable to perform HKDF: {}", e))?;
+
+    Ok(ble_ident)
+}

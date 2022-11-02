@@ -18,10 +18,8 @@ use crate::{
     issuance::Mdoc,
 };
 use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
-use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
-use sha2::Sha256;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -158,15 +156,7 @@ impl SessionManagerInit {
     }
 
     pub fn ble_ident(&self) -> anyhow::Result<[u8; 16]> {
-        let e_device_key_bytes = serde_cbor::to_vec(&self.device_engagement.as_ref().security.1)?;
-
-        let mut okm = [0u8; 16];
-
-        Hkdf::<Sha256>::new(None, &e_device_key_bytes)
-            .expand("BLEIdent".as_bytes(), &mut okm)
-            .map_err(|e| anyhow::anyhow!("unable to perform HKDF: {}", e))?;
-
-        Ok(okm)
+        super::calculate_ble_ident(&self.device_engagement.as_ref().security.1)
     }
 
     /// Begin device engagement using QR code.
