@@ -8,8 +8,8 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use cose_rs::{
-    algorithm::SignatureAlgorithm,
-    sign1::{CoseSign1, HeaderMap},
+    algorithm::{Algorithm, SignatureAlgorithm},
+    sign1::{CoseSign1, HeaderMap, PreparedCoseSign1},
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub type Namespaces = HashMap<String, HashMap<String, CborValue>>;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-/// Representation of an issued mdoc.
+/// A signed mdoc.
 pub struct Mdoc {
     pub doc_type: String,
     pub mso: Mso,
@@ -31,22 +31,39 @@ pub struct Mdoc {
 }
 
 #[derive(Debug, Clone)]
-pub struct MdocPreparation {
+/// An incomplete mdoc, requiring a remotely signed signature to be completed.
+pub struct PreparedMdoc {
     doc_type: String,
     mso: Mso,
     namespaces: IssuerNamespaces,
-    x5chain: X5Chain,
+    prepared_sig: PreparedCoseSign1,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Builder {
+    doc_type: Option<String>,
+    namespaces: Option<Namespaces>,
+    validity_info: Option<ValidityInfo>,
+    digest_algorithm: Option<DigestAlgorithm>,
+    device_key_info: Option<DeviceKeyInfo>,
+    x5chain: Option<X5Chain>,
 }
 
 impl Mdoc {
-    pub fn prepare_mdoc(
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
+
+    /// Prepare mdoc for remote signing.
+    pub fn prepare(
         doc_type: String,
         namespaces: Namespaces,
-        x5chain: X5Chain,
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
-    ) -> Result<MdocPreparation> {
+        x5chain: X5Chain,
+        signature_algorithm: Algorithm,
+    ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
             authorizations.validate()?;
         }
@@ -63,74 +80,195 @@ impl Mdoc {
             validity_info,
         };
 
-        let preparation_mdoc = MdocPreparation {
+        let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
+
+        let mut unprotected_headers = HeaderMap::default();
+        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor()?);
+
+        let prepared_sig = CoseSign1::builder()
+            .payload(mso_bytes)
+            .unprotected(unprotected_headers)
+            .signature_algorithm(signature_algorithm)
+            .prepare()
+            .map_err(|e| anyhow!("error preparing cosesign1: {}", e))?;
+
+        let preparation_mdoc = PreparedMdoc {
             doc_type,
             namespaces: issuer_namespaces,
             mso,
-            x5chain,
+            prepared_sig,
         };
 
         Ok(preparation_mdoc)
     }
 
+    /// Directly sign and issue an mdoc.
     pub fn issue<S, Sig>(
         doc_type: String,
         namespaces: Namespaces,
-        x5chain: X5Chain,
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
+        x5chain: X5Chain,
         signer: S,
     ) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
         Sig: Signature,
     {
-        Self::prepare_mdoc(
+        let prepared_mdoc = Self::prepare(
             doc_type,
             namespaces,
-            x5chain,
             validity_info,
             digest_algorithm,
             device_key_info,
-        )?
-        .complete(signer)
+            x5chain,
+            signer.algorithm(),
+        )?;
+
+        let signature_payload = prepared_mdoc.signature_payload();
+        let signature = signer
+            .try_sign(signature_payload)
+            .map_err(|e| anyhow!("error signing cosesign1: {}", e))?
+            .as_bytes()
+            .to_vec();
+
+        Ok(prepared_mdoc.complete(signature))
     }
 }
 
-impl MdocPreparation {
-    pub fn complete<S, Sig>(self, signer: S) -> Result<Mdoc>
+impl PreparedMdoc {
+    /// Retrieve the payload for a remote signature.
+    pub fn signature_payload(&self) -> &[u8] {
+        self.prepared_sig.signature_payload()
+    }
+
+    /// Supply the remotely signed signature to complete and issue the prepared mdoc.
+    pub fn complete(self, signature: Vec<u8>) -> Mdoc {
+        let PreparedMdoc {
+            doc_type,
+            namespaces,
+            mso,
+            prepared_sig,
+        } = self;
+
+        let issuer_auth = prepared_sig.finalize(signature);
+
+        Mdoc {
+            doc_type,
+            mso,
+            namespaces,
+            issuer_auth,
+        }
+    }
+}
+
+impl Builder {
+    /// Set the document type.
+    pub fn doc_type(mut self, doc_type: String) -> Self {
+        self.doc_type = Some(doc_type);
+        self
+    }
+
+    /// Set the data elements.
+    pub fn namespaces(mut self, namespaces: Namespaces) -> Self {
+        self.namespaces = Some(namespaces);
+        self
+    }
+
+    /// Set the validity information
+    pub fn validity_info(mut self, validity_info: ValidityInfo) -> Self {
+        self.validity_info = Some(validity_info);
+        self
+    }
+
+    /// Set the digest algorithm to be used for hashing the data elements.
+    pub fn digest_algorithm(mut self, digest_algorithm: DigestAlgorithm) -> Self {
+        self.digest_algorithm = Some(digest_algorithm);
+        self
+    }
+
+    /// Set the information about the device key that this mdoc will be issued to.
+    pub fn device_key_info(mut self, device_key_info: DeviceKeyInfo) -> Self {
+        self.device_key_info = Some(device_key_info);
+        self
+    }
+
+    /// Set the x5chain of the issuing key.
+    pub fn x5chain(mut self, x5chain: X5Chain) -> Self {
+        self.x5chain = Some(x5chain);
+        self
+    }
+
+    /// Prepare the mdoc for remote signing.
+    ///
+    /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
+    /// it is a required field in the signature headers.
+    pub fn prepare(self, signature_algorithm: Algorithm) -> Result<PreparedMdoc> {
+        let doc_type = self
+            .doc_type
+            .ok_or_else(|| anyhow!("missing parameter: 'doc_type'"))?;
+        let namespaces = self
+            .namespaces
+            .ok_or_else(|| anyhow!("missing parameter: 'namespaces'"))?;
+        let validity_info = self
+            .validity_info
+            .ok_or_else(|| anyhow!("missing parameter: 'validity_info'"))?;
+        let digest_algorithm = self
+            .digest_algorithm
+            .ok_or_else(|| anyhow!("missing parameter: 'digest_algorithm'"))?;
+        let device_key_info = self
+            .device_key_info
+            .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
+        let x5chain = self
+            .x5chain
+            .ok_or_else(|| anyhow!("missing parameter: 'x5chain'"))?;
+
+        Mdoc::prepare(
+            doc_type,
+            namespaces,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+            x5chain,
+            signature_algorithm,
+        )
+    }
+
+    /// Directly issue an mdoc.
+    pub fn issue<S, Sig>(self, signer: S) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
         Sig: Signature,
     {
-        let MdocPreparation {
+        let doc_type = self
+            .doc_type
+            .ok_or_else(|| anyhow!("missing parameter: 'doc_type'"))?;
+        let namespaces = self
+            .namespaces
+            .ok_or_else(|| anyhow!("missing parameter: 'namespaces'"))?;
+        let validity_info = self
+            .validity_info
+            .ok_or_else(|| anyhow!("missing parameter: 'validity_info'"))?;
+        let digest_algorithm = self
+            .digest_algorithm
+            .ok_or_else(|| anyhow!("missing parameter: 'digest_algorithm'"))?;
+        let device_key_info = self
+            .device_key_info
+            .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
+        let x5chain = self
+            .x5chain
+            .ok_or_else(|| anyhow!("missing parameter: 'x5chain'"))?;
+
+        Mdoc::issue(
             doc_type,
             namespaces,
-            mso,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
             x5chain,
-        } = self;
-
-        // encode mso to cbor
-        let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
-
-        let mut unprotected_headers = HeaderMap::default();
-        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor()?);
-
-        let cose_sign1 = CoseSign1::builder()
-            .payload(mso_bytes)
-            .unprotected(unprotected_headers)
-            .sign(&signer)
-            .map_err(|error| anyhow!("error signing mso: {error}"))?;
-
-        let mdoc = Mdoc {
-            doc_type,
-            mso,
-            namespaces,
-            issuer_auth: cose_sign1,
-        };
-
-        Ok(mdoc)
+            signer,
+        )
     }
 }
 
@@ -297,15 +435,14 @@ mod test {
             .expect("failed to parse pem")
             .into();
 
-        Mdoc::issue(
-            doc_type,
-            namespaces,
-            x5chain,
-            validity_info,
-            digest_algorithm,
-            device_key_info,
-            signer,
-        )
-        .expect("failed to issue mdoc");
+        Mdoc::builder()
+            .doc_type(doc_type)
+            .namespaces(namespaces)
+            .x5chain(x5chain)
+            .validity_info(validity_info)
+            .digest_algorithm(digest_algorithm)
+            .device_key_info(device_key_info)
+            .issue(signer)
+            .expect("failed to issue mdoc");
     }
 }
