@@ -8,12 +8,13 @@ use crate::definitions::{
     },
     DeviceEngagement, DeviceResponse, SessionData, SessionTranscript,
 };
+use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
-use std::collections::HashMap;
+use serde_json::json;
+use serde_json::Value;
+use std::collections::BTreeMap;
 use uuid::Uuid;
-
 // TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
 // non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
@@ -141,7 +142,7 @@ impl SessionManager {
 
     // TODO: Handle any doc type.
     // TODO: Proper error handling.
-    pub fn handle_response(&mut self, response: &[u8]) -> Result<HashMap<String, String>> {
+    pub fn handle_response(&mut self, response: &[u8]) -> Result<Value> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => {
@@ -173,7 +174,8 @@ impl SessionManager {
         //
         // 4. The reader must verify that the `DeviceKey` is the subject of the x5chain, and that the
         //    x5chain is consistent and issued by a trusted source.
-        Ok(response
+        let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
+        response
             .documents
             .ok_or_else(|| anyhow!("device did not send any documents"))?
             .into_inner()
@@ -191,14 +193,60 @@ impl SessionManager {
             .into_inner()
             .into_iter()
             .map(|item| item.into_inner())
-            .filter_map(|item| {
+            .for_each(|item| {
                 // TODO: Support non-string data.
-                let value = match item.element_value {
-                    CborValue::Text(s) => s,
-                    _ => return None,
-                };
-                Some((item.element_identifier, value))
-            })
-            .collect())
+                println!("element_value {:?}", item.element_value);
+                let value = parse_response(item.element_value.clone());
+                if value.is_ok() {
+                    parsed_response.insert(item.element_identifier.clone(), value.unwrap());
+                }
+            });
+        Ok(json!(parsed_response))
+    }
+}
+
+fn parse_response(value: CborValue) -> Result<Value> {
+    match value {
+        CborValue::Text(s) => Ok(Value::String(s)),
+        CborValue::Tag(_t, v) => match *v {
+            CborValue::Text(d) => Ok(Value::String(d)),
+            _ => Ok(Value::String("not a tagged string".to_string())),
+        },
+        CborValue::Array(v) => {
+            let mut array_response = Vec::<Value>::new();
+            for a in v {
+                let r = parse_response(a)?;
+                array_response.push(r);
+            }
+            Ok(json!(array_response))
+        }
+        CborValue::Map(m) => {
+            let mut map_response = BTreeMap::<String, String>::new();
+            for (key, value) in m {
+                match key {
+                    CborValue::Text(k) => {
+                        let parsed = parse_response(value)?;
+                        match parsed {
+                            Value::String(x) => {
+                                map_response.insert(k, x);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let json = json!(map_response);
+            Ok(json)
+        }
+        CborValue::Bytes(b) => {
+            //Todo: represent bytes better than as a string
+            let s = serde_json::to_string(&b)?;
+            Ok(json!(s))
+        }
+        //this should never trigger
+        CborValue::Bool(b) => Ok(json!(b)),
+        CborValue::Integer(i) => Ok(json!(i)),
+        _ => Ok(Value::String("unrecognized cbor value".to_string())),
     }
 }
