@@ -30,6 +30,36 @@ pub struct SessionManager {
 pub enum Error {
     #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
     InvalidQrCode(anyhow::Error),
+    #[error("Device did not transmit an data.")]
+    DeviceTransmissionError,
+    #[error("Device did not transmit an mDL.")]
+    DocumentTypeError,
+    #[error("the device did not transmit any mDL data.")]
+    NoMdlDataTransmission,
+    #[error("device did not transmit any data in the org.iso.18013.5.1 namespace.")]
+    IncorrectNamespace,
+    #[error("device responded with an error.")]
+    HolderError,
+    #[error("could not decrypt the response.")]
+    DecryptionError,
+    #[error("could not decode cbor input.")]
+    CborDecodingError,
+    #[error("not a valid input for json.")]
+    JsonError,
+    #[error("could not parse data_element.")]
+    ParsingError,
+}
+
+impl From<serde_cbor::Error> for Error {
+    fn from(_: serde_cbor::Error) -> Self {
+        Error::CborDecodingError
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(_: serde_json::Error) -> Self {
+        Error::JsonError
+    }
 }
 
 // TODO: Refactor for more general implementation. This implementation will work for a simple test
@@ -141,16 +171,10 @@ impl SessionManager {
     }
 
     // TODO: Handle any doc type.
-    // TODO: Proper error handling.
-    pub fn handle_response(&mut self, response: &[u8]) -> Result<Value> {
+    pub fn handle_response(&mut self, response: &[u8]) -> Result<Value, Error> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
-            None => {
-                return Err(anyhow!(
-                    "mdl holder responded with an error: {:?}",
-                    session_data.status
-                ))
-            }
+            None => return Err(Error::HolderError),
             Some(r) => r,
         };
         // TODO: Handle case where session termination status code is returned with data.
@@ -159,7 +183,7 @@ impl SessionManager {
             encrypted_response.as_ref(),
             &mut self.device_message_counter,
         )
-        .map_err(|e| anyhow!("unable to decrypt response: {}", e))?;
+        .map_err(|_e| Error::DecryptionError)?;
         let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
         // TODO: Mdoc authentication.
         //
@@ -177,25 +201,21 @@ impl SessionManager {
         let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
         response
             .documents
-            .ok_or_else(|| anyhow!("device did not send any documents"))?
+            .ok_or_else(|| Error::DeviceTransmissionError)?
             .into_inner()
             .into_iter()
             .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-            .ok_or_else(|| anyhow!("device did not transmit an mDL"))?
+            .ok_or_else(|| Error::DocumentTypeError)?
             .issuer_signed
             .namespaces
-            .ok_or_else(|| anyhow!("device did not transmit any mDL data"))?
+            .ok_or_else(|| Error::NoMdlDataTransmission)?
             .into_inner()
             .remove("org.iso.18013.5.1")
-            .ok_or_else(|| {
-                anyhow!("device did not transmit any data in the org.iso.18013.5.1 namespace")
-            })?
+            .ok_or_else(|| Error::IncorrectNamespace)?
             .into_inner()
             .into_iter()
             .map(|item| item.into_inner())
             .for_each(|item| {
-                // TODO: Support non-string data.
-                println!("element_value {:?}", item.element_value);
                 let value = parse_response(item.element_value.clone());
                 if value.is_ok() {
                     parsed_response.insert(item.element_identifier.clone(), value.unwrap());
@@ -205,12 +225,12 @@ impl SessionManager {
     }
 }
 
-fn parse_response(value: CborValue) -> Result<Value> {
+fn parse_response(value: CborValue) -> Result<Value, Error> {
     match value {
         CborValue::Text(s) => Ok(Value::String(s)),
         CborValue::Tag(_t, v) => match *v {
             CborValue::Text(d) => Ok(Value::String(d)),
-            _ => Ok(Value::String("not a tagged string".to_string())),
+            _ => Err(Error::ParsingError),
         },
         CborValue::Array(v) => {
             let mut array_response = Vec::<Value>::new();
@@ -247,6 +267,6 @@ fn parse_response(value: CborValue) -> Result<Value> {
         //this should never trigger
         CborValue::Bool(b) => Ok(json!(b)),
         CborValue::Integer(i) => Ok(json!(i)),
-        _ => Ok(Value::String("unrecognized cbor value".to_string())),
+        _ => Err(Error::ParsingError),
     }
 }
