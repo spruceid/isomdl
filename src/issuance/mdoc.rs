@@ -115,7 +115,7 @@ impl MdocPreparation {
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
         let mut unprotected_headers = HeaderMap::default();
-        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor()?);
+        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
 
         let cose_sign1 = CoseSign1::builder()
             .payload(mso_bytes)
@@ -238,7 +238,7 @@ mod test {
     use p256::pkcs8::DecodePrivateKey;
     use time::OffsetDateTime;
 
-    static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
+    static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.der");
     static ISSUER_KEY: &str = include_str!("../../test/issuance/256-key.pem");
 
     #[test]
@@ -250,6 +250,7 @@ mod test {
             ("family_name".to_string(), "Smith".to_string().into()),
             ("given_name".to_string(), "Alice".to_string().into()),
             ("document_number".to_string(), "I8889680".to_string().into()),
+            ("portrait".to_string(), CborValue::Bytes(include_bytes!("/home/jward/Downloads/portrait.jpg").to_vec())),
         ]
         .into_iter()
         .collect();
@@ -258,7 +259,7 @@ mod test {
             .collect();
 
         let x5chain = X5Chain::builder()
-            .with_pem(ISSUER_CERT)
+            .with_der(ISSUER_CERT.to_vec())
             .unwrap()
             .build()
             .unwrap();
@@ -271,6 +272,10 @@ mod test {
         };
 
         let digest_algorithm = DigestAlgorithm::SHA256;
+
+        use elliptic_curve::sec1::ToEncodedPoint;
+        use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
+        use rand::{SeedableRng, rngs::StdRng};
 
         let der = include_str!("../../test/issuance/device_key.b64");
         let der_bytes = base64::decode(der).unwrap();
@@ -308,8 +313,12 @@ mod test {
         )
         .expect("failed to issue mdoc");
 
-        // use crate::presentation::Stringify;
-        // let doc: crate::presentation::device::Document = mdoc.into();
-        // println!("example mdoc: {}", doc.stringify().unwrap())
+        //use crate::presentation::Stringify;
+        //let doc: crate::presentation::device::Document = mdoc.into();
+        //use std::io::Write;
+        //std::fs::File::create("remove_me/doc_with_portrait")
+        //    .unwrap()
+        //    .write_all(doc.stringify().unwrap().as_bytes());
+
     }
 }
