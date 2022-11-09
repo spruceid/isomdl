@@ -284,10 +284,10 @@ impl SessionManager {
             {
                 Some(alg) => alg,
                 None => {
-                    tracing::error!(
-                        "device key for document '{}' cannot perform signing",
-                        document.id
-                    );
+                    //tracing::error!(
+                    //    "device key for document '{}' cannot perform signing",
+                    //    document.id
+                    //);
                     let error: DocumentError =
                         [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
                             .into_iter()
@@ -365,7 +365,7 @@ impl SessionManager {
             let device_namespaces = match Tag24::new(device_namespaces) {
                 Ok(dp) => dp,
                 Err(e) => {
-                    tracing::error!("failed to convert device namespaces to cbor: {}", e);
+                    //tracing::error!("failed to convert device namespaces to cbor: {}", e);
                     let error: DocumentError =
                         [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
                             .into_iter()
@@ -382,7 +382,7 @@ impl SessionManager {
             let device_auth = match Tag24::new(device_auth) {
                 Ok(da) => da,
                 Err(e) => {
-                    tracing::error!("failed to convert device authentication to cbor: {}", e);
+                    //tracing::error!("failed to convert device authentication to cbor: {}", e);
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
                         .into_iter()
                         .collect();
@@ -398,7 +398,7 @@ impl SessionManager {
             {
                 Ok(prepared) => prepared,
                 Err(e) => {
-                    tracing::error!("failed to prepare COSE_Sign1: {}", e);
+                    //tracing::error!("failed to prepare COSE_Sign1: {}", e);
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
                         .into_iter()
                         .collect();
@@ -489,7 +489,7 @@ impl SessionManager {
                             &mut self.device_message_counter,
                         )
                         .unwrap_or_else(|e| {
-                            tracing::warn!("unable to encrypt response: {}", e);
+                            //tracing::warn!("unable to encrypt response: {}", e);
                             status = Some(session::Status::SessionEncryptionError);
                             Default::default()
                         });
@@ -559,9 +559,9 @@ impl PreparedDeviceResponse {
         let signed_doc = match self.prepared_documents.pop() {
             Some(doc) => doc.finalize(signature),
             None => {
-                tracing::error!(
-                    "received a signature for finalising when there are no more prepared docs"
-                );
+                //tracing::error!(
+                //    "received a signature for finalising when there are no more prepared docs"
+                //);
                 return;
             }
         };
@@ -570,7 +570,7 @@ impl PreparedDeviceResponse {
 
     pub fn finalize_response(self) -> DeviceResponse {
         if !self.is_complete() {
-            tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
+            //tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
             return PreparedDeviceResponse::empty(Status::GeneralError).finalize_response();
         }
 

@@ -183,11 +183,11 @@ impl TryFrom<CborValue> for DeviceEngagement {
                 .transpose()
                 .map_err(|_| Error::Malformed)?;
             if server_retrieval_methods.is_some() {
-                tracing::warn!("server_retrieval is unimplemented.")
+                //tracing::warn!("server_retrieval is unimplemented.")
             }
             let protocol_info = map.remove(&CborValue::Integer(4));
             if protocol_info.is_some() {
-                tracing::warn!("protocol_info is RFU and has been ignored in deserialization.")
+                //tracing::warn!("protocol_info is RFU and has been ignored in deserialization.")
             }
 
             let device_engagement = DeviceEngagement {

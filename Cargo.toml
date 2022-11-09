@@ -30,7 +30,7 @@ uuid = { version = "1.2", features = ["v1", "std", "rng", "serde"] }
 time = { version = "0.3.14", features = ["formatting", "parsing"] }
 zeroize = { version = "1.4", features = ["zeroize_derive"] }
 signature = "1.6"
-tracing = "0.1"
+#tracing = "0.1"
 base64 = "0.13"
 pem-rfc7468 = "0.6.0"
 x509-cert = { version = "0.1.0", features = ["pem"] }
