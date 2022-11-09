@@ -250,7 +250,10 @@ mod test {
             ("family_name".to_string(), "Smith".to_string().into()),
             ("given_name".to_string(), "Alice".to_string().into()),
             ("document_number".to_string(), "I8889680".to_string().into()),
-            ("portrait".to_string(), CborValue::Bytes(include_bytes!("/home/jward/Downloads/portrait.jpg").to_vec())),
+            (
+                "portrait".to_string(),
+                CborValue::Bytes(include_bytes!("/home/jward/Downloads/portrait.jpg").to_vec()),
+            ),
         ]
         .into_iter()
         .collect();
@@ -273,9 +276,9 @@ mod test {
 
         let digest_algorithm = DigestAlgorithm::SHA256;
 
-        use elliptic_curve::sec1::ToEncodedPoint;
         use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
-        use rand::{SeedableRng, rngs::StdRng};
+        use elliptic_curve::sec1::ToEncodedPoint;
+        use rand::{rngs::StdRng, SeedableRng};
 
         let der = include_str!("../../test/issuance/device_key.b64");
         let der_bytes = base64::decode(der).unwrap();
@@ -319,6 +322,5 @@ mod test {
         //std::fs::File::create("remove_me/doc_with_portrait")
         //    .unwrap()
         //    .write_all(doc.stringify().unwrap().as_bytes());
-
     }
 }

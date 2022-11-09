@@ -1,11 +1,12 @@
 use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
-use cose_rs::algorithm::Algorithm;
 use serde_cbor::Value as CborValue;
 use std::{fs::File, io::Read};
-use x509_cert::{certificate::Certificate, der::{Encode, Decode, PemReader, Reader}};
+use x509_cert::{
+    certificate::Certificate,
+    der::{Decode, Encode, PemReader, Reader},
+};
 
-// Temporarily registered, possibly subject to change.
 pub const X5CHAIN_HEADER_LABEL: i128 = 33;
 
 #[derive(Debug, Clone)]
@@ -22,50 +23,19 @@ impl From<NonEmptyVec<X509>> for X5Chain {
     }
 }
 
-//impl AsRef<[Certificate<'static>]> for X5Chain {
-//    fn as_ref(&self) -> &[Certificate] {
-//        self.0.as_ref()
-//    }
-//}
-
 impl X5Chain {
     pub fn builder() -> Builder {
         Builder::default()
     }
 
     pub fn into_cbor(&self) -> CborValue {
-        CborValue::Array(self.0
-            .iter()
-            .cloned()
-            .map(|x509| x509.bytes)
-            .map(CborValue::Bytes)
-            .collect::<Vec<CborValue>>())
-            
-    }
-
-    pub fn key_algorithm(&self) -> Result<Algorithm> {
-        // Safe to index into chain, as we know there is at least one element from Builder::build.
-        Ok(
-            todo!()
-            //match CertificateRef::public_key(&self[0])?
-            //    .ec_key()?
-            //    .group()
-            //    .curve_name()
-            //    .ok_or_else(|| anyhow!("no curve name found on first Certificate cert in chain"))?
-            //{
-            //    openssl::nid::Nid::X9_62_PRIME256V1 => Algorithm::ES256,
-            //    openssl::nid::Nid::SECP384R1 => Algorithm::ES384,
-            //    openssl::nid::Nid::SECP521R1 => Algorithm::ES512,
-            //    nid => {
-            //        if let Ok(name) = nid.long_name() {
-            //            Err(anyhow!("unsupported algorithm: {}", name))?
-            //        }
-            //        Err(anyhow!(
-            //            "unsupported algorithm: {:?} (see openssl::nid)",
-            //            nid
-            //        ))?
-            //    }
-            //},
+        CborValue::Array(
+            self.0
+                .iter()
+                .cloned()
+                .map(|x509| x509.bytes)
+                .map(CborValue::Bytes)
+                .collect::<Vec<CborValue>>(),
         )
     }
 }
@@ -81,14 +51,22 @@ impl Builder {
             .map_err(|e| anyhow!("unable to parse pem: {}", e))?
             .decode()
             .map_err(|e| anyhow!("unable to parse certificate from pem encoding: {}", e))?;
-        let x509 = X509 { bytes: cert.to_vec().map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))? };
+        let x509 = X509 {
+            bytes: cert
+                .to_vec()
+                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
+        };
         self.certs.push(x509);
         Ok(self)
     }
     pub fn with_der(mut self, data: Vec<u8>) -> Result<Builder> {
         let cert: Certificate = Certificate::from_der(&data)
             .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
-        let x509 = X509 { bytes: cert.to_vec().map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))? };
+        let x509 = X509 {
+            bytes: cert
+                .to_vec()
+                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
+        };
         self.certs.push(x509);
         Ok(self)
     }
@@ -99,7 +77,11 @@ impl Builder {
             .map_err(|e| anyhow!("unable to parse pem: {}", e))?
             .decode()
             .map_err(|e| anyhow!("unable to parse certificate from pem file: {}", e))?;
-        let x509 = X509 { bytes: cert.to_vec().map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))? };
+        let x509 = X509 {
+            bytes: cert
+                .to_vec()
+                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
+        };
         self.certs.push(x509);
         Ok(self)
     }
@@ -108,14 +90,19 @@ impl Builder {
         f.read_to_end(&mut data)?;
         let cert: Certificate = Certificate::from_der(&data)
             .map_err(|e| anyhow!("unable to parse certificate from der file: {}", e))?;
-        let x509 = X509 { bytes: cert.to_vec().map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))? };
+        let x509 = X509 {
+            bytes: cert
+                .to_vec()
+                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
+        };
         self.certs.push(x509);
         Ok(self)
     }
     pub fn build(self) -> Result<X5Chain> {
         // TODO: Add chain validation
-        Ok(X5Chain(self.certs.try_into()
-            .map_err(|_| anyhow!("at least one certificate must be given to the builder"))?))
+        Ok(X5Chain(self.certs.try_into().map_err(|_| {
+            anyhow!("at least one certificate must be given to the builder")
+        })?))
     }
 }
 

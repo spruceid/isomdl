@@ -48,10 +48,10 @@ mod test {
         );
     }
 
-    use super::*;
-    use crate::presentation::{Stringify, device::Document};
     use super::super::{helpers::Tag24, Mso};
+    use super::*;
     use crate::issuance::Mdoc;
+    use crate::presentation::{device::Document, Stringify};
 
     #[test]
     fn debug() {
@@ -59,8 +59,12 @@ mod test {
             <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
         let signed: IssuerSigned =
             serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
-        
-        let portrait_bytes = signed.namespaces.unwrap().get("org.iso.18013.5.1").unwrap()
+
+        let portrait_bytes = signed
+            .namespaces
+            .unwrap()
+            .get("org.iso.18013.5.1")
+            .unwrap()
             .clone()
             .into_inner()
             .into_iter()
@@ -75,7 +79,8 @@ mod test {
         use std::io::Write;
         let file = std::fs::File::create("ex-portrait.jpg")
             .unwrap()
-            .write_all(&portrait_bytes).unwrap();
+            .write_all(&portrait_bytes)
+            .unwrap();
 
         // Issue mDL
         //

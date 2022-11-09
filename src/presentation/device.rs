@@ -1,7 +1,7 @@
 use crate::{
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
-        device_request::DeviceRequest,
+        device_request::{DeviceRequest, DocRequest, ItemsRequest},
         device_response::{
             Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
             Errors as NamespaceErrors, Status,
@@ -124,6 +124,9 @@ type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSi
 type Namespace = String;
 type ElementIdentifier = String;
 
+pub type RequestedItems = Vec<ItemsRequest>;
+pub type PermittedItems = HashMap<DocType, HashMap<Namespace, Vec<ElementIdentifier>>>;
+
 impl SessionManagerInit {
     /// Initialise the SessionManager.
     pub fn initialise(
@@ -176,7 +179,7 @@ impl SessionManagerEngaged {
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
-    ) -> anyhow::Result<SessionManager> {
+    ) -> anyhow::Result<(SessionManager, RequestedItems)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript = Tag24::new(SessionTranscript(
             self.device_engagement,
@@ -203,56 +206,68 @@ impl SessionManagerEngaged {
             state: State::AwaitingRequest,
         };
 
-        sm.handle_decoded_request(SessionData {
+        let requested_data = sm.handle_decoded_request(SessionData {
             data: Some(session_establishment.data),
             status: None,
         })?;
 
-        Ok(sm)
+        Ok((sm, requested_data))
     }
 }
 
 impl SessionManager {
-    fn prepare_response(&self, request: &[u8]) -> PreparedDeviceResponse {
-        let request: CborValue = match serde_cbor::from_slice(request) {
-            Ok(cbor) => cbor,
-            Err(error) => {
-                tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
-                return PreparedDeviceResponse::empty(Status::CborDecodingError);
-            }
-        };
+    fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
+        let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
+            // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
+            PreparedDeviceResponse::empty(Status::CborDecodingError)
+        })?;
 
-        let request: DeviceRequest = match serde_cbor::value::from_value(request) {
-            Ok(cbor) => cbor,
-            Err(error) => {
-                tracing::error!("unable to validate DeviceRequest cbor: {}", error);
-                return PreparedDeviceResponse::empty(Status::CborValidationError);
-            }
-        };
+        serde_cbor::value::from_value(request).map_err(|_| {
+            // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
+            PreparedDeviceResponse::empty(Status::CborValidationError)
+        })
+    }
 
+    fn validate_request(
+        &self,
+        request: DeviceRequest,
+    ) -> Result<Vec<ItemsRequest>, PreparedDeviceResponse> {
         if request.version != DeviceRequest::VERSION {
-            tracing::error!(
-                "unsupported DeviceRequest version: {} ({} is supported)",
-                request.version,
-                DeviceRequest::VERSION
-            );
-            return PreparedDeviceResponse::empty(Status::GeneralError);
+            // tracing::error!(
+            //     "unsupported DeviceRequest version: {} ({} is supported)",
+            //     request.version,
+            //     DeviceRequest::VERSION
+            // );
+            return Err(PreparedDeviceResponse::empty(Status::GeneralError));
         }
+        Ok(request
+            .doc_requests
+            .into_inner()
+            .into_iter()
+            .map(|DocRequest { items_request, .. }|
+                 // TODO: implement reader auth
+                 items_request.into_inner())
+            .collect())
+    }
 
+    pub fn prepare_response(&mut self, requests: RequestedItems, permitted: PermittedItems) {
+        let prepared_response = self.prepare_response_inner(requests, permitted);
+        self.state = State::Signing(prepared_response);
+    }
+
+    fn prepare_response_inner(
+        &self,
+        requests: RequestedItems,
+        permitted: PermittedItems,
+    ) -> PreparedDeviceResponse {
         let mut prepared_documents: Vec<PreparedDocument> = Vec::new();
         let mut document_errors: Vec<DocumentError> = Vec::new();
 
-        for doc_request in request.doc_requests.into_inner().into_iter() {
-            if let Some(_reader_auth) = doc_request.reader_auth.as_ref() {
-                // TODO: implement reader auth
-            }
-
-            let items_request = doc_request.items_request.into_inner();
-            let doc_type = items_request.doc_type;
+        for (doc_type, namespaces) in filter_permitted(&requests, permitted).into_iter() {
             let document = match self.documents.get(&doc_type) {
                 Some(doc) => doc,
                 None => {
-                    tracing::error!("holder owns no documents of type {}", doc_type);
+                    // tracing::error!("holder owns no documents of type {}", doc_type);
                     let error: DocumentError =
                         [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
                             .into_iter()
@@ -282,10 +297,6 @@ impl SessionManager {
                 }
             };
 
-            if let Some(_info) = items_request.request_info.as_ref() {
-                // Current version of mdl spec doesn't use request info.
-            }
-
             let mut issuer_namespaces: HashMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
                 Default::default();
             let mut device_namespaces: HashMap<String, DeviceSignedItems> = Default::default();
@@ -293,12 +304,10 @@ impl SessionManager {
                 Default::default();
 
             // TODO: Handle special cases, i.e. for `age_over_NN`.
-            for (namespace, elements) in items_request.namespaces.into_inner().into_iter() {
+            for (namespace, elements) in namespaces.into_iter() {
                 if let Some(issuer_items) = document.namespaces.get(&namespace) {
-                    for (element_identifier, _intent_to_retain) in elements.into_inner().into_iter()
-                    {
+                    for element_identifier in elements.into_iter() {
                         if let Some(item) = issuer_items.get(&element_identifier) {
-                            // TODO: use intent_to_retain: notify user for approval?
                             if let Some(returned_items) = issuer_namespaces.get_mut(&namespace) {
                                 returned_items.push(item.clone());
                             } else {
@@ -338,7 +347,7 @@ impl SessionManager {
                         }
                     }
                 } else {
-                    for (element_identifier, _) in elements.into_inner().into_iter() {
+                    for element_identifier in elements.into_iter() {
                         if let Some(returned_errors) = errors.get_mut(&namespace) {
                             returned_errors
                                 .insert(element_identifier, DocumentErrorCode::DataNotReturned);
@@ -419,7 +428,7 @@ impl SessionManager {
         }
     }
 
-    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<()> {
+    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<RequestedItems> {
         // TODO: Better handling for termination status and missing data.
         let data = request.data.ok_or_else(|| {
             anyhow::anyhow!("no mdoc requests received, assume session can be terminated")
@@ -430,14 +439,26 @@ impl SessionManager {
             &mut self.reader_message_counter,
         )
         .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
-        let prepared_response = self.prepare_response(&decrypted_request);
-        self.state = State::Signing(prepared_response);
-        Ok(())
+        let request = match self.parse_request(&decrypted_request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.state = State::Signing(e);
+                return Ok(Default::default());
+            }
+        };
+        let request = match self.validate_request(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.state = State::Signing(e);
+                return Ok(Default::default());
+            }
+        };
+        Ok(request)
     }
 
     /// Handle a request from the reader.
     // TODO: Improve error handling.
-    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<()> {
+    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
         // TODO: Check session manager state.
         let session_data: SessionData = serde_cbor::from_slice(request)?;
         self.handle_decoded_request(session_data)
@@ -626,6 +647,35 @@ impl From<Mdoc> for Document {
     }
 }
 
+/// Filter permitted items to only permit the items that were requested.
+fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
+    permitted
+        .into_iter()
+        .filter_map(|(doc_type, namespaces)| {
+            request
+                .iter()
+                .find(|item| item.doc_type == doc_type)
+                .map(|item| {
+                    namespaces
+                        .into_iter()
+                        .filter_map(|(ns, elems)| {
+                            item.namespaces
+                                .get(&ns)
+                                .map(|req_elems| {
+                                    elems
+                                        .into_iter()
+                                        .filter(|elem| req_elems.contains_key(elem))
+                                        .collect()
+                                })
+                                .map(|e| (ns, e))
+                        })
+                        .collect()
+                })
+                .map(|ns| (doc_type, ns))
+        })
+        .collect()
+}
+
 // TODO: Remove this function. This adds a temporary way to sign DeviceRequest for test mdocs.
 pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
     let der = include_str!("../../test/issuance/device_key.b64");
@@ -635,4 +685,66 @@ pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
     key.try_sign(payload)
         .map(|sig| sig.to_vec())
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn filter_permitted() {
+        let requested = serde_json::from_value(json!([
+            {
+                "docType": "doc_type_1",
+                "nameSpaces": {
+                    "namespace_1": {
+                        "element_1": false,
+                        "element_2": false,
+                    },
+                    "namespace_2": {
+                        "element_1": false,
+                    }
+                }
+            },
+            {
+                "docType": "doc_type_2",
+                "nameSpaces": {
+                    "namespace_1": {
+                        "element_1": false,
+                    }
+                }
+            }
+        ]))
+        .unwrap();
+        let permitted = serde_json::from_value(json!({
+            "doc_type_1": {
+                "namespace_1": [
+                    "element_1",
+                    "element_3"
+                ],
+                "namespace_3": [
+                    "element_1",
+                ]
+            },
+            "doc_type_3": {
+                "namespace_1": [
+                    "element_1",
+                ],
+            }
+        }))
+        .unwrap();
+        let expected: PermittedItems = serde_json::from_value(json!({
+            "doc_type_1": {
+                "namespace_1": [
+                    "element_1",
+                ],
+            }
+        }))
+        .unwrap();
+
+        let filtered = super::filter_permitted(&requested, permitted);
+
+        assert_eq!(expected, filtered);
+    }
 }
