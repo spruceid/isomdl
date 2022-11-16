@@ -3,7 +3,14 @@
 ISO mDL implementation in Rust
 # isomdl
 
-ISO mDL implementation in Rust
+Notes: Implementation Limitations:
+This implementation of ISO mDL:
+- does not feature server retrieval functionality
+- currently only allows for presentation initiation by the mDL Holder showing a QR code (no NFC, no WiFi aware)
+- currenlty only supports BLE transport for presentation
+- currently only allows a reader to request an "org.iso.18013.5.1.mDL" docType in a presentation
+- A holder is currently not notified of which requested elements the verifier intends to retain
+
 
 Usage:
 This implementation uses a structure that separates issuance and presentation functionality in their respective folders.
@@ -53,7 +60,7 @@ server_retrieval_methods: set to None
 2. and then calling 
 `SessionManager::qr_engagement()`
 
-qr_engagement() returns a SessionManagerEngaged that you can use to process a SessionEstablishment message once received from the reader.
+qr_engagement() returns a SessionManagerEngaged that you can use to process a SessionEstablishment message once received from the reader as well as a qr_code_uri
 When receiving the SessionEstablishment, process it by calling:
 
 3. `SessionManagerEngaged::process_session_establishment(session_establishment: SessionEstablishment)`
@@ -82,13 +89,3 @@ namespaces: the namespaces (and data fields) that the verifier wants to request 
 
 2. `SessionManager::handle_response(response &[u8])`
 output is the proved data elements relayed by the device
-
-
-
-Implementation Limitations:
-This implementation of ISO mDL:
-- does not feature server retrieval functionality
-- currently only allows for presentation initiation by the mDL Holder showing a QR code (no NFC, no WiFi aware)
-- currenlty only supports BLE transport for presentation
-- currently only allows a reader to request an "org.iso.18013.5.1.mDL" docType in a presentation
-- A holder is currently not notified of which requested elements the verifier intends to retain
