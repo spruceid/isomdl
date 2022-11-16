@@ -204,13 +204,14 @@ impl SessionManager {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::definitions::helpers::NonEmptyMap;
+    use crate::definitions::SessionEstablishment;
+    use crate::presentation::reader::SessionData;
     use crate::presentation::reader::SessionManager;
     use std::collections::HashMap;
-    #[test]
-    fn test_establish_session() {
-        //specify requested data
+
+    pub fn initiate_reader_session() -> (SessionManager, Vec<u8>) {
         let identifiers = vec![
             "family_name".to_string(),
             "issue_date".to_string(),
@@ -229,7 +230,47 @@ mod test {
         let namespaces = NonEmptyMap::new("org.iso.18013.5.1".to_string(), data_elements);
         let qr_code_uri = "mdoc:owBjMS4wAYIB2BhYS6QBAiABIVggwkkbFpvu3xld1P-9hxXFzg2XXzWwhmp_B3we80niPRQiWCDG78CIFASvvtV-ZdgCUjIU1XcCR77bZYQRw5QFAju9kAKBgwIBowD0AfULUOEUJR5Z3RHtop4AAQIDBAU".to_string();
 
-        let _session_manager = SessionManager::establish_session(qr_code_uri, namespaces)
+        let establish_session = SessionManager::establish_session(qr_code_uri, namespaces)
             .expect("failed to establish reader session");
+
+        establish_session
+    }
+
+    #[test]
+    fn test_establish_session() {
+        let establish_session = initiate_reader_session();
+
+        let mut _sm = establish_session.0;
+        let rq = establish_session.1;
+
+        let _session_establishment: SessionEstablishment =
+            serde_cbor::from_slice(&rq).expect("not a valid SessionEstablishment cbor encoding");
+    }
+
+    #[test]
+    fn test_new_request() {
+        let establish_session = initiate_reader_session();
+
+        let identifiers = vec![
+            "family_name".to_string(),
+            "issue_date".to_string(),
+            "expiry_date".to_string(),
+            "document_number".to_string(),
+            "portrait".to_string(),
+            "driving_privileges".to_string(),
+        ];
+        let mut data_element = HashMap::<String, bool>::new();
+        for id in identifiers {
+            data_element.insert(id, false);
+        }
+
+        let data_elements = NonEmptyMap::try_from(data_element).unwrap();
+        let namespaces = NonEmptyMap::new("org.iso.18013.5.1".to_string(), data_elements);
+
+        let mut sm = establish_session.0;
+
+        let new_req = sm.new_request(namespaces).unwrap();
+        let _sd: SessionData =
+            serde_cbor::from_slice(&new_req).expect("not a valid SessionData cbor encoding");
     }
 }

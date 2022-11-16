@@ -644,16 +644,15 @@ mod test {
     use crate::definitions::helpers::NonEmptyMap;
     use crate::definitions::helpers::Tag24;
     use crate::definitions::issuer_signed::{self};
-    use crate::definitions::IssuerSigned;
     use crate::definitions::{DeviceResponse, Mso};
+    use crate::definitions::{IssuerSigned, SessionEstablishment};
     use crate::presentation::device::{Document, SessionManagerInit};
     use hex::FromHex;
     use issuer_signed::IssuerSignedItem;
     use std::collections::HashMap;
     use uuid::Uuid;
 
-    #[test]
-    fn test_initialise_session() {
+    fn initialise_session() -> SessionManagerInit {
         //creating a dummy device::Document to pass into SessionManagerInit from a ISO test vector
         //Document is normally recovered from mobile app storage
         static DEVICE_RESPONSE_CBOR: &str =
@@ -727,7 +726,32 @@ mod test {
             None,
         )
         .expect("could not start a session");
-        let (_engaged_state, _qr_code_uri) =
-            session.qr_engagement().expect("unexpected qr engagement");
+
+        session
+    }
+
+    #[test]
+    fn test_qr_engagement() {
+        let session = initialise_session();
+        let (_engaged_state, _qr_code_uri) = session
+            .qr_engagement()
+            .expect("failed to generate qr code {}");
+    }
+
+    #[test]
+    fn test_process_establishment() {
+        let session = initialise_session();
+        let (engaged_state, _qr_code_uri) = session
+            .qr_engagement()
+            .expect("failed to generate qr code {}");
+
+        let se = crate::presentation::reader::test::initiate_reader_session();
+
+        let session_establishment: SessionEstablishment =
+            serde_cbor::from_slice(&se.1).expect("invaled cbor encoding ");
+
+        let _sm = engaged_state
+            .process_session_establishment(session_establishment)
+            .expect("could not process session establishment message.");
     }
 }
