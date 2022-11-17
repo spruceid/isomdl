@@ -256,12 +256,7 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             let json = json!(map_response);
             Ok(json)
         }
-        CborValue::Bytes(b) => {
-            //Todo: represent bytes better than as a string
-            let s = serde_json::to_string(&b)?;
-            Ok(json!(s))
-        }
-        //this should never trigger
+        CborValue::Bytes(b) => Ok(json!(b)),
         CborValue::Bool(b) => Ok(json!(b)),
         CborValue::Integer(i) => Ok(json!(i)),
         _ => Err(Error::ParsingError),
