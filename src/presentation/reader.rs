@@ -201,24 +201,24 @@ impl SessionManager {
         let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
         response
             .documents
-            .ok_or_else(|| Error::DeviceTransmissionError)?
+            .ok_or(Error::DeviceTransmissionError)?
             .into_inner()
             .into_iter()
             .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-            .ok_or_else(|| Error::DocumentTypeError)?
+            .ok_or(Error::DocumentTypeError)?
             .issuer_signed
             .namespaces
-            .ok_or_else(|| Error::NoMdlDataTransmission)?
+            .ok_or(Error::NoMdlDataTransmission)?
             .into_inner()
             .remove("org.iso.18013.5.1")
-            .ok_or_else(|| Error::IncorrectNamespace)?
+            .ok_or(Error::IncorrectNamespace)?
             .into_inner()
             .into_iter()
             .map(|item| item.into_inner())
             .for_each(|item| {
                 let value = parse_response(item.element_value.clone());
-                if value.is_ok() {
-                    parsed_response.insert(item.element_identifier.clone(), value.unwrap());
+                if let Ok(val) = value {
+                    parsed_response.insert(item.element_identifier, val);
                 }
             });
         Ok(json!(parsed_response))
@@ -228,10 +228,13 @@ impl SessionManager {
 fn parse_response(value: CborValue) -> Result<Value, Error> {
     match value {
         CborValue::Text(s) => Ok(Value::String(s)),
-        CborValue::Tag(_t, v) => match *v {
-            CborValue::Text(d) => Ok(Value::String(d)),
-            _ => Err(Error::ParsingError),
-        },
+        CborValue::Tag(_t, v) => {
+            if let CborValue::Text(d) = *v {
+                Ok(Value::String(d))
+            } else {
+                Err(Error::ParsingError)
+            }
+        }
         CborValue::Array(v) => {
             let mut array_response = Vec::<Value>::new();
             for a in v {
@@ -243,17 +246,11 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
         CborValue::Map(m) => {
             let mut map_response = BTreeMap::<String, String>::new();
             for (key, value) in m {
-                match key {
-                    CborValue::Text(k) => {
-                        let parsed = parse_response(value)?;
-                        match parsed {
-                            Value::String(x) => {
-                                map_response.insert(k, x);
-                            }
-                            _ => {}
-                        }
+                if let CborValue::Text(k) = key {
+                    let parsed = parse_response(value)?;
+                    if let Value::String(x) = parsed {
+                        map_response.insert(k, x);
                     }
-                    _ => {}
                 }
             }
             let json = json!(map_response);
