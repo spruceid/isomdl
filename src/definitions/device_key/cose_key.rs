@@ -3,6 +3,7 @@ use cose_rs::algorithm::Algorithm;
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
+use ssi_jwk::JWK;
 use std::collections::BTreeMap;
 
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
@@ -43,16 +44,20 @@ pub enum OKPCurve {
 /// Errors that can occur when deserialising a COSE_Key.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
-    #[error("COSE_Key of kty 'EC2' missing y coordinate.")]
+    #[error("COSE_Key of kty 'EC2' missing x coordinate")]
+    EC2MissingX,
+    #[error("COSE_Key of kty 'EC2' missing y coordinate")]
     EC2MissingY,
     #[error("Expected to parse a CBOR bool or bstr for y-coordinate, received: '{0:?}'")]
     InvalidTypeY(CborValue),
     #[error("Expected to parse a CBOR map, received: '{0:?}'")]
     NotAMap(CborValue),
-    #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves.")]
+    #[error("Unable to discern the elliptic curve")]
+    UnknownCurve,
+    #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves")]
     UnsupportedCurve,
-    #[error("This implementation of COSE_Key only supports EC2 and OKP keys.")]
-    UnsupportedFormat,
+    #[error("This implementation of COSE_Key only supports EC2 and OKP keys")]
+    UnsupportedKeyType,
     #[error("Could not reconstruct coordinates from the provided COSE_Key")]
     InvalidCoseKey,
 }
@@ -142,7 +147,7 @@ impl TryFrom<CborValue> for CoseKey {
                     let crv = crv_id.try_into()?;
                     Ok(Self::OKP { crv, x })
                 }
-                _ => Err(Error::UnsupportedFormat),
+                _ => Err(Error::UnsupportedKeyType),
             }
         } else {
             Err(Error::NotAMap(v))
@@ -260,6 +265,73 @@ impl TryFrom<i128> for OKPCurve {
             5 => Ok(OKPCurve::X448),
             6 => Ok(OKPCurve::Ed25519),
             7 => Ok(OKPCurve::Ed448),
+            _ => Err(Error::UnsupportedCurve),
+        }
+    }
+}
+
+impl TryFrom<JWK> for CoseKey {
+    type Error = Error;
+
+    fn try_from(jwk: JWK) -> Result<Self, Self::Error> {
+        match jwk.params {
+            ssi_jwk::Params::EC(params) => {
+                let x = params
+                    .x_coordinate
+                    .as_ref()
+                    .ok_or(Error::EC2MissingX)?
+                    .0
+                    .clone();
+                Ok(CoseKey::EC2 {
+                    crv: (&params).try_into()?,
+                    x,
+                    y: params.try_into()?,
+                })
+            }
+            ssi_jwk::Params::OKP(params) => Ok(CoseKey::OKP {
+                crv: (&params).try_into()?,
+                x: params.public_key.0.clone(),
+            }),
+            _ => Err(Error::UnsupportedKeyType),
+        }
+    }
+}
+
+impl TryFrom<&ssi_jwk::ECParams> for EC2Curve {
+    type Error = Error;
+
+    fn try_from(params: &ssi_jwk::ECParams) -> Result<Self, Self::Error> {
+        match params.curve.as_ref() {
+            Some(crv) if crv == "P-256" => Ok(Self::P256),
+            Some(crv) if crv == "P-384" => Ok(Self::P384),
+            Some(crv) if crv == "P-521" => Ok(Self::P521),
+            Some(_) => Err(Error::UnsupportedCurve),
+            None => Err(Error::UnknownCurve),
+        }
+    }
+}
+
+impl TryFrom<ssi_jwk::ECParams> for EC2Y {
+    type Error = Error;
+
+    fn try_from(params: ssi_jwk::ECParams) -> Result<Self, Self::Error> {
+        if let Some(y) = params.y_coordinate.as_ref() {
+            Ok(Self::Value(y.0.clone()))
+        } else {
+            Err(Error::EC2MissingY)
+        }
+    }
+}
+
+impl TryFrom<&ssi_jwk::OctetParams> for OKPCurve {
+    type Error = Error;
+
+    fn try_from(params: &ssi_jwk::OctetParams) -> Result<Self, Self::Error> {
+        match params.curve.as_str() {
+            "Ed25519" => Ok(Self::Ed25519),
+            "Ed448" => Ok(Self::Ed448),
+            "X25519" => Ok(Self::X25519),
+            "X448" => Ok(Self::X448),
             _ => Err(Error::UnsupportedCurve),
         }
     }

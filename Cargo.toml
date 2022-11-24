@@ -34,6 +34,8 @@ signature = "1.6"
 tracing = "0.1"
 base64 = "0.13"
 
+ssi-jwk = { git = "https://github.com/spruceid/ssi", rev = "19a177d" }
+
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"
 rev = "2656fd9"

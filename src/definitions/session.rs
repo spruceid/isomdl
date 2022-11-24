@@ -78,8 +78,8 @@ impl TryFrom<u64> for Status {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionTranscript(
-    pub Tag24<DeviceEngagement>,
-    pub Tag24<CoseKey>,
+    pub DeviceEngagementBytes,
+    pub Tag24<EReaderKey>,
     pub Handover,
 );
 
@@ -96,10 +96,11 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(from = "Option<NfcHandover>", into = "Option<NfcHandover>")]
+#[serde(untagged)]
 pub enum Handover {
     QR,
-    NFC(NfcHandover),
+    NFC(ByteStr, Option<ByteStr>),
+    OID4VP { nonce: String, aud: String },
 }
 
 pub enum EphemeralSecrets {
@@ -122,24 +123,6 @@ impl From<EncodedPoints> for Vec<u8> {
         match ep {
             Ep256(encoded_point) => encoded_point.as_bytes().to_vec(),
             Ep384(encoded_point) => encoded_point.as_bytes().to_vec(),
-        }
-    }
-}
-
-impl From<Option<NfcHandover>> for Handover {
-    fn from(o: Option<NfcHandover>) -> Handover {
-        match o {
-            Some(nfc) => Handover::NFC(nfc),
-            None => Handover::QR,
-        }
-    }
-}
-
-impl From<Handover> for Option<NfcHandover> {
-    fn from(h: Handover) -> Option<NfcHandover> {
-        match h {
-            Handover::NFC(nfc) => Some(nfc),
-            Handover::QR => None,
         }
     }
 }
@@ -270,6 +253,120 @@ mod test {
     use super::*;
     use crate::definitions::device_engagement::Security;
     use crate::definitions::device_request::DeviceRequest;
+
+    #[test]
+    fn qr_handover() {
+        // null
+        let cbor = hex::decode("F6").expect("failed to decode hex");
+        let handover: Handover =
+            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        if !matches!(handover, Handover::QR) {
+            panic!("expected 'Handover::QR', received {:?}", handover)
+        } else {
+            let roundtripped =
+                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            assert_eq!(
+                cbor, roundtripped,
+                "re-serialized handover did not match initial bytes"
+            )
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn qr_handover_empty_array() {
+        // []
+        let cbor = hex::decode("80").expect("failed to decode hex");
+        let handover: Handover =
+            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        if !matches!(handover, Handover::QR) {
+            panic!("expected 'Handover::QR', received {:?}", handover)
+        } else {
+            let roundtripped =
+                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            assert_eq!(
+                cbor, roundtripped,
+                "re-serialized handover did not match initial bytes"
+            )
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn qr_handover_empty_object() {
+        // {}
+        let cbor = hex::decode("A0").expect("failed to decode hex");
+        let handover: Handover =
+            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        if !matches!(handover, Handover::QR) {
+            panic!("expected 'Handover::QR', received {:?}", handover)
+        } else {
+            let roundtripped =
+                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            assert_eq!(
+                cbor, roundtripped,
+                "re-serialized handover did not match initial bytes"
+            )
+        }
+    }
+
+    #[test]
+    fn nfc_static_handover() {
+        // ['hello', null]
+        let cbor = hex::decode("824568656C6C6FF6").expect("failed to decode hex");
+        let handover: Handover =
+            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        if !matches!(handover, Handover::NFC(..)) {
+            panic!("expected 'Handover::NFC(..)', received {:?}", handover)
+        } else {
+            let roundtripped =
+                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            assert_eq!(
+                cbor, roundtripped,
+                "re-serialized handover did not match initial bytes"
+            )
+        }
+    }
+
+    #[test]
+    fn nfc_negotiated_handover() {
+        // ['hello', 'world']
+        let cbor = hex::decode("824568656C6C6F45776F726C64").expect("failed to decode hex");
+        let handover: Handover =
+            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        if !matches!(handover, Handover::NFC(..)) {
+            panic!("expected 'Handover::NFC(..)', received {:?}", handover)
+        } else {
+            let roundtripped =
+                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            assert_eq!(
+                cbor, roundtripped,
+                "re-serialized handover did not match initial bytes"
+            )
+        }
+    }
+
+    #[test]
+    fn oid4vp_handover() {
+        // {"nonce": "hello", "aud": "world"}
+        let cbor = hex::decode("A2656E6F6E63656568656C6C6F6361756465776F726C64")
+            .expect("failed to decode hex");
+        let handover: Handover =
+            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        if !matches!(handover, Handover::OID4VP { .. }) {
+            panic!(
+                "expected '{}', received {:?}",
+                "Handover::OID4VP{..}", handover
+            )
+        } else {
+            let roundtripped =
+                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            assert_eq!(
+                cbor, roundtripped,
+                "re-serialized handover did not match initial bytes"
+            )
+        }
+    }
 
     #[test]
     fn key_generation() {

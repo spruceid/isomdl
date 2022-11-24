@@ -368,7 +368,7 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::*;
     use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
     use crate::definitions::fulldate::FullDate;
@@ -441,6 +441,11 @@ mod test {
 
     #[test]
     fn issue_minimal_mdoc() -> anyhow::Result<()> {
+        minimal_test_mdoc()?;
+        Ok(())
+    }
+
+    pub fn minimal_test_mdoc() -> anyhow::Result<Mdoc> {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
 
         let mut mdl_data: serde_json::Value =
@@ -763,7 +768,7 @@ mod test {
             .expect("failed to parse pem")
             .into();
 
-        Mdoc::builder()
+        let mdoc = Mdoc::builder()
             .doc_type(doc_type)
             .namespaces(namespaces)
             .x5chain(x5chain)
@@ -773,6 +778,6 @@ mod test {
             .issue(signer)
             .expect("failed to issue mdoc");
 
-        Ok(())
+        Ok(mdoc)
     }
 }
