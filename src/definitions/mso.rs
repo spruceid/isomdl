@@ -2,7 +2,11 @@ use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub type DigestId = u64;
+/// DigestId is a unsigned integer between 0 and (2^31 -) inclusive.
+/// Therefore the most straightforward way to represent it is as a i32 that is enforced to be
+/// positive.
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, Hash, PartialEq, Copy)]
+pub struct DigestId(i32);
 pub type DigestIds = HashMap<DigestId, ByteStr>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -24,6 +28,12 @@ pub enum DigestAlgorithm {
     SHA384,
     #[serde(rename = "SHA-512")]
     SHA512,
+}
+
+impl From<i32> for DigestId {
+    fn from(i: i32) -> DigestId {
+        DigestId(if i.is_negative() { -i } else { i })
+    }
 }
 
 #[cfg(test)]

@@ -3,9 +3,13 @@ pub mod device_key;
 pub mod device_request;
 pub mod device_response;
 pub mod device_signed;
+pub mod fulldate;
 pub mod helpers;
 pub mod issuer_signed;
 pub mod mso;
+pub mod oid4vp;
+pub mod org_iso_18013_5_1;
+pub mod org_iso_18013_5_1_aamva;
 pub mod session;
 pub mod validity_info;
 
