@@ -85,7 +85,7 @@ pub enum Error {
 }
 
 // TODO: Do we need to support multiple documents of the same type?
-type Documents = NonEmptyMap<DocType, Document>;
+pub type Documents = NonEmptyMap<DocType, Document>;
 type DocType = String;
 
 /// Device-internal document datatype.
