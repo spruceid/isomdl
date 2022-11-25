@@ -1,6 +1,19 @@
-use crate::definitions::{device_response::Document as StandardDoc, DeviceSigned, IssuerSigned};
+use crate::definitions::{
+    device_response::{Document as StandardDoc, Status},
+    helpers::NonEmptyVec,
+    DeviceSigned, IssuerSigned,
+};
 use crate::presentation::Stringify;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceResponse {
+    pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documents: Option<NonEmptyVec<Document>>,
+    pub status: Status,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -2,8 +2,9 @@ use super::{DeviceSession, Documents, PreparedDeviceResponse};
 use crate::definitions::{
     device_engagement::{DeviceEngagement, Security},
     device_request::{DocRequest, ItemsRequest},
+    device_response::Status,
     helpers::{NonEmptyMap, NonEmptyVec, Tag24},
-    oid4vp::Document,
+    oid4vp::DeviceResponse,
     session::{Handover, SessionTranscript},
     CoseKey,
 };
@@ -106,13 +107,19 @@ fn request_all(document: &super::Document) -> Result<DocRequest> {
 }
 
 impl PreparedDeviceResponse {
-    pub fn finalize_oid4vp_response(self) -> Vec<Document> {
+    pub fn finalize_oid4vp_response(self) -> DeviceResponse {
         if !self.is_complete() {
             tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
             return PreparedDeviceResponse::empty(super::Status::GeneralError)
                 .finalize_oid4vp_response();
         }
-        self.signed_documents.into_iter().map(Into::into).collect()
+        DeviceResponse {
+            documents: NonEmptyVec::maybe_new(
+                self.signed_documents.into_iter().map(Into::into).collect(),
+            ),
+            status: Status::OK,
+            version: "1.0".to_string(),
+        }
     }
 }
 
@@ -121,7 +128,6 @@ mod test {
     use super::*;
 
     use crate::issuance::mdoc::test::minimal_test_mdoc;
-    use crate::presentation::Stringify;
     use signature::{Signature, Signer};
 
     #[test]
@@ -134,6 +140,12 @@ mod test {
             p256::SecretKey::from_sec1_der(&der_bytes).unwrap().into();
         let mdoc = minimal_test_mdoc().expect("failed to issue new mdoc");
         let doc_type = mdoc.doc_type.clone();
+        let documents = NonEmptyMap::new(doc_type, mdoc.into());
+
+        use std::io::Write;
+        let mut file = std::fs::File::create("mdoc_documents").unwrap();
+        file.write_all(&serde_cbor::to_vec(&documents).unwrap())
+            .unwrap();
 
         let device_jwk_str = r#"{"kty":"EC","crv":"secp256k1","x":"BoFNXJPrlLf7i7gxZ7OoNAujWUmJ7xkwOfA6kA8dlkk","y":"nHXseRkDNFxWt2UpVDQL9Mu05WPAitJa5fCNdPU_M7g","d":"ZXzavVc9F90aYQWm9kgrTjemOUdm88b1uU_g3VAm5CE"}"#;
         let device_jwk: ssi_jwk::JWK = serde_json::from_str(device_jwk_str).unwrap();
@@ -141,7 +153,7 @@ mod test {
         let verifier_jwk: ssi_jwk::JWK = serde_json::from_str(verifier_jwk_str).unwrap();
 
         let mut prepared_response = SessionManager::prepare_oid4vp_response(
-            NonEmptyMap::new(doc_type, mdoc.into()),
+            documents,
             "did:jwk:eyJ1c2UiOiAic2lnIiwgICJrdHkiOiAiRUMiLCAgImNydiI6ICJzZWNwMjU2azEiLCAgImQiOiAiVlR6Y0UtRC1nNUVGSGNRLTczUWI1OTlxSzdYMW9BbGlNdS00V21sbnJKNCIsIngiOiAiSGVOQi1fNFVEdURyOEtsUi1MR1lIaEtEM1VUQ2JMV1Y5WHJRZzBpSGZuUSIsICAieSI6ICI2NGc0amNieTVUV1I0TG9nUjExOFNVdW1RMFRCVWlKLVRsNmdNRkNFWFQwIiwiYWxnIjogIkVTMjU2SyIgfQ".to_string(),
             "nonce".to_string(),
             device_jwk,
@@ -155,11 +167,8 @@ mod test {
             prepared_response.submit_next_signature(signature.as_bytes().to_vec());
         }
 
-        let _documents: Vec<String> = prepared_response
-            .finalize_oid4vp_response()
-            .iter()
-            .map(Stringify::stringify)
-            .collect::<Result<_, _>>()
+        let _documents: String = serde_cbor::to_vec(&prepared_response.finalize_oid4vp_response())
+            .map(|docs| base64::encode_config(&docs, base64::URL_SAFE_NO_PAD))
             .unwrap();
 
         // Record generated response:

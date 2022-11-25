@@ -381,8 +381,8 @@ pub mod test {
     use std::str::FromStr;
     use time::OffsetDateTime;
 
-    static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
-    static ISSUER_KEY: &str = include_str!("../../test/issuance/256-key.pem");
+    static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/issuer-cert.pem");
+    static ISSUER_KEY: &str = include_str!("../../test/issuance/issuer-key.pem");
 
     fn mdl_data() -> String {
         base64::encode_config(
