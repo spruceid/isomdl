@@ -359,7 +359,7 @@ fn digest_namespace(
 fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
     let mut digest_id;
     loop {
-        digest_id = rand::thread_rng().gen();
+        digest_id = rand::thread_rng().gen::<i32>().into();
         if used_ids.insert(digest_id) {
             break;
         }
