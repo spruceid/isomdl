@@ -32,7 +32,7 @@ pub enum DigestAlgorithm {
 
 impl From<i32> for DigestId {
     fn from(i: i32) -> DigestId {
-        DigestId(if i.is_negative() { i * -1 } else { i })
+        DigestId(if i.is_negative() { -i } else { i })
     }
 }
 
