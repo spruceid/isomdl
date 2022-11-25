@@ -140,10 +140,10 @@ mod test {
         let doc_type = mdoc.doc_type.clone();
         let documents = NonEmptyMap::new(doc_type, mdoc.into());
 
-        use std::io::Write;
-        let mut file = std::fs::File::create("mdoc_documents").unwrap();
-        file.write_all(&serde_cbor::to_vec(&documents).unwrap())
-            .unwrap();
+        // use std::io::Write;
+        // let mut file = std::fs::File::create("mdoc_documents").unwrap();
+        // file.write_all(&serde_cbor::to_vec(&documents).unwrap())
+        //     .unwrap();
 
         let device_jwk_str = r#"{
             "kty":"EC",
