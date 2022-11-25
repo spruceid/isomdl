@@ -135,15 +135,17 @@ mod test {
         let mdoc = minimal_test_mdoc().expect("failed to issue new mdoc");
         let doc_type = mdoc.doc_type.clone();
 
-        let jwk_str = r#"{"use": "sig",  "kty": "EC",  "crv": "secp256k1",  "d": "VTzcE-D-g5EFHcQ-73Qb599qK7X1oAliMu-4WmlnrJ4","x": "HeNB-_4UDuDr8KlR-LGYHhKD3UTCbLWV9XrQg0iHfnQ",  "y": "64g4jcby5TWR4LogR118SUumQ0TBUiJ-Tl6gMFCEXT0","alg": "ES256K" }"#;
-        let jwk: ssi_jwk::JWK = serde_json::from_str(jwk_str).unwrap();
+        let device_jwk_str = r#"{"kty":"EC","crv":"secp256k1","x":"BoFNXJPrlLf7i7gxZ7OoNAujWUmJ7xkwOfA6kA8dlkk","y":"nHXseRkDNFxWt2UpVDQL9Mu05WPAitJa5fCNdPU_M7g","d":"ZXzavVc9F90aYQWm9kgrTjemOUdm88b1uU_g3VAm5CE"}"#;
+        let device_jwk: ssi_jwk::JWK = serde_json::from_str(device_jwk_str).unwrap();
+        let verifier_jwk_str = r#"{"use": "sig",  "kty": "EC",  "crv": "secp256k1",  "d": "VTzcE-D-g5EFHcQ-73Qb599qK7X1oAliMu-4WmlnrJ4","x": "HeNB-_4UDuDr8KlR-LGYHhKD3UTCbLWV9XrQg0iHfnQ",  "y": "64g4jcby5TWR4LogR118SUumQ0TBUiJ-Tl6gMFCEXT0","alg": "ES256K" }"#;
+        let verifier_jwk: ssi_jwk::JWK = serde_json::from_str(verifier_jwk_str).unwrap();
 
         let mut prepared_response = SessionManager::prepare_oid4vp_response(
             NonEmptyMap::new(doc_type, mdoc.into()),
-            "aud".to_string(),
+            "did:jwk:eyJ1c2UiOiAic2lnIiwgICJrdHkiOiAiRUMiLCAgImNydiI6ICJzZWNwMjU2azEiLCAgImQiOiAiVlR6Y0UtRC1nNUVGSGNRLTczUWI1OTlxSzdYMW9BbGlNdS00V21sbnJKNCIsIngiOiAiSGVOQi1fNFVEdURyOEtsUi1MR1lIaEtEM1VUQ2JMV1Y5WHJRZzBpSGZuUSIsICAieSI6ICI2NGc0amNieTVUV1I0TG9nUjExOFNVdW1RMFRCVWlKLVRsNmdNRkNFWFQwIiwiYWxnIjogIkVTMjU2SyIgfQ".to_string(),
             "nonce".to_string(),
-            jwk.clone(),
-            jwk,
+            device_jwk,
+            verifier_jwk,
             request,
         )
         .expect("failed to prepare response");
