@@ -4,7 +4,8 @@ use crate::definitions::{
     device_request::{DocRequest, ItemsRequest},
     helpers::{NonEmptyMap, NonEmptyVec, Tag24},
     oid4vp::Document,
-    session::{create_p256_ephemeral_keys, Handover, SessionTranscript},
+    session::{Handover, SessionTranscript},
+    CoseKey,
 };
 use anyhow::Result;
 use std::collections::HashMap;
@@ -25,11 +26,21 @@ impl DeviceSession for SessionManager {
 }
 
 impl SessionManager {
-    pub fn prepare_oid4vp_response(
+    pub fn prepare_oid4vp_response<K1, K2>(
         documents: Documents,
+        aud: String,
+        nonce: String,
+        e_device_key: K1,
+        e_verifier_key: K2,
         _request: serde_json::Value,
-    ) -> Result<PreparedDeviceResponse> {
-        let e_device_key = Tag24::new(create_p256_ephemeral_keys()?.1)?;
+    ) -> Result<PreparedDeviceResponse>
+    where
+        K1: TryInto<CoseKey>,
+        <K1 as TryInto<CoseKey>>::Error: Sync + Send + std::error::Error + 'static,
+        K2: TryInto<CoseKey>,
+        <K2 as TryInto<CoseKey>>::Error: Sync + Send + std::error::Error + 'static,
+    {
+        let e_device_key = Tag24::new(e_device_key.try_into()?)?;
         let device_engagement = Tag24::new(DeviceEngagement {
             version: "1.0".into(),
             security: Security(1, e_device_key),
@@ -37,13 +48,8 @@ impl SessionManager {
             server_retrieval_methods: None,
             protocol_info: None,
         })?;
-        // TODO: Retrieve the EReaderKey from the request.
-        let e_reader_key = Tag24::new(create_p256_ephemeral_keys()?.1)?;
-        // TODO: Retrieve the aud and nonce from the request.
-        let handover = Handover::OID4VP {
-            aud: "hard-coded".into(),
-            nonce: "example".into(),
-        };
+        let e_reader_key = Tag24::new(e_verifier_key.try_into()?)?;
+        let handover = Handover::OID4VP { aud, nonce };
         let session_transcript =
             Tag24::new(SessionTranscript(device_engagement, e_reader_key, handover))?;
         let manager = SessionManager {
@@ -129,8 +135,15 @@ mod test {
         let mdoc = minimal_test_mdoc().expect("failed to issue new mdoc");
         let doc_type = mdoc.doc_type.clone();
 
+        let jwk_str = r#"{"use": "sig",  "kty": "EC",  "crv": "secp256k1",  "d": "VTzcE-D-g5EFHcQ-73Qb599qK7X1oAliMu-4WmlnrJ4","x": "HeNB-_4UDuDr8KlR-LGYHhKD3UTCbLWV9XrQg0iHfnQ",  "y": "64g4jcby5TWR4LogR118SUumQ0TBUiJ-Tl6gMFCEXT0","alg": "ES256K" }"#;
+        let jwk: ssi_jwk::JWK = serde_json::from_str(jwk_str).unwrap();
+
         let mut prepared_response = SessionManager::prepare_oid4vp_response(
             NonEmptyMap::new(doc_type, mdoc.into()),
+            "aud".to_string(),
+            "nonce".to_string(),
+            jwk.clone(),
+            jwk,
             request,
         )
         .expect("failed to prepare response");

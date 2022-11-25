@@ -28,6 +28,10 @@ pub enum EC2Curve {
     P256,
     P384,
     P521,
+    // TODO: secp256k1 is not defined in the 18013-5 specification. The CoseKey implementation
+    // should be moved into cose-rs, and we should have a validation step that the CoseKey being
+    // used is valid for the cipher suite.
+    P256K,
     // TODO: Support for brainpool curves can be added when they are added to the IANA COSE
     // Elliptic Curves registry.
 }
@@ -228,6 +232,7 @@ impl From<EC2Curve> for CborValue {
             EC2Curve::P256 => CborValue::Integer(1),
             EC2Curve::P384 => CborValue::Integer(2),
             EC2Curve::P521 => CborValue::Integer(3),
+            EC2Curve::P256K => CborValue::Integer(8),
         }
     }
 }
@@ -240,6 +245,7 @@ impl TryFrom<i128> for EC2Curve {
             1 => Ok(EC2Curve::P256),
             2 => Ok(EC2Curve::P384),
             3 => Ok(EC2Curve::P521),
+            8 => Ok(EC2Curve::P256K),
             _ => Err(Error::UnsupportedCurve),
         }
     }
@@ -305,6 +311,7 @@ impl TryFrom<&ssi_jwk::ECParams> for EC2Curve {
             Some(crv) if crv == "P-256" => Ok(Self::P256),
             Some(crv) if crv == "P-384" => Ok(Self::P384),
             Some(crv) if crv == "P-521" => Ok(Self::P521),
+            Some(crv) if crv == "secp256k1" => Ok(Self::P256K),
             Some(_) => Err(Error::UnsupportedCurve),
             None => Err(Error::UnknownCurve),
         }
