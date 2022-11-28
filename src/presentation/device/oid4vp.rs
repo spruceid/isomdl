@@ -1,7 +1,7 @@
 use super::{DeviceSession, Documents, PreparedDeviceResponse, RequestedItems};
 use crate::definitions::{
     device_engagement::{DeviceEngagement, Security},
-    device_request::{ItemsRequest},
+    device_request::ItemsRequest,
     device_response::Status,
     helpers::{NonEmptyMap, NonEmptyVec, Tag24},
     oid4vp::DeviceResponse,
@@ -62,7 +62,7 @@ impl SessionManager {
             .as_ref()
             .values()
             .map(request_all)
-            .collect::<Result<_,_>>()?;
+            .collect::<Result<_, _>>()?;
 
         Ok(SessionManager {
             documents,
@@ -175,7 +175,7 @@ mod test {
         .expect("failed to prepare response");
 
         let requested_items = manager.requested_items();
-        
+
         // Ask for user permission. If they say yes, then:
         let permitted_items: super::super::PermittedItems = requested_items
             .clone()

@@ -253,8 +253,7 @@ impl SessionManager {
     }
 
     pub fn prepare_response(&mut self, requests: &RequestedItems, permitted: PermittedItems) {
-        let prepared_response =
-        DeviceSession::prepare_response(self, requests, permitted);
+        let prepared_response = DeviceSession::prepare_response(self, requests, permitted);
         self.state = State::Signing(prepared_response);
     }
 
@@ -439,7 +438,7 @@ impl PreparedDocument {
     }
 }
 
-trait DeviceSession {
+pub trait DeviceSession {
     fn documents(&self) -> &Documents;
     fn session_transcript(&self) -> &Tag24<SessionTranscript>;
     fn prepare_response(
