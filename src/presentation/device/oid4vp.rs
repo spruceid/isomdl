@@ -9,8 +9,10 @@ use crate::definitions::{
     CoseKey,
 };
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionManager {
     documents: Documents,
     session_transcript: Tag24<SessionTranscript>,
