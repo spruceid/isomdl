@@ -100,7 +100,7 @@ pub enum Error {
 pub enum Handover {
     QR,
     NFC(ByteStr, Option<ByteStr>),
-    OID4VP { nonce: String, aud: String },
+    OID4VP(String, String),
 }
 
 pub enum EphemeralSecrets {
@@ -348,15 +348,14 @@ mod test {
 
     #[test]
     fn oid4vp_handover() {
-        // {"nonce": "hello", "aud": "world"}
-        let cbor = hex::decode("A2656E6F6E63656568656C6C6F6361756465776F726C64")
-            .expect("failed to decode hex");
+        // ["aud", "nonce"]
+        let cbor = hex::decode("8263617564656E6F6E6365").expect("failed to decode hex");
         let handover: Handover =
             serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::OID4VP { .. }) {
+        if !matches!(handover, Handover::OID4VP(..)) {
             panic!(
                 "expected '{}', received {:?}",
-                "Handover::OID4VP{..}", handover
+                "Handover::OID4VP(..)", handover
             )
         } else {
             let roundtripped =

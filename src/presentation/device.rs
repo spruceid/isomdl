@@ -92,10 +92,10 @@ type DocType = String;
 // non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
 pub struct Document {
-    id: Uuid,
-    issuer_auth: CoseSign1,
-    mso: Mso,
-    namespaces: Namespaces,
+    pub id: Uuid,
+    pub issuer_auth: CoseSign1,
+    pub mso: Mso,
+    pub namespaces: Namespaces,
 }
 
 #[derive(Debug, Clone)]
@@ -576,9 +576,20 @@ pub trait DeviceSession {
                     continue;
                 }
             };
+            let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
+                Ok(dab) => dab,
+                Err(_e) => {
+                    //tracing::error!("failed to convert device authentication to cbor: {}", e);
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
             let prepared_cose_sign1 = match CoseSign1::builder()
                 .detached()
-                .payload(device_auth.inner_bytes.clone())
+                .payload(device_auth_bytes)
                 .signature_algorithm(signature_algorithm)
                 .prepare()
             {

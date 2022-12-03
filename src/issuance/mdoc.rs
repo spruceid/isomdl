@@ -419,6 +419,8 @@ pub mod test {
                   "org.iso.18013.5.1.issuing_authority":"CA DMV",
                   "org.iso.18013.5.1.document_number":"I12345678",
                   "org.iso.18013.5.1.portrait":include_str!("../../test/issuance/portrait.b64u"),
+                  "org.iso.18013.5.1.height":170,
+                  "org.iso.18013.5.1.eye_colour":"hazel",
                   "org.iso.18013.5.1.driving_privileges":[
                     {
                        "vehicle_category_code":"A",
@@ -609,6 +611,31 @@ pub mod test {
                     )
                     .unwrap(),
                 ),
+            ),
+            (
+                "height".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.height")
+                    .ok_or_else(|| anyhow!("missing required element: org.iso.18013.5.1.height"))?
+                    .as_i64()
+                    .ok_or_else(|| {
+                        anyhow!("expected integer for element: org.iso.18013.5.1.height")
+                    })?
+                    .into(),
+            ),
+            (
+                "eye_colour".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.eye_colour")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.eye_colour")
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!("expected string for element: org.iso.18013.5.1.eye_colour")
+                    })?
+                    .to_string()
+                    .into(),
             ),
             (
                 "driving_privileges".to_string(),

@@ -30,30 +30,39 @@ impl DeviceSession for SessionManager {
 }
 
 impl SessionManager {
-    pub fn new<K1, K2>(
+    pub fn new<K>(
         documents: Documents,
         aud: String,
         nonce: String,
-        e_device_key: K1,
-        e_verifier_key: K2,
+        e_verifier_key: K,
         _request: serde_json::Value,
     ) -> Result<Self>
     where
-        K1: TryInto<CoseKey>,
-        <K1 as TryInto<CoseKey>>::Error: Sync + Send + std::error::Error + 'static,
-        K2: TryInto<CoseKey>,
-        <K2 as TryInto<CoseKey>>::Error: Sync + Send + std::error::Error + 'static,
+        K: TryInto<CoseKey>,
+        <K as TryInto<CoseKey>>::Error: Sync + Send + std::error::Error + 'static,
     {
-        let e_device_key = Tag24::new(e_device_key.try_into()?)?;
+        //TODO: This is bad.
+        let device_key = Tag24::new(
+            documents
+                .as_ref()
+                .values()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("documents map was empty"))?
+                .mso
+                .device_key_info
+                .device_key
+                .clone(),
+        )
+        .unwrap();
         let device_engagement = Tag24::new(DeviceEngagement {
             version: "1.0".into(),
-            security: Security(1, e_device_key),
+            security: Security(1, device_key),
             device_retrieval_methods: None,
             server_retrieval_methods: None,
             protocol_info: None,
         })?;
         let e_reader_key = Tag24::new(e_verifier_key.try_into()?)?;
-        let handover = Handover::OID4VP { aud, nonce };
+        let handover = Handover::OID4VP(aud, nonce);
 
         let session_transcript =
             Tag24::new(SessionTranscript(device_engagement, e_reader_key, handover))?;
@@ -147,14 +156,14 @@ mod test {
         // file.write_all(&serde_cbor::to_vec(&documents).unwrap())
         //     .unwrap();
 
-        let device_jwk_str = r#"{
-            "kty":"EC",
-            "crv":"secp256k1",
-            "x":"BoFNXJPrlLf7i7gxZ7OoNAujWUmJ7xkwOfA6kA8dlkk",
-            "y":"nHXseRkDNFxWt2UpVDQL9Mu05WPAitJa5fCNdPU_M7g",
-            "d":"ZXzavVc9F90aYQWm9kgrTjemOUdm88b1uU_g3VAm5CE"
-        }"#;
-        let device_jwk: ssi_jwk::JWK = serde_json::from_str(device_jwk_str).unwrap();
+        //let device_jwk_str = r#"{
+        //    "kty":"EC",
+        //    "crv":"secp256k1",
+        //    "x":"BoFNXJPrlLf7i7gxZ7OoNAujWUmJ7xkwOfA6kA8dlkk",
+        //    "y":"nHXseRkDNFxWt2UpVDQL9Mu05WPAitJa5fCNdPU_M7g",
+        //    "d":"ZXzavVc9F90aYQWm9kgrTjemOUdm88b1uU_g3VAm5CE"
+        //}"#;
+        //let device_jwk: ssi_jwk::JWK = serde_json::from_str(device_jwk_str).unwrap();
         let verifier_jwk_str = r#"{
             "use": "sig",
             "kty": "EC",
@@ -170,7 +179,6 @@ mod test {
             documents,
             "did:jwk:eyJ1c2UiOiAic2lnIiwgICJrdHkiOiAiRUMiLCAgImNydiI6ICJzZWNwMjU2azEiLCAgImQiOiAiVlR6Y0UtRC1nNUVGSGNRLTczUWI1OTlxSzdYMW9BbGlNdS00V21sbnJKNCIsIngiOiAiSGVOQi1fNFVEdURyOEtsUi1MR1lIaEtEM1VUQ2JMV1Y5WHJRZzBpSGZuUSIsICAieSI6ICI2NGc0amNieTVUV1I0TG9nUjExOFNVdW1RMFRCVWlKLVRsNmdNRkNFWFQwIiwiYWxnIjogIkVTMjU2SyIgfQ".to_string(),
             "nonce".to_string(),
-            device_jwk,
             verifier_jwk,
             request,
         )
