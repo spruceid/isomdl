@@ -64,6 +64,8 @@ pub enum Error {
     UnsupportedKeyType,
     #[error("Could not reconstruct coordinates from the provided COSE_Key")]
     InvalidCoseKey,
+    #[error("Constructing a JWK from CoseKey with point-compression is not supported.")]
+    UnsupportedFormat,
 }
 
 impl CoseKey {
@@ -327,6 +329,58 @@ impl TryFrom<ssi_jwk::ECParams> for EC2Y {
         } else {
             Err(Error::EC2MissingY)
         }
+    }
+}
+
+impl TryFrom<CoseKey> for JWK {
+    type Error = Error;
+    fn try_from(cose: CoseKey) -> Result<JWK, Error> {
+        Ok(match cose {
+            CoseKey::EC2 { crv, x, y } => JWK {
+                params: ssi_jwk::Params::EC(ssi_jwk::ECParams {
+                    curve: Some(match crv {
+                        EC2Curve::P256 => "P-256".to_string(),
+                        EC2Curve::P384 => "P-384".to_string(),
+                        EC2Curve::P521 => "P-521".to_string(),
+                        EC2Curve::P256K => "secp256k1".to_string(),
+                    }),
+                    x_coordinate: Some(ssi_jwk::Base64urlUInt(x)),
+                    y_coordinate: match y {
+                        EC2Y::Value(vec) => Some(ssi_jwk::Base64urlUInt(vec)),
+                        EC2Y::SignBit(_) => return Err(Error::UnsupportedFormat),
+                    },
+                    ecc_private_key: None,
+                }),
+                public_key_use: None,
+                key_operations: None,
+                algorithm: None,
+                key_id: None,
+                x509_url: None,
+                x509_certificate_chain: None,
+                x509_thumbprint_sha1: None,
+                x509_thumbprint_sha256: None,
+            },
+            CoseKey::OKP { crv, x } => JWK {
+                params: ssi_jwk::Params::OKP(ssi_jwk::OctetParams {
+                    curve: match crv {
+                        OKPCurve::X25519 => "X25519".to_string(),
+                        OKPCurve::X448 => "X448".to_string(),
+                        OKPCurve::Ed25519 => "Ed25519".to_string(),
+                        OKPCurve::Ed448 => "Ed448".to_string(),
+                    },
+                    public_key: ssi_jwk::Base64urlUInt(x),
+                    private_key: None,
+                }),
+                public_key_use: None,
+                key_operations: None,
+                algorithm: None,
+                key_id: None,
+                x509_url: None,
+                x509_certificate_chain: None,
+                x509_thumbprint_sha1: None,
+                x509_thumbprint_sha256: None,
+            },
+        })
     }
 }
 

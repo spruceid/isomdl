@@ -41,7 +41,9 @@ pub struct SessionEstablishment {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<ByteStr>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
 }
 
