@@ -29,14 +29,17 @@ impl X5Chain {
     }
 
     pub fn into_cbor(&self) -> CborValue {
-        CborValue::Array(
-            self.0
-                .iter()
-                .cloned()
-                .map(|x509| x509.bytes)
-                .map(CborValue::Bytes)
-                .collect::<Vec<CborValue>>(),
-        )
+        match &self.0.as_ref() {
+            &[cert] => CborValue::Bytes(cert.bytes.clone()),
+            certs => CborValue::Array(
+                certs
+                    .iter()
+                    .cloned()
+                    .map(|x509| x509.bytes)
+                    .map(CborValue::Bytes)
+                    .collect::<Vec<CborValue>>(),
+            ),
+        }
     }
 }
 
