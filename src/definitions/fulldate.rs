@@ -18,7 +18,7 @@ impl fmt::Display for FullDate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}-{}-{}",
+            "{}-{:0>2}-{:0>2}",
             self.0.year(),
             <u8>::from(self.0.month()),
             self.0.day()
@@ -40,8 +40,11 @@ mod test {
 
     #[test]
     fn fulldate_str_roundtrip() {
-        const DATESTR: &str = "2000-12-30";
-        let fulldate = FullDate::from_str(DATESTR).expect("unable to parse datestr");
-        assert_eq!(DATESTR, fulldate.to_string())
+        const DATESTR_LO: &str = "2000-02-01";
+        let fulldate = FullDate::from_str(DATESTR_LO).expect("unable to parse datestr");
+        assert_eq!(DATESTR_LO, fulldate.to_string());
+        const DATESTR_HI: &str = "2000-12-30";
+        let fulldate = FullDate::from_str(DATESTR_HI).expect("unable to parse datestr");
+        assert_eq!(DATESTR_HI, fulldate.to_string());
     }
 }
