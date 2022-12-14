@@ -37,7 +37,7 @@ impl SessionManager {
     pub fn establish_session(
         qr_code: String,
         namespaces: device_request::Namespaces,
-    ) -> Result<(Self, Vec<u8>)> {
+    ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let device_engagement_bytes =
             Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(Error::InvalidQrCode)?;
 
@@ -49,6 +49,9 @@ impl SessionManager {
         //decode device_engagement
         let device_engagement = device_engagement_bytes.as_ref();
         let e_device_key = &device_engagement.security.1;
+
+        // calculate ble Ident value
+        let ble_ident = super::calculate_ble_ident(e_device_key)?;
 
         // derive shared secret
         let shared_secret = get_shared_secret(
@@ -82,7 +85,7 @@ impl SessionManager {
         };
         let session_request = serde_cbor::to_vec(&session)?;
 
-        Ok((session_manager, session_request))
+        Ok((session_manager, session_request, ble_ident))
     }
 
     pub fn first_central_client_uuid(&self) -> Option<&Uuid> {

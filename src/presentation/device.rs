@@ -1,15 +1,12 @@
 use crate::{
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
-        device_request::DeviceRequest,
+        device_request::{DeviceRequest, DocRequest, ItemsRequest},
         device_response::{
             Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
             Errors as NamespaceErrors, Status,
         },
-        device_signed::{
-            DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned,
-            DeviceSignedItems,
-        },
+        device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
@@ -18,12 +15,12 @@ use crate::{
     issuance::Mdoc,
 };
 use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
-use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
-use sha2::Sha256;
 use std::collections::HashMap;
 use uuid::Uuid;
+
+pub mod oid4vp;
 
 // TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
 // non-cbor serde implementors.
@@ -83,19 +80,19 @@ pub enum Error {
 }
 
 // TODO: Do we need to support multiple documents of the same type?
-type Documents = NonEmptyMap<DocType, Document>;
+pub type Documents = NonEmptyMap<DocType, Document>;
 type DocType = String;
 
-/// Holder-internal document datatype.
+/// Device-internal document datatype.
 #[derive(Debug, Clone)]
 // TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
 // non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
 pub struct Document {
-    id: Uuid,
-    issuer_auth: CoseSign1,
-    mso: Mso,
-    namespaces: Namespaces,
+    pub id: Uuid,
+    pub issuer_auth: CoseSign1,
+    pub mso: Mso,
+    pub namespaces: Namespaces,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +122,9 @@ struct PreparedDocument {
 type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
 type Namespace = String;
 type ElementIdentifier = String;
+
+pub type RequestedItems = Vec<ItemsRequest>;
+pub type PermittedItems = HashMap<DocType, HashMap<Namespace, Vec<ElementIdentifier>>>;
 
 impl SessionManagerInit {
     /// Initialise the SessionManager.
@@ -158,15 +158,7 @@ impl SessionManagerInit {
     }
 
     pub fn ble_ident(&self) -> anyhow::Result<[u8; 16]> {
-        let e_device_key_bytes = serde_cbor::to_vec(&self.device_engagement.as_ref().security.1)?;
-
-        let mut okm = [0u8; 16];
-
-        Hkdf::<Sha256>::new(None, &e_device_key_bytes)
-            .expand("BLEIdent".as_bytes(), &mut okm)
-            .map_err(|e| anyhow::anyhow!("unable to perform HKDF: {}", e))?;
-
-        Ok(okm)
+        super::calculate_ble_ident(&self.device_engagement.as_ref().security.1)
     }
 
     /// Begin device engagement using QR code.
@@ -186,7 +178,7 @@ impl SessionManagerEngaged {
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
-    ) -> anyhow::Result<SessionManager> {
+    ) -> anyhow::Result<(SessionManager, RequestedItems)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript = Tag24::new(SessionTranscript(
             self.device_engagement,
@@ -213,223 +205,56 @@ impl SessionManagerEngaged {
             state: State::AwaitingRequest,
         };
 
-        sm.handle_decoded_request(SessionData {
+        let requested_data = sm.handle_decoded_request(SessionData {
             data: Some(session_establishment.data),
             status: None,
         })?;
 
-        Ok(sm)
+        Ok((sm, requested_data))
     }
 }
 
 impl SessionManager {
-    fn prepare_response(&self, request: &[u8]) -> PreparedDeviceResponse {
-        let request: CborValue = match serde_cbor::from_slice(request) {
-            Ok(cbor) => cbor,
-            Err(error) => {
-                tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
-                return PreparedDeviceResponse::empty(Status::CborDecodingError);
-            }
-        };
+    fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
+        let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
+            // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
+            PreparedDeviceResponse::empty(Status::CborDecodingError)
+        })?;
 
-        let request: DeviceRequest = match serde_cbor::value::from_value(request) {
-            Ok(cbor) => cbor,
-            Err(error) => {
-                tracing::error!("unable to validate DeviceRequest cbor: {}", error);
-                return PreparedDeviceResponse::empty(Status::CborValidationError);
-            }
-        };
-
-        if request.version != DeviceRequest::VERSION {
-            tracing::error!(
-                "unsupported DeviceRequest version: {} ({} is supported)",
-                request.version,
-                DeviceRequest::VERSION
-            );
-            return PreparedDeviceResponse::empty(Status::GeneralError);
-        }
-
-        let mut prepared_documents: Vec<PreparedDocument> = Vec::new();
-        let mut document_errors: Vec<DocumentError> = Vec::new();
-
-        for doc_request in request.doc_requests.into_inner().into_iter() {
-            if let Some(_reader_auth) = doc_request.reader_auth.as_ref() {
-                // TODO: implement reader auth
-            }
-
-            let items_request = doc_request.items_request.into_inner();
-            let doc_type = items_request.doc_type;
-            let document = match self.documents.get(&doc_type) {
-                Some(doc) => doc,
-                None => {
-                    tracing::error!("holder owns no documents of type {}", doc_type);
-                    let error: DocumentError =
-                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
-                            .into_iter()
-                            .collect();
-                    document_errors.push(error);
-                    continue;
-                }
-            };
-            let signature_algorithm = match document
-                .mso
-                .device_key_info
-                .device_key
-                .signature_algorithm()
-            {
-                Some(alg) => alg,
-                None => {
-                    tracing::error!(
-                        "device key for document '{}' cannot perform signing",
-                        document.id
-                    );
-                    let error: DocumentError =
-                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
-                            .into_iter()
-                            .collect();
-                    document_errors.push(error);
-                    continue;
-                }
-            };
-
-            if let Some(_info) = items_request.request_info.as_ref() {
-                // Current version of mdl spec doesn't use request info.
-            }
-
-            let mut issuer_namespaces: HashMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
-                Default::default();
-            let mut device_namespaces: HashMap<String, DeviceSignedItems> = Default::default();
-            let mut errors: HashMap<String, NonEmptyMap<String, DocumentErrorCode>> =
-                Default::default();
-
-            // TODO: Handle special cases, i.e. for `age_over_NN`.
-            for (namespace, elements) in items_request.namespaces.into_inner().into_iter() {
-                if let Some(issuer_items) = document.namespaces.get(&namespace) {
-                    for (element_identifier, _intent_to_retain) in elements.into_inner().into_iter()
-                    {
-                        if let Some(item) = issuer_items.get(&element_identifier) {
-                            // TODO: use intent_to_retain: notify user for approval?
-                            if let Some(returned_items) = issuer_namespaces.get_mut(&namespace) {
-                                returned_items.push(item.clone());
-                            } else {
-                                let returned_items = NonEmptyVec::new(item.clone());
-                                issuer_namespaces.insert(namespace.clone(), returned_items);
-                            }
-                            let device_key_permitted = document
-                                .mso
-                                .device_key_info
-                                .key_authorizations
-                                .as_ref()
-                                .map(|auth| auth.permitted(&namespace, &element_identifier))
-                                .unwrap_or(false);
-                            if device_key_permitted {
-                                if let Some(device_items) = device_namespaces.get_mut(&namespace) {
-                                    device_items.insert(
-                                        element_identifier,
-                                        item.as_ref().element_value.clone(),
-                                    );
-                                } else {
-                                    let device_signed = NonEmptyMap::new(
-                                        element_identifier,
-                                        item.as_ref().element_value.clone(),
-                                    );
-                                    device_namespaces.insert(namespace.clone(), device_signed);
-                                }
-                            }
-                        } else if let Some(returned_errors) = errors.get_mut(&namespace) {
-                            returned_errors
-                                .insert(element_identifier, DocumentErrorCode::DataNotReturned);
-                        } else {
-                            let returned_errors = NonEmptyMap::new(
-                                element_identifier,
-                                DocumentErrorCode::DataNotReturned,
-                            );
-                            errors.insert(namespace.clone(), returned_errors);
-                        }
-                    }
-                } else {
-                    for (element_identifier, _) in elements.into_inner().into_iter() {
-                        if let Some(returned_errors) = errors.get_mut(&namespace) {
-                            returned_errors
-                                .insert(element_identifier, DocumentErrorCode::DataNotReturned);
-                        } else {
-                            let returned_errors = NonEmptyMap::new(
-                                element_identifier,
-                                DocumentErrorCode::DataNotReturned,
-                            );
-                            errors.insert(namespace.clone(), returned_errors);
-                        }
-                    }
-                }
-            }
-
-            let device_namespaces = match Tag24::new(device_namespaces) {
-                Ok(dp) => dp,
-                Err(e) => {
-                    tracing::error!("failed to convert device namespaces to cbor: {}", e);
-                    let error: DocumentError =
-                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
-                            .into_iter()
-                            .collect();
-                    document_errors.push(error);
-                    continue;
-                }
-            };
-            let device_auth = DeviceAuthentication::new(
-                self.session_transcript.as_ref().clone(),
-                doc_type.clone(),
-                device_namespaces,
-            );
-            let device_auth = match Tag24::new(device_auth) {
-                Ok(da) => da,
-                Err(e) => {
-                    tracing::error!("failed to convert device authentication to cbor: {}", e);
-                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                        .into_iter()
-                        .collect();
-                    document_errors.push(error);
-                    continue;
-                }
-            };
-            let prepared_cose_sign1 = match CoseSign1::builder()
-                .detached()
-                .payload(device_auth.inner_bytes.clone())
-                .signature_algorithm(signature_algorithm)
-                .prepare()
-            {
-                Ok(prepared) => prepared,
-                Err(e) => {
-                    tracing::error!("failed to prepare COSE_Sign1: {}", e);
-                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                        .into_iter()
-                        .collect();
-                    document_errors.push(error);
-                    continue;
-                }
-            };
-
-            let prepared_document = PreparedDocument {
-                id: document.id,
-                doc_type,
-                issuer_signed: IssuerSigned {
-                    namespaces: issuer_namespaces.try_into().ok(),
-                    issuer_auth: document.issuer_auth.clone(),
-                },
-                device_namespaces: device_auth.into_inner().3,
-                prepared_cose_sign1,
-                errors: errors.try_into().ok(),
-            };
-            prepared_documents.push(prepared_document);
-        }
-        PreparedDeviceResponse {
-            prepared_documents,
-            document_errors: document_errors.try_into().ok(),
-            status: Status::OK,
-            signed_documents: Vec::new(),
-        }
+        serde_cbor::value::from_value(request).map_err(|_| {
+            // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
+            PreparedDeviceResponse::empty(Status::CborValidationError)
+        })
     }
 
-    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<()> {
+    fn validate_request(
+        &self,
+        request: DeviceRequest,
+    ) -> Result<Vec<ItemsRequest>, PreparedDeviceResponse> {
+        if request.version != DeviceRequest::VERSION {
+            // tracing::error!(
+            //     "unsupported DeviceRequest version: {} ({} is supported)",
+            //     request.version,
+            //     DeviceRequest::VERSION
+            // );
+            return Err(PreparedDeviceResponse::empty(Status::GeneralError));
+        }
+        Ok(request
+            .doc_requests
+            .into_inner()
+            .into_iter()
+            .map(|DocRequest { items_request, .. }|
+                 // TODO: implement reader auth
+                 items_request.into_inner())
+            .collect())
+    }
+
+    pub fn prepare_response(&mut self, requests: &RequestedItems, permitted: PermittedItems) {
+        let prepared_response = DeviceSession::prepare_response(self, requests, permitted);
+        self.state = State::Signing(prepared_response);
+    }
+
+    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<RequestedItems> {
         // TODO: Better handling for termination status and missing data.
         let data = request.data.ok_or_else(|| {
             anyhow::anyhow!("no mdoc requests received, assume session can be terminated")
@@ -440,14 +265,26 @@ impl SessionManager {
             &mut self.reader_message_counter,
         )
         .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
-        let prepared_response = self.prepare_response(&decrypted_request);
-        self.state = State::Signing(prepared_response);
-        Ok(())
+        let request = match self.parse_request(&decrypted_request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.state = State::Signing(e);
+                return Ok(Default::default());
+            }
+        };
+        let request = match self.validate_request(request) {
+            Ok(r) => r,
+            Err(e) => {
+                self.state = State::Signing(e);
+                return Ok(Default::default());
+            }
+        };
+        Ok(request)
     }
 
     /// Handle a request from the reader.
     // TODO: Improve error handling.
-    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<()> {
+    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
         // TODO: Check session manager state.
         let session_data: SessionData = serde_cbor::from_slice(request)?;
         self.handle_decoded_request(session_data)
@@ -477,8 +314,8 @@ impl SessionManager {
                             &response_bytes,
                             &mut self.device_message_counter,
                         )
-                        .unwrap_or_else(|e| {
-                            tracing::warn!("unable to encrypt response: {}", e);
+                        .unwrap_or_else(|_e| {
+                            //tracing::warn!("unable to encrypt response: {}", e);
                             status = Some(session::Status::SessionEncryptionError);
                             Default::default()
                         });
@@ -548,9 +385,9 @@ impl PreparedDeviceResponse {
         let signed_doc = match self.prepared_documents.pop() {
             Some(doc) => doc.finalize(signature),
             None => {
-                tracing::error!(
-                    "received a signature for finalising when there are no more prepared docs"
-                );
+                //tracing::error!(
+                //    "received a signature for finalising when there are no more prepared docs"
+                //);
                 return;
             }
         };
@@ -559,7 +396,7 @@ impl PreparedDeviceResponse {
 
     pub fn finalize_response(self) -> DeviceResponse {
         if !self.is_complete() {
-            tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
+            //tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
             return PreparedDeviceResponse::empty(Status::GeneralError).finalize_response();
         }
 
@@ -598,6 +435,182 @@ impl PreparedDocument {
     }
 }
 
+pub trait DeviceSession {
+    fn documents(&self) -> &Documents;
+    fn session_transcript(&self) -> &Tag24<SessionTranscript>;
+    fn prepare_response(
+        &self,
+        requests: &RequestedItems,
+        permitted: PermittedItems,
+    ) -> PreparedDeviceResponse {
+        let mut prepared_documents: Vec<PreparedDocument> = Vec::new();
+        let mut document_errors: Vec<DocumentError> = Vec::new();
+
+        for (doc_type, namespaces) in filter_permitted(requests, permitted).into_iter() {
+            let document = match self.documents().get(&doc_type) {
+                Some(doc) => doc,
+                None => {
+                    // tracing::error!("holder owns no documents of type {}", doc_type);
+                    let error: DocumentError =
+                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
+                            .into_iter()
+                            .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let signature_algorithm = match document
+                .mso
+                .device_key_info
+                .device_key
+                .signature_algorithm()
+            {
+                Some(alg) => alg,
+                None => {
+                    //tracing::error!(
+                    //    "device key for document '{}' cannot perform signing",
+                    //    document.id
+                    //);
+                    let error: DocumentError =
+                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
+                            .into_iter()
+                            .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+
+            let mut issuer_namespaces: HashMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
+                Default::default();
+            let mut errors: HashMap<String, NonEmptyMap<String, DocumentErrorCode>> =
+                Default::default();
+
+            // TODO: Handle special cases, i.e. for `age_over_NN`.
+            for (namespace, elements) in namespaces.into_iter() {
+                if let Some(issuer_items) = document.namespaces.get(&namespace) {
+                    for element_identifier in elements.into_iter() {
+                        if let Some(item) = issuer_items.get(&element_identifier) {
+                            if let Some(returned_items) = issuer_namespaces.get_mut(&namespace) {
+                                returned_items.push(item.clone());
+                            } else {
+                                let returned_items = NonEmptyVec::new(item.clone());
+                                issuer_namespaces.insert(namespace.clone(), returned_items);
+                            }
+                        } else if let Some(returned_errors) = errors.get_mut(&namespace) {
+                            returned_errors
+                                .insert(element_identifier, DocumentErrorCode::DataNotReturned);
+                        } else {
+                            let returned_errors = NonEmptyMap::new(
+                                element_identifier,
+                                DocumentErrorCode::DataNotReturned,
+                            );
+                            errors.insert(namespace.clone(), returned_errors);
+                        }
+                    }
+                } else {
+                    for element_identifier in elements.into_iter() {
+                        if let Some(returned_errors) = errors.get_mut(&namespace) {
+                            returned_errors
+                                .insert(element_identifier, DocumentErrorCode::DataNotReturned);
+                        } else {
+                            let returned_errors = NonEmptyMap::new(
+                                element_identifier,
+                                DocumentErrorCode::DataNotReturned,
+                            );
+                            errors.insert(namespace.clone(), returned_errors);
+                        }
+                    }
+                }
+            }
+
+            let device_namespaces = match Tag24::new(Default::default()) {
+                Ok(dp) => dp,
+                Err(_e) => {
+                    //tracing::error!("failed to convert device namespaces to cbor: {}", e);
+                    let error: DocumentError =
+                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
+                            .into_iter()
+                            .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let device_auth = DeviceAuthentication::new(
+                self.session_transcript().as_ref().clone(),
+                doc_type.clone(),
+                device_namespaces.clone(),
+            );
+            let device_auth = match Tag24::new(device_auth) {
+                Ok(da) => da,
+                Err(_e) => {
+                    //tracing::error!("failed to convert device authentication to cbor: {}", e);
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
+                Ok(dab) => dab,
+                Err(_e) => {
+                    //tracing::error!("failed to convert device authentication to cbor: {}", e);
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let prepared_cose_sign1 = match CoseSign1::builder()
+                .detached()
+                .payload(device_auth_bytes)
+                .signature_algorithm(signature_algorithm)
+                .prepare()
+            {
+                Ok(prepared) => prepared,
+                Err(_e) => {
+                    //tracing::error!("failed to prepare COSE_Sign1: {}", e);
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+
+            let prepared_document = PreparedDocument {
+                id: document.id,
+                doc_type,
+                issuer_signed: IssuerSigned {
+                    namespaces: issuer_namespaces.try_into().ok(),
+                    issuer_auth: document.issuer_auth.clone(),
+                },
+                device_namespaces,
+                prepared_cose_sign1,
+                errors: errors.try_into().ok(),
+            };
+            prepared_documents.push(prepared_document);
+        }
+        PreparedDeviceResponse {
+            prepared_documents,
+            document_errors: document_errors.try_into().ok(),
+            status: Status::OK,
+            signed_documents: Vec::new(),
+        }
+    }
+}
+
+impl DeviceSession for SessionManager {
+    fn documents(&self) -> &Documents {
+        &self.documents
+    }
+
+    fn session_transcript(&self) -> &Tag24<SessionTranscript> {
+        &self.session_transcript
+    }
+}
+
 impl From<Mdoc> for Document {
     fn from(mdoc: Mdoc) -> Document {
         fn extract(
@@ -633,5 +646,107 @@ impl From<Mdoc> for Document {
             namespaces,
             issuer_auth,
         }
+    }
+}
+
+/// Filter permitted items to only permit the items that were requested.
+fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
+    permitted
+        .into_iter()
+        .filter_map(|(doc_type, namespaces)| {
+            request
+                .iter()
+                .find(|item| item.doc_type == doc_type)
+                .map(|item| {
+                    namespaces
+                        .into_iter()
+                        .filter_map(|(ns, elems)| {
+                            item.namespaces
+                                .get(&ns)
+                                .map(|req_elems| {
+                                    elems
+                                        .into_iter()
+                                        .filter(|elem| req_elems.contains_key(elem))
+                                        .collect()
+                                })
+                                .map(|e| (ns, e))
+                        })
+                        .collect()
+                })
+                .map(|ns| (doc_type, ns))
+        })
+        .collect()
+}
+
+// TODO: Remove this function. This adds a temporary way to sign DeviceRequest for test mdocs.
+pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let der = include_str!("../../test/issuance/device_key.b64");
+    let der_bytes = base64::decode(der)?;
+    let key: p256::ecdsa::SigningKey = p256::SecretKey::from_sec1_der(&der_bytes)?.into();
+    use signature::Signer;
+    key.try_sign(payload)
+        .map(|sig| sig.to_vec())
+        .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn filter_permitted() {
+        let requested = serde_json::from_value(json!([
+            {
+                "docType": "doc_type_1",
+                "nameSpaces": {
+                    "namespace_1": {
+                        "element_1": false,
+                        "element_2": false,
+                    },
+                    "namespace_2": {
+                        "element_1": false,
+                    }
+                }
+            },
+            {
+                "docType": "doc_type_2",
+                "nameSpaces": {
+                    "namespace_1": {
+                        "element_1": false,
+                    }
+                }
+            }
+        ]))
+        .unwrap();
+        let permitted = serde_json::from_value(json!({
+            "doc_type_1": {
+                "namespace_1": [
+                    "element_1",
+                    "element_3"
+                ],
+                "namespace_3": [
+                    "element_1",
+                ]
+            },
+            "doc_type_3": {
+                "namespace_1": [
+                    "element_1",
+                ],
+            }
+        }))
+        .unwrap();
+        let expected: PermittedItems = serde_json::from_value(json!({
+            "doc_type_1": {
+                "namespace_1": [
+                    "element_1",
+                ],
+            }
+        }))
+        .unwrap();
+
+        let filtered = super::filter_permitted(&requested, permitted);
+
+        assert_eq!(expected, filtered);
     }
 }

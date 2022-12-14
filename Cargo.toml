@@ -14,7 +14,6 @@ ecdsa = { version = "0.14.4", features = ["serde"] }
 p256 = { version = "0.11.1", features = ["serde", "ecdh"] }
 p384 = { version = "0.11.2", features = ["serde", "ecdh"] }
 rand = { version = "0.8.5", features = ["getrandom"] }
-openssl = "0.10.41"
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11.2", features = ["tags"] }
 serde_json = "1.0"
@@ -31,8 +30,12 @@ uuid = { version = "1.2", features = ["v1", "std", "rng", "serde"] }
 time = { version = "0.3.14", features = ["formatting", "parsing", "macros"] }
 zeroize = { version = "1.4", features = ["zeroize_derive"] }
 signature = "1.6"
-tracing = "0.1"
+#tracing = "0.1"
 base64 = "0.13"
+pem-rfc7468 = "0.6.0"
+x509-cert = { version = "0.1.0", features = ["pem"] }
+
+ssi-jwk = { version = "0.1", git = "https://github.com/spruceid/ssi" }
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"

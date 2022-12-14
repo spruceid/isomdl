@@ -23,10 +23,11 @@ pub type WebApi = (u64, String, String);
 pub struct DeviceEngagement {
     pub version: String,
     pub security: Security,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_retrieval_methods: Option<DeviceRetrievalMethods>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_retrieval_methods: Option<ServerRetrievalMethods>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol_info: Option<ProtocolInfo>,
 }
 
@@ -53,7 +54,9 @@ pub struct ServerRetrievalMethods {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct BleOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub peripheral_server_mode: Option<PeripheralServerMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub central_client_mode: Option<CentralClientMode>,
 }
 
@@ -71,9 +74,13 @@ pub struct CentralClientMode {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct WifiOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pass_phrase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     channel_info_operating_class: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     channel_info_channel_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     band_info: Option<ByteStr>,
 }
 
@@ -183,11 +190,11 @@ impl TryFrom<CborValue> for DeviceEngagement {
                 .transpose()
                 .map_err(|_| Error::Malformed)?;
             if server_retrieval_methods.is_some() {
-                tracing::warn!("server_retrieval is unimplemented.")
+                //tracing::warn!("server_retrieval is unimplemented.")
             }
             let protocol_info = map.remove(&CborValue::Integer(4));
             if protocol_info.is_some() {
-                tracing::warn!("protocol_info is RFU and has been ignored in deserialization.")
+                //tracing::warn!("protocol_info is RFU and has been ignored in deserialization.")
             }
 
             let device_engagement = DeviceEngagement {

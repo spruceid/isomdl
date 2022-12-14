@@ -30,6 +30,8 @@ pub enum Error {
     NotATextString(Box<CborValue>),
     #[error("Expected to parse a CBOR tag (number {0}), received: '{1:?}'")]
     NotATag(u64, CborValue),
+    #[error(transparent)]
+    OutOfRange(#[from] time::error::ComponentRange),
     #[error("Failed to format date string as rfc3339 date: {0}")]
     UnableToFormatDate(#[from] FormatError),
     #[error("Failed to parse date string as rfc3339 date: {0}")]
@@ -46,7 +48,10 @@ impl TryFrom<ValidityInfo> for CborValue {
                 let value = CborValue::Tag(
                     0,
                     Box::new(CborValue::Text(
-                        $date.to_offset(UtcOffset::UTC).format(&Rfc3339)?,
+                        $date
+                            .replace_millisecond(0)?
+                            .to_offset(UtcOffset::UTC)
+                            .format(&Rfc3339)?,
                     )),
                 );
                 $map.insert(key, value);
@@ -127,5 +132,28 @@ fn cbor_to_datetime(v: CborValue) -> Result<OffsetDateTime> {
         }
     } else {
         Err(Error::NotATag(0, v))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn roundtrip() {
+        let cbor = hex::decode("A3667369676E6564C074323032302D30312D30315430303A30303A30305A6976616C696446726F6DC074323032302D30312D30315430303A30303A30305A6A76616C6964556E74696CC074323032302D30312D30315430303A30303A30305A").unwrap();
+        let validity_info: ValidityInfo = serde_cbor::from_slice(&cbor).unwrap();
+        let roundtripped = serde_cbor::to_vec(&validity_info).unwrap();
+        assert_eq!(cbor, roundtripped);
+    }
+
+    // Test that microseconds are trimmed.
+    #[test]
+    fn trim() {
+        let cbor = hex::decode("A3667369676E6564C07818323032302D30312D30315430303A30303A30302E3130315A6976616C696446726F6DC0781B323032302D30312D30315430303A30303A30302E3131323231395A6A76616C6964556E74696CC0781E323032302D30312D30315430303A30303A30302E3939393939393939395A").unwrap();
+        let validity_info: ValidityInfo = serde_cbor::from_slice(&cbor).unwrap();
+        let roundtripped = serde_cbor::to_vec(&validity_info).unwrap();
+        let trimmed = hex::decode("A3667369676E6564C074323032302D30312D30315430303A30303A30305A6976616C696446726F6DC074323032302D30312D30315430303A30303A30305A6A76616C6964556E74696CC074323032302D30312D30315430303A30303A30305A").unwrap();
+        assert_eq!(trimmed, roundtripped);
     }
 }

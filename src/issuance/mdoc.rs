@@ -83,7 +83,7 @@ impl Mdoc {
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
         let mut unprotected_headers = HeaderMap::default();
-        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor()?);
+        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
 
         let prepared_sig = CoseSign1::builder()
             .payload(mso_bytes)
@@ -359,7 +359,7 @@ fn digest_namespace(
 fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
     let mut digest_id;
     loop {
-        digest_id = rand::thread_rng().gen();
+        digest_id = rand::thread_rng().gen::<i32>().into();
         if used_ids.insert(digest_id) {
             break;
         }
@@ -368,7 +368,7 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::*;
     use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
     use crate::definitions::fulldate::FullDate;
@@ -381,8 +381,8 @@ mod test {
     use std::str::FromStr;
     use time::OffsetDateTime;
 
-    static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
-    static ISSUER_KEY: &str = include_str!("../../test/issuance/256-key.pem");
+    static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/issuer-cert.pem");
+    static ISSUER_KEY: &str = include_str!("../../test/issuance/issuer-key.pem");
 
     fn mdl_data() -> String {
         base64::encode_config(
@@ -419,6 +419,8 @@ mod test {
                   "org.iso.18013.5.1.issuing_authority":"CA DMV",
                   "org.iso.18013.5.1.document_number":"I12345678",
                   "org.iso.18013.5.1.portrait":include_str!("../../test/issuance/portrait.b64u"),
+                  "org.iso.18013.5.1.height":170,
+                  "org.iso.18013.5.1.eye_colour":"hazel",
                   "org.iso.18013.5.1.driving_privileges":[
                     {
                        "vehicle_category_code":"A",
@@ -441,6 +443,11 @@ mod test {
 
     #[test]
     fn issue_minimal_mdoc() -> anyhow::Result<()> {
+        minimal_test_mdoc()?;
+        Ok(())
+    }
+
+    pub fn minimal_test_mdoc() -> anyhow::Result<Mdoc> {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
 
         let mut mdl_data: serde_json::Value =
@@ -606,6 +613,31 @@ mod test {
                 ),
             ),
             (
+                "height".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.height")
+                    .ok_or_else(|| anyhow!("missing required element: org.iso.18013.5.1.height"))?
+                    .as_i64()
+                    .ok_or_else(|| {
+                        anyhow!("expected integer for element: org.iso.18013.5.1.height")
+                    })?
+                    .into(),
+            ),
+            (
+                "eye_colour".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.eye_colour")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.eye_colour")
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!("expected string for element: org.iso.18013.5.1.eye_colour")
+                    })?
+                    .to_string()
+                    .into(),
+            ),
+            (
                 "driving_privileges".to_string(),
                 mdl_data
                     .get("org.iso.18013.5.1.driving_privileges")
@@ -749,6 +781,7 @@ mod test {
             x,
             y,
         };
+
         let approved_namespaces = vec![isomdl_namespace, aamva_namespace];
         let device_key_info = DeviceKeyInfo {
             device_key,
@@ -763,7 +796,7 @@ mod test {
             .expect("failed to parse pem")
             .into();
 
-        Mdoc::builder()
+        let mdoc = Mdoc::builder()
             .doc_type(doc_type)
             .namespaces(namespaces)
             .x5chain(x5chain)
@@ -773,6 +806,6 @@ mod test {
             .issue(signer)
             .expect("failed to issue mdoc");
 
-        Ok(())
+        Ok(mdoc)
     }
 }
