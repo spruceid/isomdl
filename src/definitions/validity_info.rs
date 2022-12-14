@@ -48,7 +48,10 @@ impl TryFrom<ValidityInfo> for CborValue {
                 let value = CborValue::Tag(
                     0,
                     Box::new(CborValue::Text(
-                        $date.replace_millisecond(0)?.to_offset(UtcOffset::UTC).format(&Rfc3339)?,
+                        $date
+                            .replace_millisecond(0)?
+                            .to_offset(UtcOffset::UTC)
+                            .format(&Rfc3339)?,
                     )),
                 );
                 $map.insert(key, value);

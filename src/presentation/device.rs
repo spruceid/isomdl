@@ -6,10 +6,7 @@ use crate::{
             Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
             Errors as NamespaceErrors, Status,
         },
-        device_signed::{
-            DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned,
-            DeviceSignedItems,
-        },
+        device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
@@ -485,7 +482,6 @@ pub trait DeviceSession {
 
             let mut issuer_namespaces: HashMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
                 Default::default();
-            let mut device_namespaces: HashMap<String, DeviceSignedItems> = Default::default();
             let mut errors: HashMap<String, NonEmptyMap<String, DocumentErrorCode>> =
                 Default::default();
 
@@ -499,27 +495,6 @@ pub trait DeviceSession {
                             } else {
                                 let returned_items = NonEmptyVec::new(item.clone());
                                 issuer_namespaces.insert(namespace.clone(), returned_items);
-                            }
-                            let device_key_permitted = document
-                                .mso
-                                .device_key_info
-                                .key_authorizations
-                                .as_ref()
-                                .map(|auth| auth.permitted(&namespace, &element_identifier))
-                                .unwrap_or(false);
-                            if device_key_permitted {
-                                if let Some(device_items) = device_namespaces.get_mut(&namespace) {
-                                    device_items.insert(
-                                        element_identifier,
-                                        item.as_ref().element_value.clone(),
-                                    );
-                                } else {
-                                    let device_signed = NonEmptyMap::new(
-                                        element_identifier,
-                                        item.as_ref().element_value.clone(),
-                                    );
-                                    device_namespaces.insert(namespace.clone(), device_signed);
-                                }
                             }
                         } else if let Some(returned_errors) = errors.get_mut(&namespace) {
                             returned_errors
@@ -548,7 +523,7 @@ pub trait DeviceSession {
                 }
             }
 
-            let device_namespaces = match Tag24::new(device_namespaces) {
+            let device_namespaces = match Tag24::new(Default::default()) {
                 Ok(dp) => dp,
                 Err(_e) => {
                     //tracing::error!("failed to convert device namespaces to cbor: {}", e);
@@ -563,7 +538,7 @@ pub trait DeviceSession {
             let device_auth = DeviceAuthentication::new(
                 self.session_transcript().as_ref().clone(),
                 doc_type.clone(),
-                device_namespaces,
+                device_namespaces.clone(),
             );
             let device_auth = match Tag24::new(device_auth) {
                 Ok(da) => da,
@@ -611,7 +586,7 @@ pub trait DeviceSession {
                     namespaces: issuer_namespaces.try_into().ok(),
                     issuer_auth: document.issuer_auth.clone(),
                 },
-                device_namespaces: device_auth.into_inner().3,
+                device_namespaces,
                 prepared_cose_sign1,
                 errors: errors.try_into().ok(),
             };
