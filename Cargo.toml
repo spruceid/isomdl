@@ -35,8 +35,7 @@ base64 = "0.13"
 pem-rfc7468 = "0.6.0"
 x509-cert = { version = "0.1.0", features = ["pem"] }
 
-# ssi branch = 'feat/enum-everything'
-ssi-jwk = { path = "../ssi/ssi-jwk" }
+ssi-jwk = { version = "0.1", git = "https://github.com/spruceid/ssi" }
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"
