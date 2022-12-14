@@ -371,29 +371,356 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 mod test {
     use super::*;
     use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
+    use crate::definitions::fulldate::FullDate;
+    use crate::definitions::org_iso_18013_5_1::{Code, DrivingPrivilege};
+    use crate::definitions::org_iso_18013_5_1_aamva::{self as aamva};
     use crate::definitions::KeyAuthorizations;
+    use base64::URL_SAFE_NO_PAD;
     use elliptic_curve::sec1::ToEncodedPoint;
     use p256::pkcs8::DecodePrivateKey;
+    use std::str::FromStr;
     use time::OffsetDateTime;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
     static ISSUER_KEY: &str = include_str!("../../test/issuance/256-key.pem");
 
+    fn mdl_data() -> String {
+        base64::encode_config(
+            serde_json::json!(
+                {
+                  "org.iso.18013.5.1.aamva.sex":1,
+                  "org.iso.18013.5.1.aamva.given_name_truncation":"N",
+                  "org.iso.18013.5.1.aamva.family_name_truncation":"N",
+                  "org.iso.18013.5.1.aamva.aamva_version":2,
+                  "org.iso.18013.5.1.aamva.domestic_driving_privileges":[
+                    {
+                      "domestic_vehicle_class":{
+                        "domestic_vehicle_class_code":"A",
+                        "domestic_vehicle_class_description":"unknown",
+                        "issue_date":"2022-08-09",
+                        "expiry_date":"2030-10-20"
+                      }
+                    },
+                    {
+                      "domestic_vehicle_class":{
+                        "domestic_vehicle_class_code":"B",
+                        "domestic_vehicle_class_description":"unknown",
+                        "issue_date":"2022-08-09",
+                        "expiry_date":"2030-10-20"
+                      }
+                    }
+                  ],
+                  "org.iso.18013.5.1.family_name":"Doe",
+                  "org.iso.18013.5.1.given_name":"John",
+                  "org.iso.18013.5.1.birth_date":"1980-10-10",
+                  "org.iso.18013.5.1.issue_date":"2020-08-10",
+                  "org.iso.18013.5.1.expiry_date":"2030-10-30",
+                  "org.iso.18013.5.1.issuing_country":"US",
+                  "org.iso.18013.5.1.issuing_authority":"CA DMV",
+                  "org.iso.18013.5.1.document_number":"I12345678",
+                  "org.iso.18013.5.1.portrait":include_str!("../../test/issuance/portrait.b64u"),
+                  "org.iso.18013.5.1.driving_privileges":[
+                    {
+                       "vehicle_category_code":"A",
+                       "issue_date":"2022-08-09",
+                       "expiry_date":"2030-10-20"
+                    },
+                    {
+                       "vehicle_category_code":"B",
+                       "issue_date":"2022-08-09",
+                       "expiry_date":"2030-10-20"
+                    }
+                  ],
+                  "org.iso.18013.5.1.un_distinguishing_sign":"USA"
+                }
+            )
+            .to_string(),
+            URL_SAFE_NO_PAD,
+        )
+    }
+
     #[test]
-    fn issue_minimal_mdoc() {
+    fn issue_minimal_mdoc() -> anyhow::Result<()> {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
 
-        let mdl_namespace = String::from("org.iso.18013.5.1");
-        let mdl_elements = [
-            ("family_name".to_string(), "Smith".to_string().into()),
-            ("given_name".to_string(), "Alice".to_string().into()),
-            ("document_number".to_string(), "I8889680".to_string().into()),
+        let mut mdl_data: serde_json::Value =
+            String::from_utf8(base64::decode_config(mdl_data(), base64::URL_SAFE_NO_PAD).unwrap())
+                .unwrap()
+                .parse()
+                .unwrap();
+
+        let isomdl_namespace = String::from("org.iso.18013.5.1");
+        let isomdl_elements = [
+            (
+                "family_name".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.family_name")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.family_name")
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!("expected string for element: org.iso.18013.5.1.family_name")
+                    })?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "given_name".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.given_name")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.given_name")
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!("expected string for element: org.iso.18013.5.1.given_name")
+                    })?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "document_number".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.document_number")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.document_number")
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!("expected string for element: org.iso.18013.5.1.document_number")
+                    })?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "issuing_country".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.issuing_country")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.issuing_country")
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!("expected string for element: org.iso.18013.5.1.issuing_country")
+                    })?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "issuing_authority".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.issuing_authority")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.issuing_authority")
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!("expected string for element: org.iso.18013.5.1.issuing_authority")
+                    })?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "un_distinguishing_sign".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.un_distinguishing_sign")
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "missing required element: org.iso.18013.5.1.un_distinguishing_sign"
+                        )
+                    })?
+                    .as_str()
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "expected string for element: org.iso.18013.5.1.un_distinguishing_sign"
+                        )
+                    })?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "birth_date".to_string(),
+                FullDate::from_str(
+                    mdl_data
+                        .get("org.iso.18013.5.1.birth_date")
+                        .ok_or_else(|| {
+                            anyhow!("missing required element: org.iso.18013.5.1.birth_date")
+                        })?
+                        .as_str()
+                        .ok_or_else(|| {
+                            anyhow!("expected string for element: org.iso.18013.5.1.birth_date")
+                        })?,
+                )
+                .unwrap()
+                .into(),
+            ),
+            (
+                "issue_date".to_string(),
+                FullDate::from_str(
+                    mdl_data
+                        .get("org.iso.18013.5.1.issue_date")
+                        .ok_or_else(|| {
+                            anyhow!("missing required element: org.iso.18013.5.1.issue_date")
+                        })?
+                        .as_str()
+                        .ok_or_else(|| {
+                            anyhow!("expected string for element: org.iso.18013.5.1.issue_date")
+                        })?,
+                )
+                .unwrap()
+                .into(),
+            ),
+            (
+                "expiry_date".to_string(),
+                FullDate::from_str(
+                    mdl_data
+                        .get("org.iso.18013.5.1.expiry_date")
+                        .ok_or_else(|| {
+                            anyhow!("missing required element: org.iso.18013.5.1.expiry_date")
+                        })?
+                        .as_str()
+                        .ok_or_else(|| {
+                            anyhow!("expected string for element: org.iso.18013.5.1.expiry_date")
+                        })?,
+                )
+                .unwrap()
+                .into(),
+            ),
+            (
+                "portrait".to_string(),
+                CborValue::Bytes(
+                    base64::decode_config(
+                        mdl_data
+                            .get("org.iso.18013.5.1.portrait")
+                            .ok_or_else(|| {
+                                anyhow!("missing required element: org.iso.18013.5.1.portrait")
+                            })?
+                            .as_str()
+                            .ok_or_else(|| {
+                                anyhow!("expected string for element: org.iso.18013.5.1.portrait")
+                            })?,
+                        URL_SAFE_NO_PAD,
+                    )
+                    .unwrap(),
+                ),
+            ),
+            (
+                "driving_privileges".to_string(),
+                mdl_data
+                    .get("org.iso.18013.5.1.driving_privileges")
+                    .ok_or_else(|| {
+                        anyhow!("missing required element: org.iso.18013.5.1.driving_privileges")
+                    })?
+                    .as_array()
+                    .ok_or_else(|| {
+                        anyhow!("expected array for element: org.iso.18013.5.1.driving_privileges")
+                    })?
+                    .iter()
+                    .map(|j| {
+                        let vehicle_category_code = j
+                            .get("vehicle_category_code")
+                            .unwrap()
+                            .as_str()
+                            .unwrap()
+                            .to_string();
+                        let issue_date = j
+                            .get("issue_date")
+                            .map(|s| FullDate::from_str(s.as_str().unwrap()).unwrap());
+                        let expiry_date = j
+                            .get("expiry_date")
+                            .map(|s| FullDate::from_str(s.as_str().unwrap()).unwrap());
+                        let codes = j.get("codes").and_then(|v| {
+                            NonEmptyVec::maybe_new(
+                                v.as_array()
+                                    .unwrap()
+                                    .iter()
+                                    .map(|s| {
+                                        let code =
+                                            s.get("code").unwrap().as_str().unwrap().to_string();
+                                        let sign =
+                                            j.get("sign").map(|s| s.as_str().unwrap().to_string());
+                                        let value =
+                                            j.get("value").map(|s| s.as_str().unwrap().to_string());
+                                        Code { code, sign, value }
+                                    })
+                                    .collect(),
+                            )
+                        });
+                        DrivingPrivilege {
+                            vehicle_category_code,
+                            issue_date,
+                            expiry_date,
+                            codes,
+                        }
+                        .into()
+                    })
+                    .collect::<Vec<CborValue>>()
+                    .into(),
+            ),
         ]
         .into_iter()
         .collect();
-        let namespaces = [(mdl_namespace.clone(), mdl_elements)]
-            .into_iter()
-            .collect();
+
+        let aamva_namespace = String::from("org.iso.18013.5.1.aamva");
+        let aamva_elements = [
+            (
+                "sex".to_string().into(),
+                mdl_data
+                    .get("org.iso.18013.5.1.aamva.sex")
+                    .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.sex"))?
+                    .as_i64()
+                    .ok_or_else(|| anyhow!("expected integer for element: org.iso.18013.5.1.aamva.sex"))?
+                    .into(),
+            ),
+            (
+                "given_name_truncation".to_string().into(),
+                mdl_data
+                    .get("org.iso.18013.5.1.aamva.given_name_truncation")
+                    .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.given_name_truncation"))?
+                    .as_str()
+                    .ok_or_else(|| anyhow!("expected string for element: org.iso.18013.5.1.aamva.given_name_truncation"))?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "family_name_truncation".to_string().into(),
+                mdl_data
+                    .get("org.iso.18013.5.1.aamva.family_name_truncation")
+                    .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.family_name_truncation"))?
+                    .as_str()
+                    .ok_or_else(|| anyhow!("expected string for element: org.iso.18013.5.1.aamva.family_name_truncation"))?
+                    .to_string()
+                    .into(),
+            ),
+            (
+                "aamva_version".to_string().into(),
+                mdl_data
+                    .get("org.iso.18013.5.1.aamva.aamva_version")
+                    .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.aamva_version"))?
+                    .as_i64()
+                    .ok_or_else(|| anyhow!("expected integer for element: org.iso.18013.5.1.aamva.aamva_version"))?
+                    .into(),
+            ),
+            (
+                "domestic_driving_privileges".to_string().into(),
+                aamva::privileges_from_json(mdl_data.get_mut("org.iso.18013.5.1.aamva.domestic_driving_privileges")
+                    .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.domestic_driving_privileges"))?.take())?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<CborValue>>()
+                    .into(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let namespaces = [
+            (isomdl_namespace.clone(), isomdl_elements),
+            (aamva_namespace.clone(), aamva_elements),
+        ]
+        .into_iter()
+        .collect();
 
         let x5chain = X5Chain::builder()
             .with_pem(ISSUER_CERT)
@@ -422,10 +749,11 @@ mod test {
             x,
             y,
         };
+        let approved_namespaces = vec![isomdl_namespace, aamva_namespace];
         let device_key_info = DeviceKeyInfo {
             device_key,
             key_authorizations: Some(KeyAuthorizations {
-                namespaces: Some(NonEmptyVec::new(mdl_namespace)),
+                namespaces: NonEmptyVec::maybe_new(approved_namespaces),
                 data_elements: None,
             }),
             key_info: None,
@@ -444,5 +772,7 @@ mod test {
             .device_key_info(device_key_info)
             .issue(signer)
             .expect("failed to issue mdoc");
+
+        Ok(())
     }
 }

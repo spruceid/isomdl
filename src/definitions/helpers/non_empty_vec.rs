@@ -27,6 +27,35 @@ impl<T: Clone> NonEmptyVec<T> {
     pub fn into_inner(self) -> Vec<T> {
         self.0
     }
+
+    pub fn into<T2>(self) -> NonEmptyVec<T2>
+    where
+        T2: From<T> + Clone,
+    {
+        self.into_inner()
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<T2>>()
+            .try_into()
+            // Originally was a NonEmptyVec so there is at least one element
+            // and therefore we can safely unwrap.
+            .unwrap()
+    }
+
+    pub fn try_into<T2, E>(self) -> Result<NonEmptyVec<T2>, E>
+    where
+        T2: TryFrom<T, Error = E> + Clone,
+    {
+        Ok(self
+            .into_inner()
+            .into_iter()
+            .map(T2::try_from)
+            .collect::<Result<Vec<T2>, E>>()?
+            .try_into()
+            // Originally was a NonEmptyVec so there is at least one element
+            // and therefore we can safely unwrap.
+            .unwrap())
+    }
 }
 
 impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {
