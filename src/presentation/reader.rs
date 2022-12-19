@@ -8,8 +8,8 @@ use crate::definitions::{
     },
     DeviceEngagement, DeviceResponse, SessionData, SessionTranscript,
 };
-use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_json::json;
 use serde_json::Value;
@@ -30,7 +30,7 @@ pub struct SessionManager {
 pub enum Error {
     #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
     InvalidQrCode(anyhow::Error),
-    #[error("Device did not transmit an data.")]
+    #[error("Device did not transmit any data.")]
     DeviceTransmissionError,
     #[error("Device did not transmit an mDL.")]
     DocumentTypeError,
@@ -42,11 +42,11 @@ pub enum Error {
     HolderError,
     #[error("could not decrypt the response.")]
     DecryptionError,
-    #[error("could not decode cbor input.")]
+    #[error("Unexpected CBOR type for offered value")]
     CborDecodingError,
-    #[error("not a valid input for json.")]
+    #[error("not a valid JSON input.")]
     JsonError,
-    #[error("could not parse data_element.")]
+    #[error("Unexpected date type for data_element.")]
     ParsingError,
 }
 
