@@ -426,25 +426,19 @@ impl TryFrom<CborValue> for WifiOptions {
 	Ok(WifiOptions::default())
 	    .and_then(|wifi_opts| {
 		let pass_phrase = lookup_opt_string(&map, 0)?;
-		Ok(WifiOptions {pass_phrase: pass_phrase, ..wifi_opts})
+		Ok(WifiOptions{pass_phrase, ..wifi_opts})
 	    })
 	    .and_then(|wifi_opts| {
 		let channel_info_operating_class = lookup_opt_u64(&map, 1)?;
-		Ok(WifiOptions {
-		    channel_info_operating_class: channel_info_operating_class,
-		    ..wifi_opts
-		})
+		Ok(WifiOptions{channel_info_operating_class, ..wifi_opts})
 	    })
 	    .and_then(|wifi_opts| {
 		let channel_info_channel_number = lookup_opt_u64(&map, 2)?;
-		Ok(WifiOptions {
-		    channel_info_channel_number: channel_info_channel_number,
-		    ..wifi_opts
-		})
+		Ok(WifiOptions{channel_info_channel_number, ..wifi_opts})
 	    })
 	    .and_then(|wifi_opts| {
 		let band_info = lookup_opt_bytestr(&map, 3)?;
-		Ok(WifiOptions {band_info: band_info, ..wifi_opts})
+		Ok(WifiOptions{band_info, ..wifi_opts})
 	    })
     }
 }
