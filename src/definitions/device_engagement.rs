@@ -71,7 +71,7 @@ pub struct CentralClientMode {
     pub uuid: Uuid,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct WifiOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -103,6 +103,8 @@ pub enum Error {
     Unimplemented,
     #[error("Invalid DeviceEngagment found")]
     InvalidDeviceEngagement,
+    #[error("Invalid WifiOptions found")]
+    InvalidWifiOptions,
     #[error("Malformed object not recognised")]
     Malformed,
     #[error("Something went wrong parsing a cose key")]
@@ -375,8 +377,81 @@ impl From<BleOptions> for CborValue {
 impl TryFrom<CborValue> for WifiOptions {
     type Error = Error;
 
-    fn try_from(_v: CborValue) -> Result<Self, Error> {
-        todo!()
+    fn try_from(v: CborValue) -> Result<Self, Error> {
+        fn lookup_opt_string(
+            map: &BTreeMap<CborValue, CborValue>,
+            idx: i128,
+        ) -> Result<Option<String>, Error> {
+            match map.get(&CborValue::Integer(idx)) {
+                None => Ok(None),
+                Some(CborValue::Text(text)) => Ok(Some(text.to_string())),
+                _ => Err(Error::InvalidWifiOptions),
+            }
+        }
+
+        fn lookup_opt_u64(
+            map: &BTreeMap<CborValue, CborValue>,
+            idx: i128,
+        ) -> Result<Option<u64>, Error> {
+            match map.get(&CborValue::Integer(idx)) {
+                None => Ok(None),
+                Some(CborValue::Integer(int_val)) => {
+                    let uint_val =
+                        u64::try_from(*int_val).map_err(|_| Error::InvalidWifiOptions)?;
+                    Ok(Some(uint_val))
+                }
+                _ => Err(Error::InvalidWifiOptions),
+            }
+        }
+
+        fn lookup_opt_bytestr(
+            map: &BTreeMap<CborValue, CborValue>,
+            idx: i128,
+        ) -> Result<Option<ByteStr>, Error> {
+            match map.get(&CborValue::Integer(idx)) {
+                None => Ok(None),
+                Some(cbor_val) => {
+                    let byte_str = ByteStr::try_from(cbor_val.clone())
+                        .map_err(|_| Error::InvalidWifiOptions)?;
+                    Ok(Some(byte_str))
+                }
+            }
+        }
+
+        let map: BTreeMap<CborValue, CborValue> = match v {
+            CborValue::Map(map) => Ok(map),
+            _ => Err(Error::InvalidWifiOptions),
+        }?;
+
+        Ok(WifiOptions::default())
+            .and_then(|wifi_opts| {
+                let pass_phrase = lookup_opt_string(&map, 0)?;
+                Ok(WifiOptions {
+                    pass_phrase,
+                    ..wifi_opts
+                })
+            })
+            .and_then(|wifi_opts| {
+                let channel_info_operating_class = lookup_opt_u64(&map, 1)?;
+                Ok(WifiOptions {
+                    channel_info_operating_class,
+                    ..wifi_opts
+                })
+            })
+            .and_then(|wifi_opts| {
+                let channel_info_channel_number = lookup_opt_u64(&map, 2)?;
+                Ok(WifiOptions {
+                    channel_info_channel_number,
+                    ..wifi_opts
+                })
+            })
+            .and_then(|wifi_opts| {
+                let band_info = lookup_opt_bytestr(&map, 3)?;
+                Ok(WifiOptions {
+                    band_info,
+                    ..wifi_opts
+                })
+            })
     }
 }
 
@@ -487,5 +562,59 @@ mod test {
         let de = Tag24::<DeviceEngagement>::from_qr_code_uri(EXAMPLE_QR_CODE).unwrap();
         let roundtripped = de.to_qr_code_uri().unwrap();
         assert_eq!(EXAMPLE_QR_CODE, roundtripped);
+    }
+
+    fn wifi_options_cbor_roundtrip_test(wifi_options: WifiOptions) {
+        let bytes: Vec<u8> = serde_cbor::to_vec(&wifi_options).unwrap();
+        let deserialized: WifiOptions = serde_cbor::from_slice(&bytes).unwrap();
+        assert_eq!(wifi_options, deserialized);
+    }
+
+    #[test]
+    fn wifi_options_cbor_roundtrip_all_some() {
+        let wifi_options: WifiOptions = WifiOptions {
+            pass_phrase: Some(String::from("secret")),
+            channel_info_operating_class: Some(2),
+            channel_info_channel_number: Some(3),
+            band_info: Some(ByteStr::from(vec![20, 30, 40])),
+        };
+
+        wifi_options_cbor_roundtrip_test(wifi_options);
+    }
+
+    #[test]
+    fn wifi_options_cbor_roundtrip_all_none() {
+        let wifi_options: WifiOptions = WifiOptions {
+            pass_phrase: None,
+            channel_info_operating_class: None,
+            channel_info_channel_number: None,
+            band_info: None,
+        };
+
+        wifi_options_cbor_roundtrip_test(wifi_options);
+    }
+
+    #[test]
+    fn wifi_options_cbor_roundtrip_even_some() {
+        let wifi_options: WifiOptions = WifiOptions {
+            pass_phrase: Some(String::from("secret number 2 with spaces and $#$@$!")),
+            channel_info_operating_class: None,
+            channel_info_channel_number: Some(123),
+            band_info: None,
+        };
+
+        wifi_options_cbor_roundtrip_test(wifi_options);
+    }
+
+    #[test]
+    fn wifi_options_cbor_roundtrip_odd_some() {
+        let wifi_options: WifiOptions = WifiOptions {
+            pass_phrase: None,
+            channel_info_operating_class: Some(5432),
+            channel_info_channel_number: None,
+            band_info: Some(ByteStr::from(vec![99, 33, 22, 66, 88, 22, 125, 76])),
+        };
+
+        wifi_options_cbor_roundtrip_test(wifi_options);
     }
 }
