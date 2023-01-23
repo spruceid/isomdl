@@ -174,7 +174,7 @@ impl SessionManager {
     }
 
     // TODO: Handle any doc type.
-    pub fn handle_response(&mut self, response: &[u8]) -> Result<Value, Error> {
+    pub fn handle_response(&mut self, response: &[u8]) -> Result<BTreeMap<String, Value>, Error> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
@@ -224,7 +224,7 @@ impl SessionManager {
                     parsed_response.insert(item.element_identifier, val);
                 }
             });
-        Ok(json!(parsed_response))
+        Ok(parsed_response)
     }
 }
 
