@@ -5,6 +5,7 @@ use time::{format_description::FormatItem, macros::format_description, Date};
 
 const FORMAT: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]");
 
+/// `full-date` as defined in RFC3339.
 #[derive(Clone, Debug)]
 pub struct FullDate(Date);
 

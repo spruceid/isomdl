@@ -6,6 +6,7 @@ pub mod device_signed;
 pub mod fulldate;
 pub mod helpers;
 pub mod issuer_signed;
+pub mod latin1;
 pub mod mso;
 pub mod namespaces;
 pub mod oid4vp;
