@@ -372,8 +372,8 @@ pub mod test {
     use super::*;
     use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
     use crate::definitions::fulldate::FullDate;
-    use crate::definitions::org_iso_18013_5_1::{Code, DrivingPrivilege};
-    use crate::definitions::org_iso_18013_5_1_aamva::{self as aamva};
+    use crate::definitions::namespaces::org_iso_18013_5_1::{Code, DrivingPrivilege};
+    use crate::definitions::namespaces::org_iso_18013_5_1_aamva::{self as aamva};
     use crate::definitions::KeyAuthorizations;
     use base64::URL_SAFE_NO_PAD;
     use elliptic_curve::sec1::ToEncodedPoint;
