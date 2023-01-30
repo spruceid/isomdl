@@ -39,5 +39,5 @@ fn to_double_digits(s: &str) -> Option<(char, char)> {
     if chars.next().is_some() {
         return None;
     }
-    return Some((first, second));
+    Some((first, second))
 }

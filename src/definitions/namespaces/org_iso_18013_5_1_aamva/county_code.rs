@@ -45,5 +45,5 @@ fn to_treble_digits(s: &str) -> Result<(char, char, char), Error> {
     if chars.next().is_some() {
         return Err(Error::TooLong);
     }
-    return Ok((first, second, third));
+    Ok((first, second, third))
 }
