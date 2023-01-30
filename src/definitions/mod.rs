@@ -3,14 +3,13 @@ pub mod device_key;
 pub mod device_request;
 pub mod device_response;
 pub mod device_signed;
-pub mod fulldate;
 pub mod helpers;
 pub mod issuer_signed;
-pub mod latin1;
 pub mod mso;
 pub mod namespaces;
 pub mod oid4vp;
 pub mod session;
+pub mod traits;
 pub mod validity_info;
 
 pub use device_engagement::{

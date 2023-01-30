@@ -1,4 +1,9 @@
-use std::ops::Deref;
+use serde_json::Value;
+use std::{ops::Deref, str::FromStr};
+
+use crate::definitions::{
+    traits::{FromJson, FromJsonError}
+};
 
 /// A string of up to 150 characters from ISO/IEC 8859-1 Latin alphabet 1.
 ///
@@ -23,10 +28,19 @@ impl Deref for Latin1 {
     }
 }
 
-impl TryFrom<String> for Latin1 {
-    type Error = Error;
+impl FromJson for Latin1 {
+    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+        String::from_json(v)?
+            .parse()
+            .map_err(Into::into)
+            .map_err(FromJsonError::Parsing)
+    }
+}
 
-    fn try_from(s: String) -> Result<Latin1, Error> {
+impl FromStr for Latin1 {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Latin1, Error> {
         let length = s.len();
         if length > 150 {
             return Err(Error::TooLong(length));
@@ -38,7 +52,7 @@ impl TryFrom<String> for Latin1 {
             return Err(Error::NonLatin1(non_latin));
         }
 
-        Ok(Latin1(s))
+        Ok(Latin1(s.to_string()))
     }
 }
 
