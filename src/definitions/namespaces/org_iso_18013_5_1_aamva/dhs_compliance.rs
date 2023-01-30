@@ -1,0 +1,45 @@
+use crate::definitions::traits::{FromJson, FromJsonError};
+use serde_json::Value;
+use std::str::FromStr;
+
+#[derive(Debug, Clone)]
+pub enum DHSCompliance {
+    F,
+    N,
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum Error {
+    #[error("unrecognized variant: {0}")]
+    Unrecognized(String),
+}
+
+impl DHSCompliance {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Self::F => "F",
+            Self::N => "N",
+        }
+    }
+}
+
+impl FromStr for DHSCompliance {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Error> {
+        match s {
+            "F" => Ok(Self::F),
+            "N" => Ok(Self::N),
+            _ => Err(Error::Unrecognized(s.to_string())),
+        }
+    }
+}
+
+impl FromJson for DHSCompliance {
+    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+        String::from_json(v)?
+            .parse()
+            .map_err(Into::into)
+            .map_err(FromJsonError::Parsing)
+    }
+}

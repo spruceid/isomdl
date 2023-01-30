@@ -1,4 +1,4 @@
-use crate::definitions::traits::{FromJson,FromJsonError};
+use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 use std::str::FromStr;
 
@@ -19,7 +19,7 @@ pub enum EyeColour {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     #[error("unrecognized variant: {0}")]
-    Unrecognized(String)
+    Unrecognized(String),
 }
 
 impl EyeColour {
@@ -54,7 +54,7 @@ impl FromStr for EyeColour {
             "maroon" => Ok(Self::Maroon),
             "pink" => Ok(Self::Pink),
             "unknown" => Ok(Self::Unknown),
-            _ => Err(Error::Unrecognized(s.to_string()))
+            _ => Err(Error::Unrecognized(s.to_string())),
         }
     }
 }

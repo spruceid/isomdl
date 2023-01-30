@@ -1,9 +1,7 @@
 use serde_json::Value;
 use std::{ops::Deref, str::FromStr};
 
-use crate::definitions::{
-    traits::{FromJson, FromJsonError}
-};
+use crate::definitions::traits::{FromJson, FromJsonError};
 
 /// A string of up to 150 characters from ISO/IEC 8859-1 Latin alphabet 1.
 ///

@@ -1,12 +1,11 @@
-use std::collections::BTreeMap;
-use serde_json::{Map, Value};
 use crate::definitions::helpers::{ByteStr, NonEmptyVec};
+use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 
 pub trait FromJson: Sized {
     fn from_json(v: &Value) -> Result<Self, FromJsonError>;
     fn from_json_opt(o: Option<&Value>) -> Result<Self, FromJsonError> {
-        o.ok_or(FromJsonError::Missing)
-            .and_then(Self::from_json)
+        o.ok_or(FromJsonError::Missing).and_then(Self::from_json)
     }
 }
 
@@ -46,7 +45,9 @@ impl FromJson for bool {
 impl FromJson for u32 {
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
         match v {
-            Value::Number(n) => n.as_u64().ok_or(FromJsonError::ExpectedPositiveInteger)?
+            Value::Number(n) => n
+                .as_u64()
+                .ok_or(FromJsonError::ExpectedPositiveInteger)?
                 .try_into()
                 .map_err(|_| FromJsonError::IntegerTooLarge),
             Value::Null => Err(FromJsonError::UnexpectedType("null", "number")),
@@ -72,7 +73,9 @@ impl FromJson for String {
 }
 
 impl<T> FromJson for Vec<T>
-where T: FromJson {
+where
+    T: FromJson,
+{
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
         match v {
             Value::Array(v) => v.iter().map(T::from_json).collect(),
@@ -86,9 +89,15 @@ where T: FromJson {
 }
 
 impl<T> FromJson for NonEmptyVec<T>
-where T: FromJson + Clone {
+where
+    T: FromJson + Clone,
+{
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
-        Vec::from_json(v).and_then(|v| v.try_into().map_err(Into::into).map_err(FromJsonError::Parsing))
+        Vec::from_json(v).and_then(|v| {
+            v.try_into()
+                .map_err(Into::into)
+                .map_err(FromJsonError::Parsing)
+        })
     }
 }
 
@@ -103,7 +112,8 @@ impl FromJson for ByteStr {
 }
 
 impl<T> FromJson for BTreeMap<String, T>
-where T: FromJson
+where
+    T: FromJson,
 {
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
         match v {
@@ -118,7 +128,8 @@ where T: FromJson
 }
 
 impl<T> FromMap for BTreeMap<String, T>
-where T: FromJson
+where
+    T: FromJson,
 {
     fn from_map(m: &Map<String, Value>) -> Result<Self, FromJsonError> {
         m.iter()
@@ -128,7 +139,8 @@ where T: FromJson
 }
 
 impl<T> FromMap for Option<T>
-where T: FromMap 
+where
+    T: FromMap,
 {
     fn from_map(v: &Map<String, Value>) -> Result<Self, FromJsonError> {
         match T::from_map(v) {
@@ -140,7 +152,8 @@ where T: FromMap
 }
 
 impl<T> FromJson for Option<T>
-where T: FromJson 
+where
+    T: FromJson,
 {
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
         T::from_json(v).map(Some)

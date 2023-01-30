@@ -2,11 +2,9 @@ use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
-pub enum Sex {
-    NotKnown,
-    Male,
-    Female,
-    NotApplicable,
+pub enum EDLIndicator {
+    DriversLicense,
+    IdentificationCard,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -15,32 +13,28 @@ pub enum Error {
     Unrecognized(u32),
 }
 
-impl From<Sex> for u8 {
-    fn from(s: Sex) -> u8 {
+impl From<EDLIndicator> for u8 {
+    fn from(s: EDLIndicator) -> u8 {
         match s {
-            Sex::NotKnown => 0,
-            Sex::Male => 1,
-            Sex::Female => 2,
-            Sex::NotApplicable => 9,
+            EDLIndicator::DriversLicense => 1,
+            EDLIndicator::IdentificationCard => 2,
         }
     }
 }
 
-impl TryFrom<u32> for Sex {
+impl TryFrom<u32> for EDLIndicator {
     type Error = Error;
 
-    fn try_from(u: u32) -> Result<Sex, Error> {
+    fn try_from(u: u32) -> Result<EDLIndicator, Error> {
         match u {
-            0 => Ok(Sex::NotKnown),
-            1 => Ok(Sex::Male),
-            2 => Ok(Sex::Female),
-            9 => Ok(Sex::NotApplicable),
+            1 => Ok(EDLIndicator::DriversLicense),
+            2 => Ok(EDLIndicator::IdentificationCard),
             _ => Err(Error::Unrecognized(u)),
         }
     }
 }
 
-impl FromJson for Sex {
+impl FromJson for EDLIndicator {
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
         u32::from_json(v)?
             .try_into()

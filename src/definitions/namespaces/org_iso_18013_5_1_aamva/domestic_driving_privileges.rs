@@ -1,19 +1,18 @@
-use crate::definitions::{helpers::NonEmptyVec};
 use super::FullDate;
-use serde::Deserialize;
-use serde_cbor::Value;
-use std::{collections::BTreeMap, str::FromStr};
+use crate::definitions::helpers::NonEmptyVec;
+use serde_cbor::Value as Cbor;
+use std::{collections::BTreeMap};
 
 pub type DomesticDrivingPrivileges = Vec<DomesticDrivingPrivilege>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromJson)]
 pub struct DomesticDrivingPrivilege {
     pub domestic_vehicle_class: Option<DomesticVehicleClass>,
     pub domestic_vehicle_restrictions: Option<NonEmptyVec<DomesticVehicleRestriction>>,
     pub domestic_vehicle_endorsements: Option<NonEmptyVec<DomesticVehicleEndorsement>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromJson)]
 pub struct DomesticVehicleClass {
     pub domestic_vehicle_class_code: String,
     pub domestic_vehicle_class_description: String,
@@ -21,53 +20,20 @@ pub struct DomesticVehicleClass {
     pub expiry_date: Option<FullDate>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromJson)]
 pub struct DomesticVehicleRestriction {
     pub domestic_vehicle_restriction_code: Option<String>,
     pub domestic_vehicle_restriction_description: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromJson)]
 pub struct DomesticVehicleEndorsement {
     pub domestic_vehicle_endorsement_code: Option<String>,
     pub domestic_vehicle_endorsement_description: String,
 }
 
-// Private intermediary types when deserializing from json.
-// TODO: This is needed to prevent the need of implementing serde traits on the public types, as we
-// want to prevent serde_cbor from being used, and instead use the `From` implementation to convert
-// into serde_cbor::Value. We should consider defining a trait instead (i.e. `trait FromJson`),
-// that can be used across all isomdl and aamva data element types to convert from json.
-
-#[derive(Clone, Debug, Deserialize)]
-struct DomesticDrivingPrivilegePriv {
-    pub domestic_vehicle_class: Option<DomesticVehicleClassPriv>,
-    pub domestic_vehicle_restrictions: Option<NonEmptyVec<DomesticVehicleRestrictionPriv>>,
-    pub domestic_vehicle_endorsements: Option<NonEmptyVec<DomesticVehicleEndorsementPriv>>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DomesticVehicleClassPriv {
-    pub domestic_vehicle_class_code: String,
-    pub domestic_vehicle_class_description: String,
-    pub issue_date: Option<String>,
-    pub expiry_date: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DomesticVehicleRestrictionPriv {
-    pub domestic_vehicle_restriction_code: Option<String>,
-    pub domestic_vehicle_restriction_description: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct DomesticVehicleEndorsementPriv {
-    pub domestic_vehicle_endorsement_code: Option<String>,
-    pub domestic_vehicle_endorsement_description: String,
-}
-
-impl From<DomesticDrivingPrivilege> for Value {
-    fn from(d: DomesticDrivingPrivilege) -> Value {
+impl From<DomesticDrivingPrivilege> for Cbor {
+    fn from(d: DomesticDrivingPrivilege) -> Cbor {
         let mut map = BTreeMap::new();
         if let Some(domestic_vehicle_class) = d.domestic_vehicle_class {
             map.insert(
@@ -81,8 +47,8 @@ impl From<DomesticDrivingPrivilege> for Value {
                 domestic_vehicle_restrictions
                     .into_inner()
                     .into_iter()
-                    .map(Value::from)
-                    .collect::<Vec<Value>>()
+                    .map(Cbor::from)
+                    .collect::<Vec<Cbor>>()
                     .into(),
             );
         }
@@ -92,17 +58,17 @@ impl From<DomesticDrivingPrivilege> for Value {
                 domestic_vehicle_endorsements
                     .into_inner()
                     .into_iter()
-                    .map(Value::from)
-                    .collect::<Vec<Value>>()
+                    .map(Cbor::from)
+                    .collect::<Vec<Cbor>>()
                     .into(),
             );
         }
-        Value::Map(map)
+        Cbor::Map(map)
     }
 }
 
-impl From<DomesticVehicleClass> for Value {
-    fn from(d: DomesticVehicleClass) -> Value {
+impl From<DomesticVehicleClass> for Cbor {
+    fn from(d: DomesticVehicleClass) -> Cbor {
         let mut map = BTreeMap::new();
         map.insert(
             "domestic_vehicle_class_code".to_string().into(),
@@ -118,12 +84,12 @@ impl From<DomesticVehicleClass> for Value {
         if let Some(expiry_date) = d.expiry_date {
             map.insert("expiry_date".to_string().into(), expiry_date.into());
         }
-        Value::Map(map)
+        Cbor::Map(map)
     }
 }
 
-impl From<DomesticVehicleRestriction> for Value {
-    fn from(d: DomesticVehicleRestriction) -> Value {
+impl From<DomesticVehicleRestriction> for Cbor {
+    fn from(d: DomesticVehicleRestriction) -> Cbor {
         let mut map = BTreeMap::new();
         if let Some(domestic_vehicle_restriction_code) = d.domestic_vehicle_restriction_code {
             map.insert(
@@ -137,12 +103,12 @@ impl From<DomesticVehicleRestriction> for Value {
                 .into(),
             d.domestic_vehicle_restriction_description.into(),
         );
-        Value::Map(map)
+        Cbor::Map(map)
     }
 }
 
-impl From<DomesticVehicleEndorsement> for Value {
-    fn from(d: DomesticVehicleEndorsement) -> Value {
+impl From<DomesticVehicleEndorsement> for Cbor {
+    fn from(d: DomesticVehicleEndorsement) -> Cbor {
         let mut map = BTreeMap::new();
         if let Some(domestic_vehicle_endorsement_code) = d.domestic_vehicle_endorsement_code {
             map.insert(
@@ -156,60 +122,6 @@ impl From<DomesticVehicleEndorsement> for Value {
                 .into(),
             d.domestic_vehicle_endorsement_description.into(),
         );
-        Value::Map(map)
-    }
-}
-
-pub fn privileges_from_json(j: serde_json::Value) -> anyhow::Result<DomesticDrivingPrivileges> {
-    let privileges: Vec<DomesticDrivingPrivilegePriv> = serde_json::from_value(j)?;
-    privileges
-        .into_iter()
-        .map(DomesticDrivingPrivilege::try_from)
-        .collect()
-}
-
-impl TryFrom<DomesticDrivingPrivilegePriv> for DomesticDrivingPrivilege {
-    type Error = anyhow::Error;
-
-    fn try_from(d: DomesticDrivingPrivilegePriv) -> Result<Self, Self::Error> {
-        Ok(Self {
-            domestic_vehicle_class: d
-                .domestic_vehicle_class
-                .map(TryInto::try_into)
-                .transpose()?,
-            domestic_vehicle_restrictions: d.domestic_vehicle_restrictions.map(NonEmptyVec::into),
-            domestic_vehicle_endorsements: d.domestic_vehicle_endorsements.map(NonEmptyVec::into),
-        })
-    }
-}
-
-impl TryFrom<DomesticVehicleClassPriv> for DomesticVehicleClass {
-    type Error = anyhow::Error;
-
-    fn try_from(d: DomesticVehicleClassPriv) -> Result<Self, Self::Error> {
-        Ok(DomesticVehicleClass {
-            domestic_vehicle_class_code: d.domestic_vehicle_class_code,
-            domestic_vehicle_class_description: d.domestic_vehicle_class_description,
-            issue_date: d.issue_date.map(|s| FullDate::from_str(&s)).transpose()?,
-            expiry_date: d.expiry_date.map(|s| FullDate::from_str(&s)).transpose()?,
-        })
-    }
-}
-
-impl From<DomesticVehicleRestrictionPriv> for DomesticVehicleRestriction {
-    fn from(d: DomesticVehicleRestrictionPriv) -> Self {
-        DomesticVehicleRestriction {
-            domestic_vehicle_restriction_code: d.domestic_vehicle_restriction_code,
-            domestic_vehicle_restriction_description: d.domestic_vehicle_restriction_description,
-        }
-    }
-}
-
-impl From<DomesticVehicleEndorsementPriv> for DomesticVehicleEndorsement {
-    fn from(d: DomesticVehicleEndorsementPriv) -> Self {
-        DomesticVehicleEndorsement {
-            domestic_vehicle_endorsement_code: d.domestic_vehicle_endorsement_code,
-            domestic_vehicle_endorsement_description: d.domestic_vehicle_endorsement_description,
-        }
+        Cbor::Map(map)
     }
 }

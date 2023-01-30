@@ -1,8 +1,6 @@
-use std::{
-    str::FromStr,
-};
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_json::{Value};
+use serde_json::Value;
+use std::str::FromStr;
 
 #[derive(Clone, Debug)]
 pub enum Alpha2 {
@@ -781,9 +779,9 @@ impl FromStr for Alpha2 {
 impl FromJson for Alpha2 {
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
         let value = String::from_json(v)?;
-        value.parse()
+        value
+            .parse()
             .map_err(Into::into)
             .map_err(FromJsonError::Parsing)
     }
 }
-

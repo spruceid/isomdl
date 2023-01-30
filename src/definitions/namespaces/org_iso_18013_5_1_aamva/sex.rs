@@ -3,7 +3,6 @@ use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub enum Sex {
-    NotKnown,
     Male,
     Female,
     NotApplicable,
@@ -18,7 +17,6 @@ pub enum Error {
 impl From<Sex> for u8 {
     fn from(s: Sex) -> u8 {
         match s {
-            Sex::NotKnown => 0,
             Sex::Male => 1,
             Sex::Female => 2,
             Sex::NotApplicable => 9,
@@ -31,7 +29,6 @@ impl TryFrom<u32> for Sex {
 
     fn try_from(u: u32) -> Result<Sex, Error> {
         match u {
-            0 => Ok(Sex::NotKnown),
             1 => Ok(Sex::Male),
             2 => Ok(Sex::Female),
             9 => Ok(Sex::NotApplicable),

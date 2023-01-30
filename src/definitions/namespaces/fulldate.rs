@@ -1,12 +1,10 @@
 use anyhow::Error;
 use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 use std::{fmt, str::FromStr};
 use time::{format_description::FormatItem, macros::format_description, Date};
-use serde_json::Value as Json;
 
-use crate::definitions::{
-    traits::{FromJson, FromJsonError}
-};
+use crate::definitions::traits::{FromJson, FromJsonError};
 
 const FORMAT: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]");
 

@@ -373,7 +373,7 @@ pub mod test {
     use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
     use crate::definitions::namespaces::{
         org_iso_18013_5_1::{Code, DrivingPrivilege, FullDate},
-        org_iso_18013_5_1_aamva as aamva
+        org_iso_18013_5_1_aamva as aamva,
     };
     use crate::definitions::KeyAuthorizations;
     use base64::URL_SAFE_NO_PAD;
