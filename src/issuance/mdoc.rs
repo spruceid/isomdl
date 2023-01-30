@@ -375,6 +375,7 @@ pub mod test {
         org_iso_18013_5_1::{Code, DrivingPrivilege, FullDate},
         org_iso_18013_5_1_aamva as aamva,
     };
+    use crate::definitions::traits::FromJson;
     use crate::definitions::KeyAuthorizations;
     use base64::URL_SAFE_NO_PAD;
     use elliptic_curve::sec1::ToEncodedPoint;
@@ -737,8 +738,11 @@ pub mod test {
             ),
             (
                 "domestic_driving_privileges".to_string().into(),
-                aamva::privileges_from_json(mdl_data.get_mut("org.iso.18013.5.1.aamva.domestic_driving_privileges")
-                    .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.domestic_driving_privileges"))?.take())?
+                aamva::DomesticDrivingPrivileges::from_json(mdl_data.get("org.iso.18013.5.1.aamva.domestic_driving_privileges")
+                                                            .unwrap()
+                )
+                .unwrap()
+                    
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<CborValue>>()

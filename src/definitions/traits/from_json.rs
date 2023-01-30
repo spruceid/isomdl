@@ -23,6 +23,8 @@ pub enum FromJsonError {
     Parsing(#[from] anyhow::Error),
     #[error("expected '{1}', received '{0}'")]
     UnexpectedType(&'static str, &'static str),
+    #[error("{0}: {1}")]
+    WithContext(&'static str, Box<FromJsonError>),
 }
 
 pub trait FromMap: Sized {

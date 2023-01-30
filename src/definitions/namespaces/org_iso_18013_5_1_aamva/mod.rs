@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 mod county_code;
 mod dhs_compliance;
 mod domestic_driving_privileges;
@@ -22,7 +24,6 @@ pub use sex::Sex;
 pub use weight_range::WeightRange;
 
 #[derive(Debug, Clone, FromJson)]
-#[allow(non_snake_case)]
 pub struct OrgIso1801351Aamva {
     pub domestic_driving_privileges: DomesticDrivingPrivileges,
     pub name_suffix: Option<NameSuffix>,

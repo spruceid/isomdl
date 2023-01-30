@@ -63,3 +63,82 @@ pub struct OrgIso1801351 {
     pub given_name_national_character: Option<String>,
     pub signature_usual_mark: Option<ByteStr>,
 }
+
+#[cfg(test)]
+mod test {
+    use crate::definitions::traits::FromJson;
+    use super::*;
+
+    #[test]
+    fn all() {
+        // Missing biometric_template, *_national_character and signature_usual_mark as we need
+        // good examples for these.
+        let json = serde_json::json!({
+          "family_name":"Doe",
+          "given_name":"John",
+          "birth_date":"1980-10-10",
+          "issue_date":"2020-08-10",
+          "expiry_date":"2030-10-30",
+          "issuing_country":"US",
+          "issuing_authority":"CA DMV",
+          "document_number":"I12345678",
+          "portrait":include_str!("../../../../test/issuance/portrait.b64"),
+          "driving_privileges":[
+            {
+               "vehicle_category_code":"A",
+               "issue_date":"2022-08-09",
+               "expiry_date":"2030-10-20"
+            },
+            {
+               "vehicle_category_code":"B",
+               "issue_date":"2022-08-09",
+               "expiry_date":"2030-10-20"
+            }
+          ],
+          "un_distinguishing_sign":"USA",
+          "administrative_number":"ABC123",
+          "sex":1,
+          "height":170,
+          "weight":70,
+          "eye_colour":"hazel",
+          "hair_colour":"red",
+          "birth_place":"California",
+          "resident_address":"2415 1st Avenue",
+          "portrait_capture_date":"2020-08-10T12:00:00Z",
+          "age_in_years":42,
+          "age_birth_year":1980,
+          "age_over_18":true,
+          "age_over_21":true,
+          "issuing_jurisdiction":"US-CA",
+          "nationality":"US",
+          "resident_city":"Sacramento",
+          "resident_state":"California",
+          "resident_postal_code":"95818",
+          "resident_country": "US"
+        });
+
+        let ns = OrgIso1801351::from_json(&json)
+            .unwrap();
+
+        assert!(ns.age_over_xx.get(&('1', '8')).unwrap());
+        assert!(ns.age_over_xx.get(&('2', '1')).unwrap());
+
+        assert!(ns.administrative_number.is_some());
+        assert!(ns.sex.is_some());
+        assert!(ns.height.is_some());
+        assert!(ns.weight.is_some());
+        assert!(ns.eye_colour.is_some());
+        assert!(ns.hair_colour.is_some());
+        assert!(ns.birth_place.is_some());
+        assert!(ns.resident_address.is_some());
+        assert!(ns.portrait_capture_date.is_some());
+        assert!(ns.age_in_years.is_some());
+        assert!(ns.age_birth_year.is_some());
+        assert!(ns.issuing_jurisdiction.is_some());
+        assert!(ns.nationality.is_some());
+        assert!(ns.resident_city.is_some());
+        assert!(ns.resident_state.is_some());
+        assert!(ns.resident_postal_code.is_some());
+        assert!(ns.resident_country.is_some());
+    }
+}

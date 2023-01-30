@@ -1,9 +1,17 @@
 use crate::definitions::traits::{FromJson, FromJsonError, FromMap};
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Deref};
 
 #[derive(Debug, Clone)]
 pub struct AgeOver(BTreeMap<(char, char), bool>);
+
+impl Deref for AgeOver {
+    type Target = BTreeMap<(char, char), bool>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl FromMap for AgeOver {
     fn from_map(m: &Map<String, Value>) -> Result<Self, FromJsonError> {

@@ -1,4 +1,5 @@
 use proc_macro::{self, TokenStream};
+use proc_macro2::{Span};
 use quote::quote;
 use syn::{
     parse_macro_input, Attribute, Data, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed,
@@ -46,23 +47,22 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
          }| {
             // Unwrap safety: this is a struct with named fields, so ident MUST be Some.
             let field = ident.unwrap();
+            let field_str = field.to_string();
             let dynamic_fields = attrs.iter().any(is_dynamic_fields);
 
             let conversion = if !dynamic_fields {
                 quote! {
-                    let value = map.get("#field");
-                    let #field = match <#ty as FJ>::from_json_opt(value) {
+                    let value = map.get(#field_str);
+                    let #field = match <#ty as FromJson>::from_json_opt(value) {
                         Ok(f) => Some(f),
-                        Err(FromJsonError::Multiple(es)) => { errors.extend(es); None },
-                        Err(e) => { errors.push(e); None },
+                        Err(e) => { errors.push(FromJsonError::WithContext(#field_str, Box::new(e))); None },
                     };
                 }
             } else {
                 quote! {
-                    let #field = match <#ty as FromMap>::from_map(&mut map) {
+                    let #field = match <#ty as FromMap>::from_map(&map) {
                         Ok(f) => Some(f),
-                        Err(FromJsonError::Multiple(es)) => { errors.extend(es); None },
-                        Err(e) => { errors.push(e); None },
+                        Err(e) => { errors.push(FromJsonError::WithContext(#field_str, Box::new(e))); None },
                     };
                 }
             };
@@ -77,31 +77,34 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
         },
     );
 
+    let mod_name = Ident::new(&(ident.to_string().to_lowercase() + "_from_json_impl"), Span::call_site());
+
     let output = quote! {
-        {
+        mod #mod_name {
             use serde_json::Value;
-            use crate::definitions::traits::{FromJson as FJ, FromJsonError, FromMap};
-            impl FJ for #ident {
+            use super::*;
+            use crate::definitions::traits::{FromJson, FromJsonError, FromMap};
+            impl FromJson for #ident {
                 fn from_json(value: &Value) -> Result<#ident, FromJsonError> {
-                    let map = match *value {
-                        Value::Object(map) => map,
-                        Value::Null => return Err(FromJsonError::UnexpectedType("null", "object")),
-                        Value::Bool(_) => return Err(FromJsonError::UnexpectedType("boolean", "object")),
-                        Value::Number(_) => return Err(FromJsonError::UnexpectedType("number", "object")),
-                        Value::String(_) => return Err(FromJsonError::UnexpectedType("string", "object")),
-                        Value::Array(_) => return Err(FromJsonError::UnexpectedType("array", "object")),
+                    let map = match value {
+                        &Value::Object(_) => value.as_object().unwrap(),
+                        &Value::Null => return Err(FromJsonError::UnexpectedType("null", "object")),
+                        &Value::Bool(_) => return Err(FromJsonError::UnexpectedType("boolean", "object")),
+                        &Value::Number(_) => return Err(FromJsonError::UnexpectedType("number", "object")),
+                        &Value::String(_) => return Err(FromJsonError::UnexpectedType("string", "object")),
+                        &Value::Array(_) => return Err(FromJsonError::UnexpectedType("array", "object")),
                     };
 
                     let mut errors = vec![];
 
                     #conversions
 
-                    match errors[..] {
-                        [] => return Ok(#ident {
-                                    #fields
-                              }),
-                        [e] => return Err(e),
-                        _ => return Err(FromJsonError::Multiple(errors)),
+                    match errors.len() {
+                        0 => Ok(#ident {
+                                 #fields
+                             }),
+                        1 => Err(errors.pop().unwrap()),
+                        _ => Err(FromJsonError::Multiple(errors)),
                     }
 
                 }
@@ -138,13 +141,16 @@ fn unnamed_fields(ident: Ident, mut input: FieldsUnnamed) -> TokenStream {
         .into();
     }
 
+    let mod_name = Ident::new(&(ident.to_string().to_lowercase() + "_from_json_impl"), Span::call_site());
+
     let output = quote! {
-        {
-            use crate::definitions::traits::{FromJson as FJ, FromJsonError};
+        mod #mod_name {
+            use super::*;
+            use crate::definitions::traits::{FromJson, FromJsonError};
             use serde_json::Value;
-            impl FJ for #ident {
+            impl FromJson for #ident {
                 fn from_json(value: &Value) -> Result<#ident, FromJsonError> {
-                    <#field_type as FJ>::from_json(value)
+                    <#field_type as FromJson>::from_json(value)
                         .map(#ident)
                 }
             }
