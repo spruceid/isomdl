@@ -452,7 +452,7 @@ pub mod test {
     pub fn minimal_test_mdoc() -> anyhow::Result<Mdoc> {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
 
-        let mut mdl_data: serde_json::Value =
+        let mdl_data: serde_json::Value =
             String::from_utf8(base64::decode_config(mdl_data(), base64::URL_SAFE_NO_PAD).unwrap())
                 .unwrap()
                 .parse()
