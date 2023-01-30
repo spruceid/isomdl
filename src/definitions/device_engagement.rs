@@ -84,7 +84,7 @@ pub struct WifiOptions {
     band_info: Option<ByteStr>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct NfcOptions {
     max_len_command_data_field: u64,
@@ -105,6 +105,8 @@ pub enum Error {
     InvalidDeviceEngagement,
     #[error("Invalid WifiOptions found")]
     InvalidWifiOptions,
+    #[error("Invalid NfcOptions found")]
+    InvalidNfcOptions,
     #[error("Malformed object not recognised")]
     Malformed,
     #[error("Something went wrong parsing a cose key")]
@@ -478,8 +480,37 @@ impl From<WifiOptions> for CborValue {
 impl TryFrom<CborValue> for NfcOptions {
     type Error = Error;
 
-    fn try_from(_v: CborValue) -> Result<Self, Error> {
-        todo!()
+    fn try_from(v: CborValue) -> Result<Self, Error> {
+        fn lookup_u64(map: &BTreeMap<CborValue, CborValue>, idx: i128) -> Result<u64, Error> {
+            match map.get(&CborValue::Integer(idx)) {
+                Some(CborValue::Integer(int_val)) => {
+                    let uint_val = u64::try_from(*int_val).map_err(|_| Error::InvalidNfcOptions)?;
+                    Ok(uint_val)
+                }
+                _ => Err(Error::InvalidNfcOptions),
+            }
+        }
+
+        let map: BTreeMap<CborValue, CborValue> = match v {
+            CborValue::Map(map) => Ok(map),
+            _ => Err(Error::InvalidNfcOptions),
+        }?;
+
+        Ok(NfcOptions::default())
+            .and_then(|nfc_opts| {
+                let max_len_command_data_field = lookup_u64(&map, 0)?;
+                Ok(NfcOptions {
+                    max_len_command_data_field,
+                    ..nfc_opts
+                })
+            })
+            .and_then(|nfc_opts| {
+                let max_len_response_data_field = lookup_u64(&map, 1)?;
+                Ok(NfcOptions {
+                    max_len_response_data_field,
+                    ..nfc_opts
+                })
+            })
     }
 }
 
@@ -616,5 +647,51 @@ mod test {
         };
 
         wifi_options_cbor_roundtrip_test(wifi_options);
+    }
+
+    fn nfc_options_cbor_roundtrip_test(nfc_options: NfcOptions) {
+        let bytes: Vec<u8> = serde_cbor::to_vec(&nfc_options).unwrap();
+        let deserialized: NfcOptions = serde_cbor::from_slice(&bytes).unwrap();
+        assert_eq!(nfc_options, deserialized);
+    }
+
+    #[test]
+    fn nfc_options_cbor_roundtrip_zero_command_data() {
+        let nfc_options: NfcOptions = NfcOptions {
+            max_len_command_data_field: 0,
+            max_len_response_data_field: 1024,
+        };
+
+        nfc_options_cbor_roundtrip_test(nfc_options);
+    }
+
+    #[test]
+    fn nfc_options_cbor_roundtrip_zero_response_data() {
+        let nfc_options: NfcOptions = NfcOptions {
+            max_len_command_data_field: 4096,
+            max_len_response_data_field: 0,
+        };
+
+        nfc_options_cbor_roundtrip_test(nfc_options);
+    }
+
+    #[test]
+    fn nfc_options_cbor_roundtrip_zero_all() {
+        let nfc_options: NfcOptions = NfcOptions {
+            max_len_command_data_field: 0,
+            max_len_response_data_field: 0,
+        };
+
+        nfc_options_cbor_roundtrip_test(nfc_options);
+    }
+
+    #[test]
+    fn nfc_options_cbor_roundtrip_zero_none() {
+        let nfc_options: NfcOptions = NfcOptions {
+            max_len_command_data_field: 4096,
+            max_len_response_data_field: 8064,
+        };
+
+        nfc_options_cbor_roundtrip_test(nfc_options);
     }
 }
