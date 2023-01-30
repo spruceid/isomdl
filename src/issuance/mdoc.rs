@@ -742,7 +742,6 @@ pub mod test {
                                                             .unwrap()
                 )
                 .unwrap()
-                    
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<CborValue>>()

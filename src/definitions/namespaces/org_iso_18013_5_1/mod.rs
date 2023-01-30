@@ -66,8 +66,8 @@ pub struct OrgIso1801351 {
 
 #[cfg(test)]
 mod test {
-    use crate::definitions::traits::FromJson;
     use super::*;
+    use crate::definitions::traits::FromJson;
 
     #[test]
     fn all() {
@@ -117,8 +117,7 @@ mod test {
           "resident_country": "US"
         });
 
-        let ns = OrgIso1801351::from_json(&json)
-            .unwrap();
+        let ns = OrgIso1801351::from_json(&json).unwrap();
 
         assert!(ns.age_over_xx.get(&('1', '8')).unwrap());
         assert!(ns.age_over_xx.get(&('2', '1')).unwrap());

@@ -1,7 +1,7 @@
 use super::FullDate;
 use crate::definitions::helpers::NonEmptyVec;
 use serde_cbor::Value as Cbor;
-use std::{collections::BTreeMap};
+use std::collections::BTreeMap;
 
 pub type DomesticDrivingPrivileges = Vec<DomesticDrivingPrivilege>;
 

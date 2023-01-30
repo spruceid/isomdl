@@ -44,8 +44,8 @@ pub struct OrgIso1801351Aamva {
 
 #[cfg(test)]
 mod test {
-    use crate::definitions::traits::FromJson;
     use super::*;
+    use crate::definitions::traits::FromJson;
 
     #[test]
     fn all() {
@@ -84,8 +84,7 @@ mod test {
           "sex":2
         });
 
-        let ns = OrgIso1801351Aamva::from_json(&json)
-            .unwrap();
+        let ns = OrgIso1801351Aamva::from_json(&json).unwrap();
 
         assert!(ns.name_suffix.is_some());
         assert!(ns.organ_donor.is_some());
