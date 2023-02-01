@@ -1,6 +1,7 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 
+/// United Nations Distinguishing Sign, as per ISO/IEC 18013-1:2018 Annex F.
 #[derive(Clone, Debug)]
 pub enum UNDistinguishingSign {
     A,

@@ -2,6 +2,7 @@ use crate::definitions::traits::{FromJson, FromJsonError, FromMap};
 use serde_json::{Map, Value};
 use std::{collections::BTreeMap, ops::Deref};
 
+/// `age_over_xx` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
 pub struct AgeOver(BTreeMap<(char, char), bool>);
 

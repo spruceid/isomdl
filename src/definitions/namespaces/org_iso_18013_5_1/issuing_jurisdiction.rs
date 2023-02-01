@@ -4,6 +4,7 @@ use crate::definitions::{
 };
 use serde_json::{Map, Value};
 
+/// `issuing_jurisdiction` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
 pub struct IssuingJurisdiction(String);
 

@@ -25,6 +25,7 @@ pub use un_distinguishing_sign::UNDistinguishingSign;
 use crate::definitions::helpers::ByteStr;
 use macros::FromJson;
 
+/// The `org.iso.18013.5.1` namespace.
 #[derive(Debug, Clone, FromJson)]
 pub struct OrgIso1801351 {
     pub family_name: Latin1,

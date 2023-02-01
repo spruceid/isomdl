@@ -1,6 +1,8 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 
+/// `weight_range` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
+/// Guidelines (Version 1.0).
 #[derive(Debug, Clone)]
 pub enum WeightRange {
     Zero,

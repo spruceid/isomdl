@@ -4,6 +4,8 @@ use macros::FromJson;
 use serde_cbor::Value as Cbor;
 use std::collections::BTreeMap;
 
+/// `domestic_driving_privileges` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
+/// Guidelines (Version 1.0).
 pub type DomesticDrivingPrivileges = Vec<DomesticDrivingPrivilege>;
 
 #[derive(Clone, Debug, FromJson)]

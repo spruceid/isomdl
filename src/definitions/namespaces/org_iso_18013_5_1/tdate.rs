@@ -5,9 +5,11 @@ use anyhow::anyhow;
 use serde_json::Value;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
+/// `tdate` as per RFC8610 and restrictions in 18013-5.
 #[derive(Debug, Clone)]
 pub struct TDate(String);
 
+/// `tdate` or `full-date`.
 #[derive(Debug, Clone)]
 pub enum TDateOrFullDate {
     TDate(TDate),

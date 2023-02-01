@@ -2,6 +2,7 @@ use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 use std::str::FromStr;
 
+/// `eye_colour` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
 pub enum EyeColour {
     Black,

@@ -1,6 +1,7 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 
+/// `sex` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
 pub enum Sex {
     NotKnown,

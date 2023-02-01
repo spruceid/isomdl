@@ -2,6 +2,8 @@ use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 use std::str::FromStr;
 
+/// `name_truncation` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
+/// Guidelines (Version 1.0).
 #[derive(Debug, Clone)]
 pub enum NameTruncation {
     Truncated,

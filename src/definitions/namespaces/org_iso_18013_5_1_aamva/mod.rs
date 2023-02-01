@@ -25,6 +25,8 @@ pub use weight_range::WeightRange;
 
 use macros::FromJson;
 
+/// `org.iso.18013.5.1.aamva` namespace, as per the AAMVA mDL Implementation
+/// Guidelines (Version 1.0).
 #[derive(Debug, Clone, FromJson)]
 pub struct OrgIso1801351Aamva {
     pub domestic_driving_privileges: DomesticDrivingPrivileges,

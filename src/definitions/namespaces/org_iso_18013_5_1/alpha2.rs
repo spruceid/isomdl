@@ -2,6 +2,7 @@ use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value;
 use std::str::FromStr;
 
+/// ISO 3166-1 alpha-2 country code.
 #[derive(Clone, Debug)]
 pub enum Alpha2 {
     AD,

@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 // TODO: Obtain a licence for ISO/IEC 19785-3:2020, as Table 7 in that standard contains the list
 // of all biometric templates.
 
+/// `biometric_template_xx` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
 pub struct BiometricTemplate(BTreeMap<String, ByteStr>);
 

@@ -4,6 +4,7 @@ use macros::FromJson;
 use serde_cbor::Value as Cbor;
 use std::collections::BTreeMap;
 
+/// `driving_privileges` in the org.iso.18013.5.1 namespace.
 pub type DrivingPrivileges = Vec<DrivingPrivilege>;
 
 #[derive(Clone, Debug, FromJson)]
