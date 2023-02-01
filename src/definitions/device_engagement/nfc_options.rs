@@ -110,18 +110,10 @@ macro_rules! command_data_length_try_from {
     }
 }
 
-// Bear in mind, that even something like u16 can fail in a conversion, because the value may
-// be too small.
-//
-// i8 is omitted because it cannot represent the minimum value of 255
-// u8 has a maximum value of 255, which is the minmum value a CommandDataLength may contain, so
-// it is included.
 command_data_length_try_from! {
-    CommandDataLength(i16);
     CommandDataLength(i32);
     CommandDataLength(i64);
     CommandDataLength(i128);
-    CommandDataLength(u8);
     CommandDataLength(u16);
     CommandDataLength(u32);
     CommandDataLength(u64);
@@ -188,16 +180,9 @@ macro_rules! response_data_length_try_from {
     }
 }
 
-// Bear in mind, that even something like u16 can fail in a conversion, because the value may
-// be too small.
-//
-// i8 and u8 are omitted because they cannot represent the minimum value of 256
 response_data_length_try_from! {
-    ResponseDataLength(i16);
-    ResponseDataLength(i32);
     ResponseDataLength(i64);
     ResponseDataLength(i128);
-    ResponseDataLength(u16);
     ResponseDataLength(u32);
     ResponseDataLength(u64);
     ResponseDataLength(u128);
