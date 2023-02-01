@@ -23,6 +23,7 @@ pub use tdate::{TDate, TDateOrFullDate};
 pub use un_distinguishing_sign::UNDistinguishingSign;
 
 use crate::definitions::helpers::ByteStr;
+use macros::FromJson;
 
 #[derive(Debug, Clone, FromJson)]
 pub struct OrgIso1801351 {

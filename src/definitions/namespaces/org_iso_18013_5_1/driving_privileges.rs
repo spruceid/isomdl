@@ -1,5 +1,6 @@
 use super::FullDate;
 use crate::definitions::helpers::NonEmptyVec;
+use macros::FromJson;
 use serde_cbor::Value as Cbor;
 use std::collections::BTreeMap;
 

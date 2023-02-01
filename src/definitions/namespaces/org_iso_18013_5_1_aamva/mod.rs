@@ -23,6 +23,8 @@ pub use race_and_ethnicity::RaceAndEthnicity;
 pub use sex::Sex;
 pub use weight_range::WeightRange;
 
+use macros::FromJson;
+
 #[derive(Debug, Clone, FromJson)]
 pub struct OrgIso1801351Aamva {
     pub domestic_driving_privileges: DomesticDrivingPrivileges,
