@@ -12,7 +12,7 @@ pub struct Age(char, char);
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     #[error("{0} is greater than the maximum age of 99")]
-    TooLarge(u8)
+    TooLarge(u8),
 }
 
 impl TryFrom<u8> for Age {
@@ -20,7 +20,7 @@ impl TryFrom<u8> for Age {
 
     fn try_from(u: u8) -> Result<Age, Error> {
         let s = format!("{:0>2}", u);
-        to_age(&s).ok_or_else(|| Error::TooLarge(u))
+        to_age(&s).ok_or(Error::TooLarge(u))
     }
 }
 
@@ -61,15 +61,14 @@ fn to_age(s: &str) -> Option<Age> {
     Some(Age(first, second))
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn parsing() {
-        assert!(Age::try_from(1).unwrap() == Age('0','1'));
-        assert!(Age::try_from(99).unwrap() == Age('9','9'));
+        assert!(Age::try_from(1).unwrap() == Age('0', '1'));
+        assert!(Age::try_from(99).unwrap() == Age('9', '9'));
         assert!(Age::try_from(100).is_err());
     }
 
