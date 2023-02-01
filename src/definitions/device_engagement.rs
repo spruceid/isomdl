@@ -1,14 +1,17 @@
-use crate::definitions::device_key::cose_key::Error as CoseKeyError;
-use crate::definitions::helpers::tag24::Error as Tag24Error;
 use crate::definitions::helpers::Tag24;
 use crate::definitions::helpers::{ByteStr, NonEmptyVec};
 use crate::definitions::CoseKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Error as SerdeCborError;
 use serde_cbor::Value as CborValue;
 use std::{collections::BTreeMap, vec};
 use uuid::Uuid;
+
+pub mod error;
+pub use error::Error;
+
+pub mod nfc_options;
+pub use nfc_options::NfcOptions;
 
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
@@ -82,57 +85,6 @@ pub struct WifiOptions {
     channel_info_channel_number: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     band_info: Option<ByteStr>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(try_from = "CborValue", into = "CborValue")]
-pub struct NfcOptions {
-    max_len_command_data_field: u64,
-    max_len_response_data_field: u64,
-}
-
-// TODO: Add more context to errors.
-/// Errors that can occur when deserialising a DeviceEngagement.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum Error {
-    #[error("Expected isomdl version 1.0")]
-    UnsupportedVersion,
-    #[error("Unsupported device retrieval method")]
-    UnsupportedDRM,
-    #[error("Unimplemented BLE option")]
-    Unimplemented,
-    #[error("Invalid DeviceEngagment found")]
-    InvalidDeviceEngagement,
-    #[error("Invalid WifiOptions found")]
-    InvalidWifiOptions,
-    #[error("Invalid NfcOptions found")]
-    InvalidNfcOptions,
-    #[error("Malformed object not recognised")]
-    Malformed,
-    #[error("Something went wrong parsing a cose key")]
-    CoseKeyError,
-    #[error("Something went wrong parsing a tag24")]
-    Tag24Error,
-    #[error("Could not deserialize from cbor")]
-    SerdeCborError,
-}
-
-impl From<CoseKeyError> for Error {
-    fn from(_: CoseKeyError) -> Self {
-        Error::CoseKeyError
-    }
-}
-
-impl From<Tag24Error> for Error {
-    fn from(_: Tag24Error) -> Self {
-        Error::Tag24Error
-    }
-}
-
-impl From<SerdeCborError> for Error {
-    fn from(_: SerdeCborError) -> Self {
-        Error::SerdeCborError
-    }
 }
 
 impl From<DeviceEngagement> for CborValue {
@@ -477,59 +429,6 @@ impl From<WifiOptions> for CborValue {
     }
 }
 
-impl TryFrom<CborValue> for NfcOptions {
-    type Error = Error;
-
-    fn try_from(v: CborValue) -> Result<Self, Error> {
-        fn lookup_u64(map: &BTreeMap<CborValue, CborValue>, idx: i128) -> Result<u64, Error> {
-            match map.get(&CborValue::Integer(idx)) {
-                Some(CborValue::Integer(int_val)) => {
-                    let uint_val = u64::try_from(*int_val).map_err(|_| Error::InvalidNfcOptions)?;
-                    Ok(uint_val)
-                }
-                _ => Err(Error::InvalidNfcOptions),
-            }
-        }
-
-        let map: BTreeMap<CborValue, CborValue> = match v {
-            CborValue::Map(map) => Ok(map),
-            _ => Err(Error::InvalidNfcOptions),
-        }?;
-
-        Ok(NfcOptions::default())
-            .and_then(|nfc_opts| {
-                let max_len_command_data_field = lookup_u64(&map, 0)?;
-                Ok(NfcOptions {
-                    max_len_command_data_field,
-                    ..nfc_opts
-                })
-            })
-            .and_then(|nfc_opts| {
-                let max_len_response_data_field = lookup_u64(&map, 1)?;
-                Ok(NfcOptions {
-                    max_len_response_data_field,
-                    ..nfc_opts
-                })
-            })
-    }
-}
-
-impl From<NfcOptions> for CborValue {
-    fn from(o: NfcOptions) -> CborValue {
-        let mut map = BTreeMap::<CborValue, CborValue>::new();
-        map.insert(
-            CborValue::Integer(0),
-            CborValue::Integer(o.max_len_command_data_field.into()),
-        );
-        map.insert(
-            CborValue::Integer(1),
-            CborValue::Integer(o.max_len_response_data_field.into()),
-        );
-
-        CborValue::Map(map)
-    }
-}
-
 impl From<ServerRetrievalMethods> for CborValue {
     fn from(m: ServerRetrievalMethods) -> CborValue {
         let mut map = BTreeMap::<CborValue, CborValue>::new();
@@ -647,51 +546,5 @@ mod test {
         };
 
         wifi_options_cbor_roundtrip_test(wifi_options);
-    }
-
-    fn nfc_options_cbor_roundtrip_test(nfc_options: NfcOptions) {
-        let bytes: Vec<u8> = serde_cbor::to_vec(&nfc_options).unwrap();
-        let deserialized: NfcOptions = serde_cbor::from_slice(&bytes).unwrap();
-        assert_eq!(nfc_options, deserialized);
-    }
-
-    #[test]
-    fn nfc_options_cbor_roundtrip_zero_command_data() {
-        let nfc_options: NfcOptions = NfcOptions {
-            max_len_command_data_field: 0,
-            max_len_response_data_field: 1024,
-        };
-
-        nfc_options_cbor_roundtrip_test(nfc_options);
-    }
-
-    #[test]
-    fn nfc_options_cbor_roundtrip_zero_response_data() {
-        let nfc_options: NfcOptions = NfcOptions {
-            max_len_command_data_field: 4096,
-            max_len_response_data_field: 0,
-        };
-
-        nfc_options_cbor_roundtrip_test(nfc_options);
-    }
-
-    #[test]
-    fn nfc_options_cbor_roundtrip_zero_all() {
-        let nfc_options: NfcOptions = NfcOptions {
-            max_len_command_data_field: 0,
-            max_len_response_data_field: 0,
-        };
-
-        nfc_options_cbor_roundtrip_test(nfc_options);
-    }
-
-    #[test]
-    fn nfc_options_cbor_roundtrip_zero_none() {
-        let nfc_options: NfcOptions = NfcOptions {
-            max_len_command_data_field: 4096,
-            max_len_response_data_field: 8064,
-        };
-
-        nfc_options_cbor_roundtrip_test(nfc_options);
     }
 }
