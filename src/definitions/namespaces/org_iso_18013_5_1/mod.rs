@@ -121,8 +121,8 @@ mod test {
 
         let ns = OrgIso1801351::from_json(&json).unwrap();
 
-        assert!(ns.age_over_xx.get(&('1', '8')).unwrap());
-        assert!(ns.age_over_xx.get(&('2', '1')).unwrap());
+        assert!(ns.age_over_xx.get(&18.try_into().unwrap()).unwrap());
+        assert!(ns.age_over_xx.get(&21.try_into().unwrap()).unwrap());
 
         assert!(ns.administrative_number.is_some());
         assert!(ns.sex.is_some());

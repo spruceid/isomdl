@@ -4,10 +4,28 @@ use std::{collections::BTreeMap, ops::Deref};
 
 /// `age_over_xx` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
-pub struct AgeOver(BTreeMap<(char, char), bool>);
+pub struct AgeOver(BTreeMap<Age, bool>);
+
+#[derive(Debug, Clone, Ord, Eq, PartialOrd, PartialEq)]
+pub struct Age(char, char);
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum Error {
+    #[error("{0} is greater than the maximum age of 99")]
+    TooLarge(u8)
+}
+
+impl TryFrom<u8> for Age {
+    type Error = Error;
+
+    fn try_from(u: u8) -> Result<Age, Error> {
+        let s = format!("{:0>2}", u);
+        to_age(&s).ok_or_else(|| Error::TooLarge(u))
+    }
+}
 
 impl Deref for AgeOver {
-    type Target = BTreeMap<(char, char), bool>;
+    type Target = BTreeMap<Age, bool>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -19,7 +37,7 @@ impl FromMap for AgeOver {
         m.iter()
             .filter_map(|(k, v)| {
                 k.strip_prefix("age_over_")
-                    .and_then(to_double_digits)
+                    .and_then(to_age)
                     .map(|k| Ok((k, bool::from_json(v)?)))
             })
             .collect::<Result<_, _>>()
@@ -27,7 +45,7 @@ impl FromMap for AgeOver {
     }
 }
 
-fn to_double_digits(s: &str) -> Option<(char, char)> {
+fn to_age(s: &str) -> Option<Age> {
     let mut chars = s.chars();
     let first = match chars.next() {
         Some(d @ '0'..='9') => d,
@@ -40,5 +58,24 @@ fn to_double_digits(s: &str) -> Option<(char, char)> {
     if chars.next().is_some() {
         return None;
     }
-    Some((first, second))
+    Some(Age(first, second))
+}
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parsing() {
+        assert!(Age::try_from(1).unwrap() == Age('0','1'));
+        assert!(Age::try_from(99).unwrap() == Age('9','9'));
+        assert!(Age::try_from(100).is_err());
+    }
+
+    #[test]
+    fn cmp() {
+        assert!(Age::try_from(1).unwrap() < Age::try_from(2).unwrap());
+        assert!(Age::try_from(9).unwrap() < Age::try_from(10).unwrap());
+    }
 }
