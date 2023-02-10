@@ -3,10 +3,10 @@ use proc_macro2::{Span};
 use quote::quote;
 use syn::{
     parse_macro_input, Attribute, Data, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed,
-    Ident,
+    Ident, NestedMeta, Lit, Meta
 };
 
-#[proc_macro_derive(FromJson, attributes(dynamic_fields))]
+#[proc_macro_derive(FromJson, attributes(dynamic_fields, rename))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput { ident, data, .. } = parse_macro_input!(input);
     let struct_data = match data {
@@ -47,8 +47,11 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
          }| {
             // Unwrap safety: this is a struct with named fields, so ident MUST be Some.
             let field = ident.unwrap();
-            let field_str = field.to_string();
+            let mut field_str = field.to_string();
             let dynamic_fields = attrs.iter().any(is_dynamic_fields);
+            if let Some(rename) = attrs.iter().filter_map(rename).next() {
+                field_str = rename;
+            }
 
             let conversion = if !dynamic_fields {
                 quote! {
@@ -122,6 +125,23 @@ fn is_dynamic_fields(attr: &Attribute) -> bool {
     };
 
     meta.path().is_ident("dynamic_fields")
+}
+
+fn rename(attr: &Attribute) -> Option<String> {
+    match attr.parse_meta().ok()? {
+        Meta::List(ml) => {
+            if !ml.path.is_ident("rename") {
+                return None
+            }
+            let nested = ml.nested;
+            if let NestedMeta::Lit(Lit::Str(s)) = nested.first()? {
+		Some(s.value())
+            } else {
+                None
+            }
+        },
+        _ => None
+    }
 }
 
 fn unnamed_fields(ident: Ident, mut input: FieldsUnnamed) -> TokenStream {

@@ -19,7 +19,7 @@ impl TryFrom<u8> for Age {
     type Error = Error;
 
     fn try_from(u: u8) -> Result<Age, Error> {
-        let s = format!("{:0>2}", u);
+        let s = format!("{u:0>2}");
         to_age(&s).ok_or(Error::TooLarge(u))
     }
 }
