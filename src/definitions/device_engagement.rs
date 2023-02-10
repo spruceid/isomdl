@@ -1,14 +1,17 @@
-use crate::definitions::device_key::cose_key::Error as CoseKeyError;
-use crate::definitions::helpers::tag24::Error as Tag24Error;
 use crate::definitions::helpers::Tag24;
 use crate::definitions::helpers::{ByteStr, NonEmptyVec};
 use crate::definitions::CoseKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Error as SerdeCborError;
 use serde_cbor::Value as CborValue;
 use std::{collections::BTreeMap, vec};
 use uuid::Uuid;
+
+pub mod error;
+pub use error::Error;
+
+pub mod nfc_options;
+pub use nfc_options::NfcOptions;
 
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
@@ -82,55 +85,6 @@ pub struct WifiOptions {
     channel_info_channel_number: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     band_info: Option<ByteStr>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "CborValue", into = "CborValue")]
-pub struct NfcOptions {
-    max_len_command_data_field: u64,
-    max_len_response_data_field: u64,
-}
-
-// TODO: Add more context to errors.
-/// Errors that can occur when deserialising a DeviceEngagement.
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum Error {
-    #[error("Expected isomdl version 1.0")]
-    UnsupportedVersion,
-    #[error("Unsupported device retrieval method")]
-    UnsupportedDRM,
-    #[error("Unimplemented BLE option")]
-    Unimplemented,
-    #[error("Invalid DeviceEngagment found")]
-    InvalidDeviceEngagement,
-    #[error("Invalid WifiOptions found")]
-    InvalidWifiOptions,
-    #[error("Malformed object not recognised")]
-    Malformed,
-    #[error("Something went wrong parsing a cose key")]
-    CoseKeyError,
-    #[error("Something went wrong parsing a tag24")]
-    Tag24Error,
-    #[error("Could not deserialize from cbor")]
-    SerdeCborError,
-}
-
-impl From<CoseKeyError> for Error {
-    fn from(_: CoseKeyError) -> Self {
-        Error::CoseKeyError
-    }
-}
-
-impl From<Tag24Error> for Error {
-    fn from(_: Tag24Error) -> Self {
-        Error::Tag24Error
-    }
-}
-
-impl From<SerdeCborError> for Error {
-    fn from(_: SerdeCborError) -> Self {
-        Error::SerdeCborError
-    }
 }
 
 impl From<DeviceEngagement> for CborValue {
@@ -470,30 +424,6 @@ impl From<WifiOptions> for CborValue {
         if let Some(v) = o.band_info {
             map.insert(CborValue::Integer(3), v.into());
         }
-
-        CborValue::Map(map)
-    }
-}
-
-impl TryFrom<CborValue> for NfcOptions {
-    type Error = Error;
-
-    fn try_from(_v: CborValue) -> Result<Self, Error> {
-        todo!()
-    }
-}
-
-impl From<NfcOptions> for CborValue {
-    fn from(o: NfcOptions) -> CborValue {
-        let mut map = BTreeMap::<CborValue, CborValue>::new();
-        map.insert(
-            CborValue::Integer(0),
-            CborValue::Integer(o.max_len_command_data_field.into()),
-        );
-        map.insert(
-            CborValue::Integer(1),
-            CborValue::Integer(o.max_len_response_data_field.into()),
-        );
 
         CborValue::Map(map)
     }
