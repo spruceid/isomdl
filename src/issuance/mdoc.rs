@@ -371,9 +371,11 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 pub mod test {
     use super::*;
     use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
-    use crate::definitions::fulldate::FullDate;
-    use crate::definitions::org_iso_18013_5_1::{Code, DrivingPrivilege};
-    use crate::definitions::org_iso_18013_5_1_aamva::{self as aamva};
+    use crate::definitions::namespaces::{
+        org_iso_18013_5_1::{Code, DrivingPrivilege, FullDate},
+        org_iso_18013_5_1_aamva as aamva,
+    };
+    use crate::definitions::traits::FromJson;
     use crate::definitions::KeyAuthorizations;
     use base64::URL_SAFE_NO_PAD;
     use elliptic_curve::sec1::ToEncodedPoint;
@@ -450,7 +452,7 @@ pub mod test {
     pub fn minimal_test_mdoc() -> anyhow::Result<Mdoc> {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
 
-        let mut mdl_data: serde_json::Value =
+        let mdl_data: serde_json::Value =
             String::from_utf8(base64::decode_config(mdl_data(), base64::URL_SAFE_NO_PAD).unwrap())
                 .unwrap()
                 .parse()
@@ -736,8 +738,10 @@ pub mod test {
             ),
             (
                 "domestic_driving_privileges".to_string().into(),
-                aamva::privileges_from_json(mdl_data.get_mut("org.iso.18013.5.1.aamva.domestic_driving_privileges")
-                    .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.domestic_driving_privileges"))?.take())?
+                aamva::DomesticDrivingPrivileges::from_json(mdl_data.get("org.iso.18013.5.1.aamva.domestic_driving_privileges")
+                                                            .unwrap()
+                )
+                .unwrap()
                     .into_iter()
                     .map(Into::into)
                     .collect::<Vec<CborValue>>()
