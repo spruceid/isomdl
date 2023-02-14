@@ -1,65 +1,38 @@
 use super::FullDate;
-use crate::definitions::helpers::NonEmptyVec;
-use macros::FromJson;
+use crate::definitions::{traits::ToCbor, helpers::NonEmptyVec};
+use macros::{FromJson, ToCbor};
 use serde_cbor::Value as Cbor;
-use std::collections::BTreeMap;
 
 /// `driving_privileges` in the org.iso.18013.5.1 namespace.
-pub type DrivingPrivileges = Vec<DrivingPrivilege>;
-
 #[derive(Clone, Debug, FromJson)]
+pub struct DrivingPrivileges(Vec<DrivingPrivilege>);
+
+impl From<DrivingPrivileges> for Cbor {
+    fn from(d: DrivingPrivileges) -> Cbor {
+        Cbor::Array(d.0.into_iter().map(ToCbor::to_cbor).collect())
+    }
+}
+
+#[derive(Clone, Debug, FromJson, ToCbor)]
 pub struct DrivingPrivilege {
     pub vehicle_category_code: String,
     pub issue_date: Option<FullDate>,
     pub expiry_date: Option<FullDate>,
-    pub codes: Option<NonEmptyVec<Code>>,
+    pub codes: Option<Codes>,
 }
 
 #[derive(Clone, Debug, FromJson)]
+pub struct Codes(NonEmptyVec<Code>);
+
+impl From<Codes> for Cbor {
+    fn from(c: Codes) -> Cbor {
+        Cbor::Array(c.0.into_inner().into_iter().map(ToCbor::to_cbor).collect())
+    }
+}
+
+#[derive(Clone, Debug, FromJson, ToCbor)]
 pub struct Code {
     pub code: String,
     pub sign: Option<String>,
     pub value: Option<String>,
-}
-
-impl From<DrivingPrivilege> for Cbor {
-    fn from(d: DrivingPrivilege) -> Cbor {
-        let mut map = BTreeMap::new();
-        map.insert(
-            "vehicle_category_code".to_string().into(),
-            d.vehicle_category_code.into(),
-        );
-        if let Some(issue_date) = d.issue_date {
-            map.insert("issue_date".to_string().into(), issue_date.into());
-        }
-        if let Some(expiry_date) = d.expiry_date {
-            map.insert("expiry_date".to_string().into(), expiry_date.into());
-        }
-        if let Some(codes) = d.codes {
-            map.insert(
-                "codes".to_string().into(),
-                codes
-                    .into_inner()
-                    .into_iter()
-                    .map(Cbor::from)
-                    .collect::<Vec<Cbor>>()
-                    .into(),
-            );
-        }
-        Cbor::Map(map)
-    }
-}
-
-impl From<Code> for Cbor {
-    fn from(c: Code) -> Cbor {
-        let mut map = BTreeMap::new();
-        map.insert("code".to_string().into(), c.code.into());
-        if let Some(sign) = c.sign {
-            map.insert("sign".to_string().into(), sign.into());
-        }
-        if let Some(value) = c.value {
-            map.insert("value".to_string().into(), value.into());
-        }
-        Cbor::Map(map)
-    }
 }

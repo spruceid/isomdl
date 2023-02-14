@@ -23,10 +23,10 @@ pub use tdate::{TDate, TDateOrFullDate};
 pub use un_distinguishing_sign::UNDistinguishingSign;
 
 use crate::definitions::helpers::ByteStr;
-use macros::FromJson;
+use macros::{ToCbor, FromJson};
 
 /// The `org.iso.18013.5.1` namespace.
-#[derive(Debug, Clone, FromJson)]
+#[derive(Debug, Clone, FromJson, ToCbor)]
 pub struct OrgIso1801351 {
     pub family_name: Latin1,
     pub given_name: Latin1,
@@ -50,16 +50,16 @@ pub struct OrgIso1801351 {
     pub portrait_capture_date: Option<TDate>,
     pub age_in_years: Option<u32>,
     pub age_birth_year: Option<u32>,
-    #[dynamic_fields]
+    #[many]
     pub age_over_xx: AgeOver,
-    #[dynamic_fields]
+    #[dynamic_parse]
     pub issuing_jurisdiction: Option<IssuingJurisdiction>,
     pub nationality: Option<Alpha2>,
     pub resident_city: Option<Latin1>,
     pub resident_state: Option<Latin1>,
     pub resident_postal_code: Option<Latin1>,
     pub resident_country: Option<Alpha2>,
-    #[dynamic_fields]
+    #[many]
     pub biometric_template_xx: BiometricTemplate,
     pub family_name_national_character: Option<String>,
     pub given_name_national_character: Option<String>,

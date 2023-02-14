@@ -27,7 +27,7 @@ pub enum FromJsonError {
     WithContext(&'static str, Box<FromJsonError>),
 }
 
-pub trait FromMap: Sized {
+pub trait FromJsonMap: Sized {
     fn from_map(m: &Map<String, Value>) -> Result<Self, FromJsonError>;
 }
 
@@ -129,7 +129,7 @@ where
     }
 }
 
-impl<T> FromMap for BTreeMap<String, T>
+impl<T> FromJsonMap for BTreeMap<String, T>
 where
     T: FromJson,
 {
@@ -140,9 +140,9 @@ where
     }
 }
 
-impl<T> FromMap for Option<T>
+impl<T> FromJsonMap for Option<T>
 where
-    T: FromMap,
+    T: FromJsonMap,
 {
     fn from_map(v: &Map<String, Value>) -> Result<Self, FromJsonError> {
         match T::from_map(v) {

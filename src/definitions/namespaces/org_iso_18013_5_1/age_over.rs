@@ -1,5 +1,6 @@
-use crate::definitions::traits::{FromJson, FromJsonError, FromMap};
-use serde_json::{Map, Value};
+use crate::definitions::traits::{FromJson, FromJsonError, FromJsonMap, ToCborMap};
+use serde_cbor::Value as Cbor;
+use serde_json::{Map, Value as Json};
 use std::{collections::BTreeMap, ops::Deref};
 
 /// `age_over_xx` in the org.iso.18013.5.1 namespace.
@@ -32,8 +33,8 @@ impl Deref for AgeOver {
     }
 }
 
-impl FromMap for AgeOver {
-    fn from_map(m: &Map<String, Value>) -> Result<Self, FromJsonError> {
+impl FromJsonMap for AgeOver {
+    fn from_map(m: &Map<String, Json>) -> Result<Self, FromJsonError> {
         m.iter()
             .filter_map(|(k, v)| {
                 k.strip_prefix("age_over_")
@@ -42,6 +43,14 @@ impl FromMap for AgeOver {
             })
             .collect::<Result<_, _>>()
             .map(Self)
+    }
+}
+
+impl ToCborMap for AgeOver {
+    fn to_map(self) -> BTreeMap<Cbor, Cbor> {
+        self.0.into_iter()
+            .map(|(Age(x,y), v)| (format!("age_over_{x}{y}").into(), v.into()))
+            .collect()
     }
 }
 
