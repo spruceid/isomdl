@@ -1,5 +1,6 @@
-use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_json::Value;
+use crate::definitions::traits::{ToCbor, FromJson, FromJsonError};
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 use std::str::FromStr;
 
 /// `name_suffix` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
@@ -61,6 +62,12 @@ impl NameSuffix {
     }
 }
 
+impl ToCbor for NameSuffix {
+    fn to_cbor(self) -> Cbor {
+        self.to_str().to_string().into()
+    }
+}
+
 impl FromStr for NameSuffix {
     type Err = Error;
 
@@ -92,7 +99,7 @@ impl FromStr for NameSuffix {
 }
 
 impl FromJson for NameSuffix {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         String::from_json(v)?
             .parse()
             .map_err(Into::into)

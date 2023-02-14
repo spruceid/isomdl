@@ -21,11 +21,11 @@ pub use race_and_ethnicity::RaceAndEthnicity;
 pub use sex::Sex;
 pub use weight_range::WeightRange;
 
-use macros::FromJson;
+use macros::{FromJson, ToCbor};
 
 /// `org.iso.18013.5.1.aamva` namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.2).
-#[derive(Debug, Clone, FromJson)]
+#[derive(Debug, Clone, FromJson, ToCbor)]
 pub struct OrgIso1801351Aamva {
     pub domestic_driving_privileges: DomesticDrivingPrivileges,
     pub name_suffix: Option<NameSuffix>,

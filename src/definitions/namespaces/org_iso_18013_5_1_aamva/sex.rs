@@ -1,5 +1,6 @@
-use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_json::Value;
+use crate::definitions::traits::{ToCbor, FromJson, FromJsonError};
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 
 /// `sex` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.0).
@@ -26,6 +27,12 @@ impl From<Sex> for u8 {
     }
 }
 
+impl ToCbor for Sex {
+    fn to_cbor(self) -> Cbor {
+        u8::from(self).into()
+    }
+}
+
 impl TryFrom<u32> for Sex {
     type Error = Error;
 
@@ -40,7 +47,7 @@ impl TryFrom<u32> for Sex {
 }
 
 impl FromJson for Sex {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         u32::from_json(v)?
             .try_into()
             .map_err(Into::into)

@@ -1,3 +1,6 @@
+//! ToCbor is specifically NOT implemented for Vec<T> where T: ToCbor, as Vec<u8> likely should be
+//! represented as a bytestr instead of an array in cbor.
+
 use serde_cbor::Value;
 use std::collections::BTreeMap;
 
@@ -31,12 +34,12 @@ where
 
 impl<K, V> ToCborMap for BTreeMap<K,V>
 where
-    K: Into<Value>,
-    V: Into<Value>
+    K: ToCbor,
+    V: ToCbor
 {
     fn to_map(self) -> BTreeMap<Value, Value> {
         self.into_iter()
-            .map(|(k,v)| (k.into(), v.into()))
+            .map(|(k,v)| (k.to_cbor(), v.to_cbor()))
             .collect()
     }
 }
