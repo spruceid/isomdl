@@ -1,8 +1,8 @@
 use crate::definitions::{
     helpers::ByteStr,
-    traits::{FromJson, FromJsonError, FromJsonMap, ToCborMap},
+    traits::{FromJson, FromJsonError, FromJsonMap, ToNamespaceMap},
 };
-use serde_cbor::{Value as Cbor};
+use serde_cbor::Value as Cbor;
 use serde_json::{Map, Value as Json};
 use std::collections::BTreeMap;
 
@@ -25,10 +25,11 @@ impl FromJsonMap for BiometricTemplate {
     }
 }
 
-impl ToCborMap for BiometricTemplate {
-    fn to_map(self) -> BTreeMap<Cbor, Cbor> {
-        self.0.into_iter()
-            .map(|(k, v)| (format!("biometric_template_{k}").into(), v.into()))
+impl ToNamespaceMap for BiometricTemplate {
+    fn to_ns_map(self) -> BTreeMap<String, Cbor> {
+        self.0
+            .into_iter()
+            .map(|(k, v)| (format!("biometric_template_{k}"), v.into()))
             .collect()
     }
 }

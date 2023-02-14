@@ -14,32 +14,24 @@ pub trait ToCbor: Sized {
 }
 
 pub trait ToCborMap {
-    fn to_map(self) -> BTreeMap<Value, Value>;
+    fn to_cbor_map(self) -> BTreeMap<Value, Value>;
+}
+
+pub trait ToNamespaceMap {
+    fn to_ns_map(self) -> BTreeMap<String, Value>;
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToCborError {
     #[error("cbor serialization: {0}")]
-    Serde(#[from] serde_cbor::Error)
+    Serde(#[from] serde_cbor::Error),
 }
 
-impl<T> ToCbor for T 
+impl<T> ToCbor for T
 where
-    T: Into<Value>
+    T: Into<Value>,
 {
     fn to_cbor(self) -> Value {
         self.into()
-    }
-}
-
-impl<K, V> ToCborMap for BTreeMap<K,V>
-where
-    K: ToCbor,
-    V: ToCbor
-{
-    fn to_map(self) -> BTreeMap<Value, Value> {
-        self.into_iter()
-            .map(|(k,v)| (k.to_cbor(), v.to_cbor()))
-            .collect()
     }
 }

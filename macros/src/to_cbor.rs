@@ -52,20 +52,20 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
 
             let conversion = if many {
                 quote! {
-                    let fs = <#ty as ToCborMap>::to_map(self.#field);
+                    let fs = <#ty as ToNamespaceMap>::to_ns_map(self.#field);
                     map.extend(fs);
                 }
             } else if optional {
                 quote! {
                     if let Some(i) = self.#field {
                         let v = ToCbor::to_cbor(i);
-                        map.insert(#field_str.to_string().into(), v);
+                        map.insert(#field_str.to_string(), v);
                     }
                 }
             } else {
                 quote! {
                     let v = ToCbor::to_cbor(self.#field);
-                    map.insert(#field_str.to_string().into(), v);
+                    map.insert(#field_str.to_string(), v);
                 }
             };
             conversions.extend([conversion]);
@@ -81,13 +81,22 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
         mod #mod_name {
             use serde_cbor::Value;
             use super::*;
-            use crate::definitions::traits::{ToCbor, ToCborError, ToCborMap};
-            impl ToCbor for #ident {
-                fn to_cbor(self) -> Value {
+            use crate::definitions::traits::{ToCbor, ToNamespaceMap};
+            impl ToNamespaceMap for #ident {
+                fn to_ns_map(self) -> std::collections::BTreeMap<String, Value> {
                     let mut map = std::collections::BTreeMap::default();
 
                     #conversions
 
+                    map
+                }
+            }
+            impl ToCbor for #ident {
+                fn to_cbor(self) -> Value {
+                    let map = self.to_ns_map()
+                        .into_iter()
+                        .map(|(k, v)| (Value::Text(k), v))
+                        .collect();
                     Value::Map(map)
                 }
             }

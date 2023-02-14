@@ -1,5 +1,5 @@
 use super::FullDate;
-use crate::definitions::{traits::ToCbor, helpers::NonEmptyVec};
+use crate::definitions::{helpers::NonEmptyVec, traits::ToCbor};
 use macros::{FromJson, ToCbor};
 use serde_cbor::Value as Cbor;
 

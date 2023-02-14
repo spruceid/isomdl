@@ -23,7 +23,7 @@ pub use tdate::{TDate, TDateOrFullDate};
 pub use un_distinguishing_sign::UNDistinguishingSign;
 
 use crate::definitions::helpers::ByteStr;
-use macros::{ToCbor, FromJson};
+use macros::{FromJson, ToCbor};
 
 /// The `org.iso.18013.5.1` namespace.
 #[derive(Debug, Clone, FromJson, ToCbor)]

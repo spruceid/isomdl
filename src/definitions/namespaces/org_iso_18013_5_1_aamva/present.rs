@@ -1,4 +1,4 @@
-use crate::definitions::traits::{ToCbor, FromJson, FromJsonError};
+use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use anyhow::anyhow;
 use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;

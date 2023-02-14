@@ -1,20 +1,22 @@
 use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-/// DigestId is a unsigned integer between 0 and (2^31 -) inclusive.
+// TODO: When deserializing DigestId, check that it is not negative.
+
+/// DigestId is a unsigned integer between 0 and (2^31 - 1) inclusive.
 /// Therefore the most straightforward way to represent it is as a i32 that is enforced to be
 /// positive.
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, Hash, PartialEq, Copy)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, Ord, PartialEq, PartialOrd, Copy, Hash)]
 pub struct DigestId(i32);
-pub type DigestIds = HashMap<DigestId, ByteStr>;
+pub type DigestIds = BTreeMap<DigestId, ByteStr>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mso {
     pub version: String,
     pub digest_algorithm: DigestAlgorithm,
-    pub value_digests: HashMap<String, DigestIds>,
+    pub value_digests: BTreeMap<String, DigestIds>,
     pub device_key_info: DeviceKeyInfo,
     pub doc_type: String,
     pub validity_info: ValidityInfo,
@@ -30,8 +32,8 @@ pub enum DigestAlgorithm {
     SHA512,
 }
 
-impl From<i32> for DigestId {
-    fn from(i: i32) -> DigestId {
+impl DigestId {
+    pub fn new(i: i32) -> DigestId {
         DigestId(if i.is_negative() { -i } else { i })
     }
 }

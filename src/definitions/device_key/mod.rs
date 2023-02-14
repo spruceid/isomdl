@@ -1,7 +1,7 @@
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub mod cose_key;
 pub use cose_key::CoseKey;
@@ -14,7 +14,7 @@ pub struct DeviceKeyInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key_authorizations: Option<KeyAuthorizations>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_info: Option<HashMap<i128, CborValue>>,
+    pub key_info: Option<BTreeMap<i128, CborValue>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]

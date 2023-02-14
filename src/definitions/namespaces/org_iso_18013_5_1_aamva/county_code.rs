@@ -22,7 +22,6 @@ impl ToCbor for CountyCode {
         let CountyCode((a, b, c)) = self;
         format!("{a}{b}{c}").into()
     }
-
 }
 
 impl FromJson for CountyCode {
