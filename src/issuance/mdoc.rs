@@ -372,8 +372,7 @@ pub mod test {
     use super::*;
     use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
     use crate::definitions::namespaces::{
-        org_iso_18013_5_1::OrgIso1801351,
-        org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
+        org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
     };
     use crate::definitions::traits::{FromJson, ToNamespaceMap};
     use crate::definitions::KeyAuthorizations;
@@ -486,8 +485,12 @@ pub mod test {
         let isomdl_namespace = String::from("org.iso.18013.5.1");
         let aamva_namespace = String::from("org.iso.18013.5.1.aamva");
 
-        let isomdl_data = OrgIso1801351::from_json(&isomdl_data()).unwrap().to_ns_map();
-        let aamva_data = OrgIso1801351Aamva::from_json(&aamva_isomdl_data()).unwrap().to_ns_map();
+        let isomdl_data = OrgIso1801351::from_json(&isomdl_data())
+            .unwrap()
+            .to_ns_map();
+        let aamva_data = OrgIso1801351Aamva::from_json(&aamva_isomdl_data())
+            .unwrap()
+            .to_ns_map();
 
         let namespaces = [
             (isomdl_namespace.clone(), isomdl_data),
