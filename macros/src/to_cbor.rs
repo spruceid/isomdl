@@ -1,10 +1,7 @@
 use proc_macro::{self, TokenStream};
 use proc_macro2::Span;
 use quote::quote;
-use syn::{
-    parse_macro_input, Data, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed,
-    Ident,
-};
+use syn::{parse_macro_input, Data, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed, Ident};
 
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput { ident, data, .. } = parse_macro_input!(input);

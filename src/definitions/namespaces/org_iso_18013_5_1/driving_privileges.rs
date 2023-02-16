@@ -1,6 +1,8 @@
 use super::FullDate;
-use crate::definitions::{helpers::NonEmptyVec, traits::ToCbor};
-use macros::{FromJson, ToCbor};
+use crate::{
+    definitions::{helpers::NonEmptyVec, traits::ToCbor},
+    macros::{FromJson, ToCbor},
+};
 use serde_cbor::Value as Cbor;
 
 /// `driving_privileges` in the org.iso.18013.5.1 namespace.
