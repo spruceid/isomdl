@@ -263,7 +263,7 @@ mod test {
         let handover: Handover =
             serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
-            panic!("expected 'Handover::QR', received {:?}", handover)
+            panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
                 serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
@@ -282,7 +282,7 @@ mod test {
         let handover: Handover =
             serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
-            panic!("expected 'Handover::QR', received {:?}", handover)
+            panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
                 serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
@@ -301,7 +301,7 @@ mod test {
         let handover: Handover =
             serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
-            panic!("expected 'Handover::QR', received {:?}", handover)
+            panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
                 serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
@@ -319,7 +319,7 @@ mod test {
         let handover: Handover =
             serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::NFC(..)) {
-            panic!("expected 'Handover::NFC(..)', received {:?}", handover)
+            panic!("expected 'Handover::NFC(..)', received {handover:?}")
         } else {
             let roundtripped =
                 serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
@@ -337,7 +337,7 @@ mod test {
         let handover: Handover =
             serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::NFC(..)) {
-            panic!("expected 'Handover::NFC(..)', received {:?}", handover)
+            panic!("expected 'Handover::NFC(..)', received {handover:?}")
         } else {
             let roundtripped =
                 serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
@@ -430,15 +430,14 @@ mod test {
 
     #[test]
     fn handle_session_establishment_and_decrypt_device_request() {
-        const E_DEVICE_KEY: &'static str =
-            include_str!("../../test/definitions/session/e_device_key.cbor");
-        const SESSION_ESTABLISHMENT: &'static str =
+        const E_DEVICE_KEY: &str = include_str!("../../test/definitions/session/e_device_key.cbor");
+        const SESSION_ESTABLISHMENT: &str =
             include_str!("../../test/definitions/session/session_establishment.cbor");
-        const SHARED_SECRET: &'static str =
+        const SHARED_SECRET: &str =
             include_str!("../../test/definitions/session/shared_secret.cbor");
-        const SESSION_TRANSCRIPT: &'static str =
+        const SESSION_TRANSCRIPT: &str =
             include_str!("../../test/definitions/session/session_transcript.cbor");
-        const READER_SESSION_KEY: &'static str =
+        const READER_SESSION_KEY: &str =
             include_str!("../../test/definitions/session/reader_session_key.cbor");
 
         let e_device_key_bytes = hex::decode(E_DEVICE_KEY).unwrap();
@@ -462,7 +461,7 @@ mod test {
             serde_cbor::from_slice(&session_transcript_bytes).unwrap();
 
         let session_key = derive_session_key(&shared_secret, &session_transcript, true).unwrap();
-        let session_key_hex = hex::encode(&session_key);
+        let session_key_hex = hex::encode(session_key);
         assert_eq!(session_key_hex, READER_SESSION_KEY);
 
         let plaintext =

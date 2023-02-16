@@ -212,7 +212,7 @@ mod test {
         }
 
         let _documents: String = serde_cbor::to_vec(&prepared_response.finalize_oid4vp_response())
-            .map(|docs| base64::encode_config(&docs, base64::URL_SAFE_NO_PAD))
+            .map(|docs| base64::encode_config(docs, base64::URL_SAFE_NO_PAD))
             .unwrap();
 
         // Record generated response:
