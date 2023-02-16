@@ -376,7 +376,7 @@ pub mod test {
         org_iso_18013_5_1_aamva as aamva,
     };
     use crate::definitions::traits::FromJson;
-    use crate::definitions::KeyAuthorizations;
+
     use base64::URL_SAFE_NO_PAD;
     use elliptic_curve::sec1::ToEncodedPoint;
     use p256::pkcs8::DecodePrivateKey;
@@ -699,7 +699,7 @@ pub mod test {
         let aamva_namespace = String::from("org.iso.18013.5.1.aamva");
         let aamva_elements = [
             (
-                "sex".to_string().into(),
+                "sex".to_string(),
                 mdl_data
                     .get("org.iso.18013.5.1.aamva.sex")
                     .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.sex"))?
@@ -708,7 +708,7 @@ pub mod test {
                     .into(),
             ),
             (
-                "given_name_truncation".to_string().into(),
+                "given_name_truncation".to_string(),
                 mdl_data
                     .get("org.iso.18013.5.1.aamva.given_name_truncation")
                     .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.given_name_truncation"))?
@@ -718,7 +718,7 @@ pub mod test {
                     .into(),
             ),
             (
-                "family_name_truncation".to_string().into(),
+                "family_name_truncation".to_string(),
                 mdl_data
                     .get("org.iso.18013.5.1.aamva.family_name_truncation")
                     .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.family_name_truncation"))?
@@ -728,7 +728,7 @@ pub mod test {
                     .into(),
             ),
             (
-                "aamva_version".to_string().into(),
+                "aamva_version".to_string(),
                 mdl_data
                     .get("org.iso.18013.5.1.aamva.aamva_version")
                     .ok_or_else(|| anyhow!("missing required element: missing required element: org.iso.18013.5.1.aamva.aamva_version"))?
@@ -737,7 +737,7 @@ pub mod test {
                     .into(),
             ),
             (
-                "domestic_driving_privileges".to_string().into(),
+                "domestic_driving_privileges".to_string(),
                 aamva::DomesticDrivingPrivileges::from_json(mdl_data.get("org.iso.18013.5.1.aamva.domestic_driving_privileges")
                                                             .unwrap()
                 )
@@ -786,13 +786,10 @@ pub mod test {
             y,
         };
 
-        let approved_namespaces = vec![isomdl_namespace, aamva_namespace];
+        let _approved_namespaces = vec![isomdl_namespace, aamva_namespace];
         let device_key_info = DeviceKeyInfo {
             device_key,
-            key_authorizations: Some(KeyAuthorizations {
-                namespaces: NonEmptyVec::maybe_new(approved_namespaces),
-                data_elements: None,
-            }),
+            key_authorizations: None,
             key_info: None,
         };
 
