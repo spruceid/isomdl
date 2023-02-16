@@ -786,7 +786,6 @@ pub mod test {
             y,
         };
 
-        let _approved_namespaces = vec![isomdl_namespace, aamva_namespace];
         let device_key_info = DeviceKeyInfo {
             device_key,
             key_authorizations: None,
