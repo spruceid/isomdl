@@ -374,8 +374,8 @@ pub mod test {
     use crate::definitions::namespaces::{
         org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
     };
+
     use crate::definitions::traits::{FromJson, ToNamespaceMap};
-    use crate::definitions::KeyAuthorizations;
     use elliptic_curve::sec1::ToEncodedPoint;
     use p256::pkcs8::DecodePrivateKey;
     use time::OffsetDateTime;
@@ -527,13 +527,9 @@ pub mod test {
             y,
         };
 
-        let approved_namespaces = vec![isomdl_namespace, aamva_namespace];
         let device_key_info = DeviceKeyInfo {
             device_key,
-            key_authorizations: Some(KeyAuthorizations {
-                namespaces: NonEmptyVec::maybe_new(approved_namespaces),
-                data_elements: None,
-            }),
+            key_authorizations: None,
             key_info: None,
         };
 
