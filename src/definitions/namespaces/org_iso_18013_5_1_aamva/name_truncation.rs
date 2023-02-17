@@ -1,5 +1,6 @@
-use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_json::Value;
+use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 use std::str::FromStr;
 
 /// `name_truncation` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
@@ -27,6 +28,12 @@ impl NameTruncation {
     }
 }
 
+impl ToCbor for NameTruncation {
+    fn to_cbor(self) -> Cbor {
+        self.to_str().to_string().into()
+    }
+}
+
 impl FromStr for NameTruncation {
     type Err = Error;
 
@@ -41,7 +48,7 @@ impl FromStr for NameTruncation {
 }
 
 impl FromJson for NameTruncation {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         String::from_json(v)?
             .parse()
             .map_err(Into::into)

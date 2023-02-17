@@ -1,8 +1,9 @@
 use crate::definitions::{
     namespaces::org_iso_18013_5_1::Alpha2,
-    traits::{FromJson, FromJsonError, FromMap},
+    traits::{FromJson, FromJsonError, FromJsonMap},
 };
-use serde_json::{Map, Value};
+use serde_cbor::Value as Cbor;
+use serde_json::{Map, Value as Json};
 
 /// `issuing_jurisdiction` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
@@ -14,8 +15,14 @@ pub enum Error {
     CountryMismatch,
 }
 
-impl FromMap for IssuingJurisdiction {
-    fn from_map(map: &Map<String, Value>) -> Result<Self, FromJsonError> {
+impl From<IssuingJurisdiction> for Cbor {
+    fn from(i: IssuingJurisdiction) -> Cbor {
+        i.0.into()
+    }
+}
+
+impl FromJsonMap for IssuingJurisdiction {
+    fn from_map(map: &Map<String, Json>) -> Result<Self, FromJsonError> {
         let jurisdiction = map
             .get("issuing_jurisdiction")
             .ok_or(FromJsonError::Missing)

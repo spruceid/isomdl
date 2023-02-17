@@ -3,7 +3,7 @@ use crate::definitions::{
     DeviceSigned, IssuerSigned,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +30,7 @@ pub struct Document {
 
 pub type Errors = NonEmptyMap<String, NonEmptyMap<String, DocumentErrorCode>>;
 pub type DocumentErrors = NonEmptyVec<DocumentError>;
-pub type DocumentError = HashMap<String, DocumentErrorCode>;
+pub type DocumentError = BTreeMap<String, DocumentErrorCode>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "i128", into = "i128")]

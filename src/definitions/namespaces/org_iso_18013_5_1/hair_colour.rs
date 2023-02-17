@@ -1,5 +1,6 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_json::Value;
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 use std::str::FromStr;
 
 /// `hair_colour` in the org.iso.18013.5.1 namespace.
@@ -40,6 +41,12 @@ impl HairColour {
     }
 }
 
+impl From<HairColour> for Cbor {
+    fn from(h: HairColour) -> Cbor {
+        Cbor::Text(h.to_str().to_string())
+    }
+}
+
 impl FromStr for HairColour {
     type Err = Error;
 
@@ -61,7 +68,7 @@ impl FromStr for HairColour {
 }
 
 impl FromJson for HairColour {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         String::from_json(v)?
             .parse()
             .map_err(Into::into)

@@ -1,5 +1,6 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_json::Value;
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 use std::str::FromStr;
 
 /// ISO 3166-1 alpha-2 country code.
@@ -260,6 +261,12 @@ pub enum Alpha2 {
 pub enum Error {
     #[error("unrecognized country code: {0}")]
     Unrecognized(String),
+}
+
+impl From<Alpha2> for Cbor {
+    fn from(a: Alpha2) -> Cbor {
+        a.as_str().to_string().into()
+    }
 }
 
 impl Alpha2 {
@@ -778,7 +785,7 @@ impl FromStr for Alpha2 {
 }
 
 impl FromJson for Alpha2 {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         let value = String::from_json(v)?;
         value
             .parse()
