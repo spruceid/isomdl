@@ -2,7 +2,8 @@ pub use super::FullDate;
 
 use crate::definitions::traits::{FromJson, FromJsonError};
 use anyhow::anyhow;
-use serde_json::Value;
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
 /// `tdate` as per RFC8610 and restrictions in 18013-5.
@@ -17,7 +18,7 @@ pub enum TDateOrFullDate {
 }
 
 impl FromJson for TDate {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         let date_str = String::from_json(v)?;
 
         // 18013-5 asks for dates to be in RFC3339 format with no milliseconds, and with no UTC
@@ -38,7 +39,7 @@ impl FromJson for TDate {
 }
 
 impl FromJson for TDateOrFullDate {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         if let Ok(td) = TDate::from_json(v) {
             return Ok(Self::TDate(td));
         }
@@ -48,5 +49,20 @@ impl FromJson for TDateOrFullDate {
         }
 
         Err(anyhow!("could not parse as RFC3339 date-time or full-date").into())
+    }
+}
+
+impl From<TDate> for Cbor {
+    fn from(t: TDate) -> Cbor {
+        Cbor::Tag(0, Box::new(t.0.into()))
+    }
+}
+
+impl From<TDateOrFullDate> for Cbor {
+    fn from(t: TDateOrFullDate) -> Cbor {
+        match t {
+            TDateOrFullDate::TDate(t) => t.into(),
+            TDateOrFullDate::FullDate(f) => f.into(),
+        }
     }
 }

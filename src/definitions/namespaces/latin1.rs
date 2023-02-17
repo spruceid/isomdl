@@ -1,4 +1,5 @@
-use serde_json::Value;
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 use std::{ops::Deref, str::FromStr};
 
 use crate::definitions::traits::{FromJson, FromJsonError};
@@ -26,8 +27,14 @@ impl Deref for Latin1 {
     }
 }
 
+impl From<Latin1> for Cbor {
+    fn from(l: Latin1) -> Cbor {
+        l.0.into()
+    }
+}
+
 impl FromJson for Latin1 {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         String::from_json(v)?
             .parse()
             .map_err(Into::into)

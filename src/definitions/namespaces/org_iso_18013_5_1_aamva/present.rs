@@ -1,6 +1,7 @@
-use crate::definitions::traits::{FromJson, FromJsonError};
+use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use anyhow::anyhow;
-use serde_json::Value;
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 
 /// Indicator of presence for elements in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.0).
@@ -8,10 +9,16 @@ use serde_json::Value;
 pub struct Present;
 
 impl FromJson for Present {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         match u32::from_json(v)? {
             1 => Ok(Present),
             n => Err(anyhow!("unrecognized variant: {n}").into()),
         }
+    }
+}
+
+impl ToCbor for Present {
+    fn to_cbor(self) -> Cbor {
+        Cbor::Integer(1)
     }
 }

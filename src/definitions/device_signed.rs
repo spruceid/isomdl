@@ -5,7 +5,7 @@ use crate::definitions::{
 use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,7 +16,7 @@ pub struct DeviceSigned {
 }
 
 pub type DeviceNamespacesBytes = Tag24<DeviceNamespaces>;
-pub type DeviceNamespaces = HashMap<String, DeviceSignedItems>;
+pub type DeviceNamespaces = BTreeMap<String, DeviceSignedItems>;
 pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

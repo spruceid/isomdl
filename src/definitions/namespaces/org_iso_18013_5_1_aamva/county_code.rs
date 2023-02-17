@@ -1,5 +1,6 @@
-use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_json::Value;
+use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
+use serde_cbor::Value as Cbor;
+use serde_json::Value as Json;
 
 /// `county_code` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.0).
@@ -16,8 +17,15 @@ pub enum Error {
     TooLong,
 }
 
+impl ToCbor for CountyCode {
+    fn to_cbor(self) -> Cbor {
+        let CountyCode((a, b, c)) = self;
+        format!("{a}{b}{c}").into()
+    }
+}
+
 impl FromJson for CountyCode {
-    fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+    fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         String::from_json(v).and_then(|s| {
             to_treble_digits(&s)
                 .map(Self)

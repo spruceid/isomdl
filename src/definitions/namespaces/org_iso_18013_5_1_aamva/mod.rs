@@ -21,11 +21,11 @@ pub use race_and_ethnicity::RaceAndEthnicity;
 pub use sex::Sex;
 pub use weight_range::WeightRange;
 
-use macros::FromJson;
+use crate::macros::{FromJson, ToCbor};
 
 /// `org.iso.18013.5.1.aamva` namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.2).
-#[derive(Debug, Clone, FromJson)]
+#[derive(Debug, Clone, FromJson, ToCbor)]
 pub struct OrgIso1801351Aamva {
     pub domestic_driving_privileges: DomesticDrivingPrivileges,
     pub name_suffix: Option<NameSuffix>,
@@ -33,25 +33,25 @@ pub struct OrgIso1801351Aamva {
     pub veteran: Option<Present>,
     pub family_name_truncation: NameTruncation,
     pub given_name_truncation: NameTruncation,
-    #[rename("aka_family_name.v2")]
+    #[isomdl(rename = "aka_family_name.v2")]
     pub aka_family_name_v2: Option<Latin1>,
-    #[rename("aka_given_name.v2")]
+    #[isomdl(rename = "aka_given_name.v2")]
     pub aka_given_name_v2: Option<Latin1>,
     pub aka_suffix: Option<NameSuffix>,
     pub weight_range: Option<WeightRange>,
     pub race_ethnicity: Option<RaceAndEthnicity>,
-    #[rename("EDL_credential")]
+    #[isomdl(rename = "EDL_credential")]
     pub edl_credential: Option<EDLIndicator>,
     pub sex: Sex,
-    #[rename("DHS_compliance")]
+    #[isomdl(rename = "DHS_compliance")]
     pub dhs_compliance: DHSCompliance,
     pub resident_county: Option<CountyCode>,
     pub hazmat_endorsement_expiration_date: Option<FullDate>,
-    #[rename("CDL_indicator")]
+    #[isomdl(rename = "CDL_indicator")]
     pub cdl_indicator: Option<Present>,
-    #[rename("DHS_compliance_text")]
+    #[isomdl(rename = "DHS_compliance_text")]
     pub dhs_compliance_text: Option<String>,
-    #[rename("DHS_temporary_lawful_status")]
+    #[isomdl(rename = "DHS_temporary_lawful_status")]
     pub dhs_temporary_lawful_status: Option<Present>,
 }
 
