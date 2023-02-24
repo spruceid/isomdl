@@ -190,4 +190,12 @@ mod tests {
 
         assert!(s.a.is_none());
     }
+
+    #[test]
+    fn int_as_some() {
+        let v: Value = json!({ "a": 11 });
+        let s = S::from_json(&v).unwrap();
+
+        assert!(s.a.is_some());
+    }
 }
