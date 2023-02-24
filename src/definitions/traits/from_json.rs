@@ -158,10 +158,44 @@ where
     T: FromJson,
 {
     fn from_json(v: &Value) -> Result<Self, FromJsonError> {
+        if let &Value::Null = v {
+            return Ok(None);
+        }
         T::from_json(v).map(Some)
     }
 
     fn from_json_opt(o: Option<&Value>) -> Result<Self, FromJsonError> {
+        if let Some(&Value::Null) = o {
+            return Ok(None);
+        }
         o.map(T::from_json).transpose()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::macros::FromJson;
+    use serde_json::{json, Value};
+
+    #[derive(FromJson)]
+    struct S {
+        a: Option<u32>,
+    }
+
+    #[test]
+    fn null_as_none() {
+        let v: Value = json!({ "a": null });
+        let s = S::from_json(&v).unwrap();
+
+        assert!(s.a.is_none());
+    }
+
+    #[test]
+    fn int_as_some() {
+        let v: Value = json!({ "a": 11 });
+        let s = S::from_json(&v).unwrap();
+
+        assert!(s.a.is_some());
     }
 }
