@@ -9,7 +9,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use cose_rs::{
     algorithm::{Algorithm, SignatureAlgorithm},
-    sign1::{CoseSign1, HeaderMap, PreparedCoseSign1},
+    sign1::{CoseSign1, PreparedCoseSign1},
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,6 @@ pub struct Builder {
     validity_info: Option<ValidityInfo>,
     digest_algorithm: Option<DigestAlgorithm>,
     device_key_info: Option<DeviceKeyInfo>,
-    x5chain: Option<X5Chain>,
 }
 
 impl Mdoc {
@@ -61,7 +60,6 @@ impl Mdoc {
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
-        x5chain: X5Chain,
         signature_algorithm: Algorithm,
     ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
@@ -82,12 +80,8 @@ impl Mdoc {
 
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
-        let mut unprotected_headers = HeaderMap::default();
-        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
-
         let prepared_sig = CoseSign1::builder()
             .payload(mso_bytes)
-            .unprotected(unprotected_headers)
             .signature_algorithm(signature_algorithm)
             .prepare()
             .map_err(|e| anyhow!("error preparing cosesign1: {}", e))?;
@@ -122,7 +116,6 @@ impl Mdoc {
             validity_info,
             digest_algorithm,
             device_key_info,
-            x5chain,
             signer.algorithm(),
         )?;
 
@@ -133,7 +126,7 @@ impl Mdoc {
             .as_bytes()
             .to_vec();
 
-        Ok(prepared_mdoc.complete(signature))
+        Ok(prepared_mdoc.complete(x5chain, signature))
     }
 }
 
@@ -143,8 +136,9 @@ impl PreparedMdoc {
         self.prepared_sig.signature_payload()
     }
 
-    /// Supply the remotely signed signature to complete and issue the prepared mdoc.
-    pub fn complete(self, signature: Vec<u8>) -> Mdoc {
+    /// Supply the remotely signed signature and x5chain containing the issuing certificate
+    /// to complete and issue the prepared mdoc.
+    pub fn complete(self, x5chain: X5Chain, signature: Vec<u8>) -> Mdoc {
         let PreparedMdoc {
             doc_type,
             namespaces,
@@ -152,7 +146,10 @@ impl PreparedMdoc {
             prepared_sig,
         } = self;
 
-        let issuer_auth = prepared_sig.finalize(signature);
+        let mut issuer_auth = prepared_sig.finalize(signature);
+        issuer_auth
+            .unprotected_mut()
+            .insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
 
         Mdoc {
             doc_type,
@@ -194,12 +191,6 @@ impl Builder {
         self
     }
 
-    /// Set the x5chain of the issuing key.
-    pub fn x5chain(mut self, x5chain: X5Chain) -> Self {
-        self.x5chain = Some(x5chain);
-        self
-    }
-
     /// Prepare the mdoc for remote signing.
     ///
     /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
@@ -220,9 +211,6 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
-        let x5chain = self
-            .x5chain
-            .ok_or_else(|| anyhow!("missing parameter: 'x5chain'"))?;
 
         Mdoc::prepare(
             doc_type,
@@ -230,13 +218,12 @@ impl Builder {
             validity_info,
             digest_algorithm,
             device_key_info,
-            x5chain,
             signature_algorithm,
         )
     }
 
     /// Directly issue an mdoc.
-    pub fn issue<S, Sig>(self, signer: S) -> Result<Mdoc>
+    pub fn issue<S, Sig>(self, x5chain: X5Chain, signer: S) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
         Sig: Signature,
@@ -256,9 +243,6 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
-        let x5chain = self
-            .x5chain
-            .ok_or_else(|| anyhow!("missing parameter: 'x5chain'"))?;
 
         Mdoc::issue(
             doc_type,
@@ -540,11 +524,10 @@ pub mod test {
         let mdoc = Mdoc::builder()
             .doc_type(doc_type)
             .namespaces(namespaces)
-            .x5chain(x5chain)
             .validity_info(validity_info)
             .digest_algorithm(digest_algorithm)
             .device_key_info(device_key_info)
-            .issue(signer)
+            .issue(x5chain, signer)
             .expect("failed to issue mdoc");
 
         Ok(mdoc)
