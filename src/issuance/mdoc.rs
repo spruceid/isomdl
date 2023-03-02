@@ -30,7 +30,7 @@ pub struct Mdoc {
     pub issuer_auth: CoseSign1,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 /// An incomplete mdoc, requiring a remotely signed signature to be completed.
 pub struct PreparedMdoc {
     doc_type: String,
