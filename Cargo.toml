@@ -34,9 +34,9 @@ signature = "1.6"
 base64 = "0.13"
 pem-rfc7468 = "0.6.0"
 x509-cert = { version = "0.1.0", features = ["pem"] }
-
 ssi-jwk = { version = "0.1" }
 isomdl-macros = { version = "0.1.0", path = "macros" }
+unicode-segmentation = "1.10.1"
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"

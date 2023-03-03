@@ -48,6 +48,8 @@ pub enum Error {
     JsonError,
     #[error("Unexpected date type for data_element.")]
     ParsingError,
+    #[error("Request for data is invalid.")]
+    InvalidRequest,
 }
 
 impl From<serde_cbor::Error> for Error {
@@ -150,6 +152,12 @@ impl SessionManager {
 
     // TODO: Support requesting specific doc types.
     fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
+        //TODO: Validate Request
+        // if !validate_request(namespaces.clone()).is_ok() {
+        //     return Err(anyhow::Error::msg(
+        //         "At least one of the namespaces contain an invalid combination of fields to request",
+        //     ));
+        // }
         let items_request = ItemsRequest {
             doc_type: "org.iso.18013.5.1.mDL".into(),
             namespaces,
@@ -264,4 +272,24 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
         CborValue::Integer(i) => Ok(json!(i)),
         _ => Err(Error::ParsingError),
     }
+}
+
+fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Error> {
+    // Check if request follows ISO18013-5 restrictions
+    // A valid mdoc request can contain a maximum of 2 age_over_NN fields
+    let age_over_nn_requested: Vec<(String, bool)> = namespaces
+        .get("org.iso.18013.5.1")
+        .map(|k| k.clone().into_inner())
+        //To Do: get rid of unwrap
+        .unwrap()
+        .into_iter()
+        .filter(|x| x.0.contains("age_over"))
+        .collect();
+
+    if age_over_nn_requested.len() > 2 {
+        //To Do: Decide what should happen when more than two age_over_nn are requested
+        return Err(Error::InvalidRequest);
+    }
+
+    Ok(true)
 }
