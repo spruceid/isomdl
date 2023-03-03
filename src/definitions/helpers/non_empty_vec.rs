@@ -7,7 +7,7 @@ pub struct NonEmptyVec<T: Clone>(Vec<T>);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("cannot construct a non-empty vec from an empty vec")]
+    #[error("expected a non-empty array")]
     Empty,
 }
 

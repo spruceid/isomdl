@@ -10,7 +10,7 @@ use crate::definitions::{
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionManager {
@@ -98,13 +98,13 @@ fn request_all(document: &super::Document) -> Result<ItemsRequest> {
                 .as_ref()
                 .iter()
                 .map(|(elem, _)| (elem.clone(), false))
-                .collect::<HashMap<String, bool>>()
+                .collect::<BTreeMap<String, bool>>()
                 .try_into()
                 // Safe to unwrap as elems is initially a NonEmptyMap, so has at least one element.
                 .unwrap();
             (ns.clone(), elems)
         })
-        .collect::<HashMap<String, NonEmptyMap<String, bool>>>()
+        .collect::<BTreeMap<String, NonEmptyMap<String, bool>>>()
         .try_into()
         // Safe to unwrap as namespaces is initially a NonEmptyMap, so has at least one element.
         .unwrap();
@@ -212,7 +212,7 @@ mod test {
         }
 
         let _documents: String = serde_cbor::to_vec(&prepared_response.finalize_oid4vp_response())
-            .map(|docs| base64::encode_config(&docs, base64::URL_SAFE_NO_PAD))
+            .map(|docs| base64::encode_config(docs, base64::URL_SAFE_NO_PAD))
             .unwrap();
 
         // Record generated response:

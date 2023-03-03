@@ -18,7 +18,7 @@ use crate::{
 use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
 
@@ -128,7 +128,7 @@ type Namespace = String;
 type ElementIdentifier = String;
 
 pub type RequestedItems = Vec<ItemsRequest>;
-pub type PermittedItems = HashMap<DocType, HashMap<Namespace, Vec<ElementIdentifier>>>;
+pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdentifier>>>;
 
 impl SessionManagerInit {
     /// Initialise the SessionManager.
@@ -484,9 +484,9 @@ pub trait DeviceSession {
                 }
             };
 
-            let mut issuer_namespaces: HashMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
+            let mut issuer_namespaces: BTreeMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
                 Default::default();
-            let mut errors: HashMap<String, NonEmptyMap<String, DocumentErrorCode>> =
+            let mut errors: BTreeMap<String, NonEmptyMap<String, DocumentErrorCode>> =
                 Default::default();
 
             // TODO: Handle special cases, i.e. for `age_over_NN`.
@@ -623,7 +623,7 @@ impl From<Mdoc> for Document {
             v.into_inner()
                 .into_iter()
                 .map(|i| (i.as_ref().element_identifier.clone(), i))
-                .collect::<HashMap<_, _>>()
+                .collect::<BTreeMap<_, _>>()
                 .try_into()
                 // Can unwrap as there is always at least one element in a NonEmptyVec.
                 .unwrap()
@@ -639,7 +639,7 @@ impl From<Mdoc> for Document {
             .into_inner()
             .into_iter()
             .map(|(ns, v)| (ns, extract(v)))
-            .collect::<HashMap<_, _>>()
+            .collect::<BTreeMap<_, _>>()
             .try_into()
             // Can unwrap as there is always at least one element in a NonEmptyMap.
             .unwrap();
