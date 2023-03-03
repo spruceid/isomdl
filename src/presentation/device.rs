@@ -1,4 +1,3 @@
-use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
@@ -19,7 +18,6 @@ use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
-use std::num::ParseIntError;
 use uuid::Uuid;
 
 pub mod oid4vp;
@@ -79,8 +77,6 @@ pub enum Error {
     CborEncoding(serde_cbor::Error),
     #[error("session manager was used incorrectly")]
     ApiMisuse,
-    #[error("could not parse age attestation claim")]
-    ParsingError,
 }
 
 // TODO: Do we need to support multiple documents of the same type?
@@ -493,24 +489,6 @@ pub trait DeviceSession {
             for (namespace, elements) in namespaces.into_iter() {
                 if let Some(issuer_items) = document.namespaces.get(&namespace) {
                     for element_identifier in elements.into_iter() {
-                        if element_identifier.contains("age_over")
-                            && namespace == "org.iso.18013.5.1".to_string()
-                        {
-                            let age_attestation = nearest_age_attestation(
-                                element_identifier.clone(),
-                                issuer_items.clone(),
-                            );
-
-                            if let Ok(Some(item)) = age_attestation {
-                                if let Some(returned_items) = issuer_namespaces.get_mut(&namespace)
-                                {
-                                    returned_items.push(item.clone());
-                                } else {
-                                    let returned_items = NonEmptyVec::new(item.clone());
-                                    issuer_namespaces.insert(namespace.clone(), returned_items);
-                                }
-                            }
-                        }
                         if let Some(item) = issuer_items.get(&element_identifier) {
                             if let Some(returned_items) = issuer_namespaces.get_mut(&namespace) {
                                 returned_items.push(item.clone());
@@ -711,86 +689,6 @@ pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
         .map_err(Into::into)
 }
 
-pub fn nearest_age_attestation(
-    element_identifier: String,
-    issuer_items: NonEmptyMap<String, Tag24<IssuerSignedItem>>,
-) -> Result<Option<Tag24<IssuerSignedItem>>, Error> {
-    let requested_age: u8 = parse_age_from_element_identifier(element_identifier)?;
-
-    //find closest age_over_nn field that is true
-    let owned_age_over_claims: Vec<(String, Tag24<IssuerSignedItem>)> = issuer_items
-        .clone()
-        .into_inner()
-        .into_iter()
-        .filter(|element| element.0.contains("age_over"))
-        .collect();
-
-    let age_over_claims_numerical: Result<Vec<(u8, Tag24<IssuerSignedItem>)>, Error> =
-        owned_age_over_claims
-            .iter()
-            .map(|f| {
-                Ok((
-                    parse_age_from_element_identifier(f.to_owned().0)?,
-                    f.to_owned().1,
-                ))
-            })
-            .collect();
-
-    let (mut true_age_over_claims, mut false_age_over_claims): (Vec<_>, Vec<_>) =
-        age_over_claims_numerical?
-            .into_iter()
-            .partition(|x| x.1.to_owned().into_inner().element_value == CborValue::Bool(true));
-
-    // sorts by age from high to low
-    true_age_over_claims.sort_by(|a, b| b.to_owned().0.cmp(&a.to_owned().0));
-
-    let mut nearest_age_over: Option<u8> = None;
-    true_age_over_claims.iter().for_each(|claim| {
-        if claim.0 >= requested_age {
-            nearest_age_over = Some(claim.0);
-        }
-    });
-
-    if let Some(age) = nearest_age_over {
-        let mut element_id = String::from("age_over_");
-        element_id.push_str(&age.to_string());
-        if let Some(item) = issuer_items.get(&element_id) {
-            return Ok(Some(item.to_owned()));
-        }
-    // if there is no appropriate true age attestation, find the closest false age attestation
-    } else {
-        //sorts by age from low to high
-        false_age_over_claims.sort_by(|a, b| a.to_owned().0.cmp(&b.to_owned().0));
-        let mut nearest_age_under: Option<u8> = None;
-        false_age_over_claims.iter().for_each(|claim| {
-            if claim.0 <= requested_age {
-                nearest_age_under = Some(claim.0);
-            }
-        });
-
-        if let Some(age) = nearest_age_under {
-            let mut element_id = String::from("age_over_");
-            element_id.push_str(&age.to_string());
-            if let Some(item) = issuer_items.get(&element_id) {
-                return Ok(Some(item.to_owned()));
-            }
-        }
-    }
-
-    //if there is still no appropriate attestation, do not return a value
-    Ok(None)
-}
-
-pub fn parse_age_from_element_identifier(element_identifier: String) -> Result<u8, Error> {
-    Ok(element_identifier[element_identifier.len() - 2..].parse::<u8>()?)
-}
-
-impl From<ParseIntError> for Error {
-    fn from(_value: ParseIntError) -> Self {
-        Error::ParsingError
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -850,12 +748,5 @@ mod test {
         let filtered = super::filter_permitted(&requested, permitted);
 
         assert_eq!(expected, filtered);
-    }
-
-    #[test]
-    fn test_parse_age_from_element_identifier() {
-        let element_identifier = "age_over_88".to_string();
-        let age = parse_age_from_element_identifier(element_identifier).unwrap();
-        assert_eq!(age, 88)
     }
 }
