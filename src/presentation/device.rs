@@ -10,6 +10,7 @@ use crate::{
         device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
+        mso::DigestId,
         session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
         CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment, SessionTranscript,
     },
@@ -775,6 +776,8 @@ impl From<ParseIntError> for Error {
 
 #[cfg(test)]
 mod test {
+    use crate::definitions::helpers::ByteStr;
+
     use super::*;
     use serde_json::json;
 
@@ -839,5 +842,47 @@ mod test {
         let element_identifier = "age_over_88".to_string();
         let age = parse_age_from_element_identifier(element_identifier).unwrap();
         assert_eq!(age, 88)
+    }
+
+    #[test]
+    fn test_age_attestation_response() {
+        let requested_element_identifier = "age_over_21".to_string();
+        let element_identifier1 = "age_over_18".to_string();
+        let element_identifier2 = "age_over_20".to_string();
+        let element_identifier3 = "age_over_21".to_string();
+
+        let random = vec![1, 2, 3, 4, 5];
+        let issuer_signed_item1 = IssuerSignedItem {
+            digest_id: DigestId::new(1),
+            random: ByteStr::from(random.clone()),
+            element_identifier: element_identifier1.clone(),
+            element_value: CborValue::Bool(true),
+        };
+
+        let issuer_signed_item2 = IssuerSignedItem {
+            digest_id: DigestId::new(2),
+            random: ByteStr::from(random.clone()),
+            element_identifier: element_identifier2.clone(),
+            element_value: CborValue::Bool(true),
+        };
+
+        let issuer_signed_item3 = IssuerSignedItem {
+            digest_id: DigestId::new(3),
+            random: ByteStr::from(random),
+            element_identifier: element_identifier3.clone(),
+            element_value: CborValue::Bool(false),
+        };
+
+        let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();
+        let issuer_item2 = Tag24::new(issuer_signed_item2).unwrap();
+        let issuer_item3 = Tag24::new(issuer_signed_item3).unwrap();
+        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1);
+        issuer_items.insert(element_identifier2, issuer_item2);
+        issuer_items.insert(element_identifier3, issuer_item3.clone());
+
+        let result = nearest_age_attestation(requested_element_identifier, issuer_items)
+            .expect("failed to process age attestation request");
+
+        assert_eq!(result.unwrap().inner_bytes, issuer_item3.inner_bytes);
     }
 }
