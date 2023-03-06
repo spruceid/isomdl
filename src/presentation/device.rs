@@ -10,7 +10,6 @@ use crate::{
         device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
-        mso::DigestId,
         session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
         CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment, SessionTranscript,
     },
@@ -779,6 +778,7 @@ mod test {
     use crate::definitions::helpers::ByteStr;
 
     use super::*;
+    use crate::definitions::mso::DigestId;
     use serde_json::json;
 
     #[test]
