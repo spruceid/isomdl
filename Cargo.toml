@@ -40,7 +40,7 @@ isomdl-macros = { version = "0.1.0", path = "macros" }
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"
-rev = "2656fd9"
+rev = "0a85830"
 
 [dev-dependencies]
 hex = "0.4.3"
