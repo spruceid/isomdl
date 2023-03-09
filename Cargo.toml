@@ -10,39 +10,40 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0"
-ecdsa = { version = "0.14.4", features = ["serde"] }
-p256 = { version = "0.11.1", features = ["serde", "ecdh"] }
-p384 = { version = "0.11.2", features = ["serde", "ecdh"] }
+ecdsa = { version = "0.16.0", features = ["serde"] }
+p256 = { version = "0.13.0", features = ["serde", "ecdh"] }
+p384 = { version = "0.13.0", features = ["serde", "ecdh"] }
 rand = { version = "0.8.5", features = ["getrandom"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11.2", features = ["tags"] }
 serde_json = "1.0"
-sha2 = "0.10.5"
+sha2 = "0.10.6"
 thiserror = "1.0"
-elliptic-curve = "0.12.3"
+elliptic-curve = "0.13.1"
 hkdf = "0.12.3"
 hex-literal = "0.3.4"
 aes-gcm = "0.10.1"
 hmac = "0.12.1"
-aes = "0.8.1"
-sec1 = "0.3.0"
-uuid = { version = "1.2", features = ["v1", "std", "rng", "serde"] }
-time = { version = "0.3.14", features = ["formatting", "parsing", "macros"] }
-zeroize = { version = "1.4", features = ["zeroize_derive"] }
-signature = "1.6"
+aes = "0.8.2"
+sec1 = "0.7.1"
+uuid = { version = "1.3", features = ["v1", "std", "rng", "serde"] }
+time = { version = "0.3.20", features = ["formatting", "parsing", "macros"] }
+zeroize = { version = "1.5", features = ["zeroize_derive"] }
+signature = { version = "2.0.0", features = ["std"] }
+async-signature = "0.3.0"
 #tracing = "0.1"
 base64 = "0.13"
-pem-rfc7468 = "0.6.0"
-x509-cert = { version = "0.1.0", features = ["pem"] }
+pem-rfc7468 = "0.7.0"
+x509-cert = { version = "0.1.1", features = ["pem"] }
 
 ssi-jwk = { version = "0.1" }
 isomdl-macros = { version = "0.1.0", path = "macros" }
 
 [dependencies.cose-rs]
 git = "ssh://git@github.com/spruceid/cose-rs.git"
-rev = "0a85830"
+rev = "b05e9e4"
 
 [dev-dependencies]
 hex = "0.4.3"
-p256 = "0.11.1"
+p256 = "0.13.0"
 serde_json = "*"
