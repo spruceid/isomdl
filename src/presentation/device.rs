@@ -80,7 +80,7 @@ pub enum Error {
     #[error("session manager was used incorrectly")]
     ApiMisuse,
     #[error("could not parse age attestation claim")]
-    ParsingError,
+    ParsingError(#[from] io::Error),
 }
 
 // TODO: Do we need to support multiple documents of the same type?
