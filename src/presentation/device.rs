@@ -718,41 +718,30 @@ pub fn nearest_age_attestation(
             })
             .collect();
 
-    let (mut true_age_over_claims, mut false_age_over_claims): (Vec<_>, Vec<_>) =
+    let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
         age_over_claims_numerical?
             .into_iter()
             .partition(|x| x.1.to_owned().into_inner().element_value == CborValue::Bool(true));
 
-    // sorts by age from high to low
-    true_age_over_claims.sort_by(|a, b| b.to_owned().0.cmp(&a.to_owned().0));
+    let nearest_age_over = true_age_over_claims
+        .iter()
+        .filter(|f| f.0 >= requested_age)
+        .max_by_key(|claim| claim.0);
 
-    let mut nearest_age_over: Option<u8> = None;
-    true_age_over_claims.iter().for_each(|claim| {
-        if claim.0 >= requested_age {
-            nearest_age_over = Some(claim.0);
-        }
-    });
-
-    if let Some(age) = nearest_age_over {
-        let mut element_id = String::from("age_over_");
-        element_id.push_str(&age.to_string());
+    if let Some(age_attestation) = nearest_age_over {
+        let element_id = format!("age_over_{age}", age = age_attestation.0);
         if let Some(item) = issuer_items.get(&element_id) {
             return Ok(Some(item.to_owned()));
         }
     // if there is no appropriate true age attestation, find the closest false age attestation
     } else {
-        //sorts by age from low to high
-        false_age_over_claims.sort_by(|a, b| a.to_owned().0.cmp(&b.to_owned().0));
-        let mut nearest_age_under: Option<u8> = None;
-        false_age_over_claims.iter().for_each(|claim| {
-            if claim.0 <= requested_age {
-                nearest_age_under = Some(claim.0);
-            }
-        });
+        let nearest_age_under = false_age_over_claims
+            .iter()
+            .filter(|f| f.0 <= requested_age)
+            .min_by_key(|claim| claim.0);
 
-        if let Some(age) = nearest_age_under {
-            let mut element_id = String::from("age_over_");
-            element_id.push_str(&age.to_string());
+        if let Some(age_attestation) = nearest_age_under {
+            let element_id = format!("age_over_{age}", age = age_attestation.0);
             if let Some(item) = issuer_items.get(&element_id) {
                 return Ok(Some(item.to_owned()));
             }
