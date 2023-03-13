@@ -7,6 +7,7 @@ use crate::{
     issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
 use anyhow::{anyhow, Result};
+use async_signature::AsyncSigner;
 use cose_rs::{
     algorithm::{Algorithm, SignatureAlgorithm},
     sign1::{CoseSign1, PreparedCoseSign1},
@@ -15,7 +16,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use signature::{Signature, Signer};
+use signature::{SignatureEncoding, Signer};
 use std::collections::{BTreeMap, HashSet};
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
@@ -108,7 +109,7 @@ impl Mdoc {
     ) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
-        Sig: Signature,
+        Sig: SignatureEncoding,
     {
         let prepared_mdoc = Self::prepare(
             doc_type,
@@ -123,7 +124,39 @@ impl Mdoc {
         let signature = signer
             .try_sign(signature_payload)
             .map_err(|e| anyhow!("error signing cosesign1: {}", e))?
-            .as_bytes()
+            .to_vec();
+
+        Ok(prepared_mdoc.complete(x5chain, signature))
+    }
+
+    /// Directly sign and issue an mdoc.
+    pub async fn issue_async<S, Sig>(
+        doc_type: String,
+        namespaces: Namespaces,
+        validity_info: ValidityInfo,
+        digest_algorithm: DigestAlgorithm,
+        device_key_info: DeviceKeyInfo,
+        x5chain: X5Chain,
+        signer: S,
+    ) -> Result<Mdoc>
+    where
+        S: AsyncSigner<Sig> + SignatureAlgorithm,
+        Sig: SignatureEncoding + Send + 'static,
+    {
+        let prepared_mdoc = Self::prepare(
+            doc_type,
+            namespaces,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+            signer.algorithm(),
+        )?;
+
+        let signature_payload = prepared_mdoc.signature_payload();
+        let signature = signer
+            .sign_async(signature_payload)
+            .await
+            .map_err(|e| anyhow!("error signing cosesign1: {}", e))?
             .to_vec();
 
         Ok(prepared_mdoc.complete(x5chain, signature))
@@ -226,7 +259,7 @@ impl Builder {
     pub fn issue<S, Sig>(self, x5chain: X5Chain, signer: S) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
-        Sig: Signature,
+        Sig: SignatureEncoding,
     {
         let doc_type = self
             .doc_type
@@ -253,6 +286,40 @@ impl Builder {
             x5chain,
             signer,
         )
+    }
+
+    /// Directly issue an mdoc.
+    pub async fn issue_async<S, Sig>(self, x5chain: X5Chain, signer: S) -> Result<Mdoc>
+    where
+        S: AsyncSigner<Sig> + SignatureAlgorithm,
+        Sig: SignatureEncoding + Send + 'static,
+    {
+        let doc_type = self
+            .doc_type
+            .ok_or_else(|| anyhow!("missing parameter: 'doc_type'"))?;
+        let namespaces = self
+            .namespaces
+            .ok_or_else(|| anyhow!("missing parameter: 'namespaces'"))?;
+        let validity_info = self
+            .validity_info
+            .ok_or_else(|| anyhow!("missing parameter: 'validity_info'"))?;
+        let digest_algorithm = self
+            .digest_algorithm
+            .ok_or_else(|| anyhow!("missing parameter: 'digest_algorithm'"))?;
+        let device_key_info = self
+            .device_key_info
+            .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
+
+        Mdoc::issue_async(
+            doc_type,
+            namespaces,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+            x5chain,
+            signer,
+        )
+        .await
     }
 }
 
@@ -361,7 +428,9 @@ pub mod test {
 
     use crate::definitions::traits::{FromJson, ToNamespaceMap};
     use elliptic_curve::sec1::ToEncodedPoint;
+    use p256::ecdsa::{Signature, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
+    use p256::SecretKey;
     use time::OffsetDateTime;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/issuer-cert.pem");
@@ -477,8 +546,8 @@ pub mod test {
             .to_ns_map();
 
         let namespaces = [
-            (isomdl_namespace.clone(), isomdl_data),
-            (aamva_namespace.clone(), aamva_data),
+            (isomdl_namespace, isomdl_data),
+            (aamva_namespace, aamva_data),
         ]
         .into_iter()
         .collect();
@@ -517,7 +586,7 @@ pub mod test {
             key_info: None,
         };
 
-        let signer: p256::ecdsa::SigningKey = p256::SecretKey::from_pkcs8_pem(ISSUER_KEY)
+        let signer: SigningKey = SecretKey::from_pkcs8_pem(ISSUER_KEY)
             .expect("failed to parse pem")
             .into();
 
@@ -527,7 +596,7 @@ pub mod test {
             .validity_info(validity_info)
             .digest_algorithm(digest_algorithm)
             .device_key_info(device_key_info)
-            .issue(x5chain, signer)
+            .issue::<SigningKey, Signature>(x5chain, signer)
             .expect("failed to issue mdoc");
 
         Ok(mdoc)

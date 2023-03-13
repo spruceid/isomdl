@@ -441,7 +441,7 @@ mod test {
             include_str!("../../test/definitions/session/reader_session_key.cbor");
 
         let e_device_key_bytes = hex::decode(E_DEVICE_KEY).unwrap();
-        let e_device_key = p256::SecretKey::from_be_bytes(&e_device_key_bytes).unwrap();
+        let e_device_key = p256::SecretKey::from_slice(&e_device_key_bytes).unwrap();
         let e_device_key_inner = e_device_key.to_nonzero_scalar();
 
         let session_establishment_bytes = hex::decode(SESSION_ESTABLISHMENT).unwrap();
