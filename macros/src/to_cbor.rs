@@ -78,7 +78,6 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
         mod #mod_name {
             use serde_cbor::Value;
             use super::*;
-            use crate::definitions::traits::{ToCbor, ToNamespaceMap};
             impl ToNamespaceMap for #ident {
                 fn to_ns_map(self) -> std::collections::BTreeMap<String, Value> {
                     let mut map = std::collections::BTreeMap::default();
@@ -129,7 +128,6 @@ fn unnamed_fields(ident: Ident, mut input: FieldsUnnamed) -> TokenStream {
     let output = quote! {
         mod #mod_name {
             use super::*;
-            use crate::definitions::traits::{ToCbor, ToCborError};
             use serde_cbor::Value;
             impl ToCbor for #ident {
                 fn to_cbor(self) -> Value {

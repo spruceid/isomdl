@@ -21,7 +21,7 @@ pub use race_and_ethnicity::RaceAndEthnicity;
 pub use sex::Sex;
 pub use weight_range::WeightRange;
 
-use crate::macros::{FromJson, ToCbor};
+use crate::definitions::traits::*;
 
 /// `org.iso.18013.5.1.aamva` namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.2).
