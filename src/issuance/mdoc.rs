@@ -7,15 +7,16 @@ use crate::{
     issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
 use anyhow::{anyhow, Result};
+use async_signature::AsyncSigner;
 use cose_rs::{
     algorithm::{Algorithm, SignatureAlgorithm},
-    sign1::{CoseSign1, HeaderMap, PreparedCoseSign1},
+    sign1::{CoseSign1, PreparedCoseSign1},
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use signature::{Signature, Signer};
+use signature::{SignatureEncoding, Signer};
 use std::collections::{BTreeMap, HashSet};
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
@@ -30,7 +31,7 @@ pub struct Mdoc {
     pub issuer_auth: CoseSign1,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 /// An incomplete mdoc, requiring a remotely signed signature to be completed.
 pub struct PreparedMdoc {
     doc_type: String,
@@ -46,7 +47,6 @@ pub struct Builder {
     validity_info: Option<ValidityInfo>,
     digest_algorithm: Option<DigestAlgorithm>,
     device_key_info: Option<DeviceKeyInfo>,
-    x5chain: Option<X5Chain>,
 }
 
 impl Mdoc {
@@ -61,7 +61,6 @@ impl Mdoc {
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
-        x5chain: X5Chain,
         signature_algorithm: Algorithm,
     ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
@@ -82,12 +81,8 @@ impl Mdoc {
 
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
-        let mut unprotected_headers = HeaderMap::default();
-        unprotected_headers.insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
-
         let prepared_sig = CoseSign1::builder()
             .payload(mso_bytes)
-            .unprotected(unprotected_headers)
             .signature_algorithm(signature_algorithm)
             .prepare()
             .map_err(|e| anyhow!("error preparing cosesign1: {}", e))?;
@@ -114,7 +109,7 @@ impl Mdoc {
     ) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
-        Sig: Signature,
+        Sig: SignatureEncoding,
     {
         let prepared_mdoc = Self::prepare(
             doc_type,
@@ -122,7 +117,6 @@ impl Mdoc {
             validity_info,
             digest_algorithm,
             device_key_info,
-            x5chain,
             signer.algorithm(),
         )?;
 
@@ -130,10 +124,42 @@ impl Mdoc {
         let signature = signer
             .try_sign(signature_payload)
             .map_err(|e| anyhow!("error signing cosesign1: {}", e))?
-            .as_bytes()
             .to_vec();
 
-        Ok(prepared_mdoc.complete(signature))
+        Ok(prepared_mdoc.complete(x5chain, signature))
+    }
+
+    /// Directly sign and issue an mdoc.
+    pub async fn issue_async<S, Sig>(
+        doc_type: String,
+        namespaces: Namespaces,
+        validity_info: ValidityInfo,
+        digest_algorithm: DigestAlgorithm,
+        device_key_info: DeviceKeyInfo,
+        x5chain: X5Chain,
+        signer: S,
+    ) -> Result<Mdoc>
+    where
+        S: AsyncSigner<Sig> + SignatureAlgorithm,
+        Sig: SignatureEncoding + Send + 'static,
+    {
+        let prepared_mdoc = Self::prepare(
+            doc_type,
+            namespaces,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+            signer.algorithm(),
+        )?;
+
+        let signature_payload = prepared_mdoc.signature_payload();
+        let signature = signer
+            .sign_async(signature_payload)
+            .await
+            .map_err(|e| anyhow!("error signing cosesign1: {}", e))?
+            .to_vec();
+
+        Ok(prepared_mdoc.complete(x5chain, signature))
     }
 }
 
@@ -143,8 +169,9 @@ impl PreparedMdoc {
         self.prepared_sig.signature_payload()
     }
 
-    /// Supply the remotely signed signature to complete and issue the prepared mdoc.
-    pub fn complete(self, signature: Vec<u8>) -> Mdoc {
+    /// Supply the remotely signed signature and x5chain containing the issuing certificate
+    /// to complete and issue the prepared mdoc.
+    pub fn complete(self, x5chain: X5Chain, signature: Vec<u8>) -> Mdoc {
         let PreparedMdoc {
             doc_type,
             namespaces,
@@ -152,7 +179,10 @@ impl PreparedMdoc {
             prepared_sig,
         } = self;
 
-        let issuer_auth = prepared_sig.finalize(signature);
+        let mut issuer_auth = prepared_sig.finalize(signature);
+        issuer_auth
+            .unprotected_mut()
+            .insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
 
         Mdoc {
             doc_type,
@@ -194,12 +224,6 @@ impl Builder {
         self
     }
 
-    /// Set the x5chain of the issuing key.
-    pub fn x5chain(mut self, x5chain: X5Chain) -> Self {
-        self.x5chain = Some(x5chain);
-        self
-    }
-
     /// Prepare the mdoc for remote signing.
     ///
     /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
@@ -220,9 +244,6 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
-        let x5chain = self
-            .x5chain
-            .ok_or_else(|| anyhow!("missing parameter: 'x5chain'"))?;
 
         Mdoc::prepare(
             doc_type,
@@ -230,16 +251,15 @@ impl Builder {
             validity_info,
             digest_algorithm,
             device_key_info,
-            x5chain,
             signature_algorithm,
         )
     }
 
     /// Directly issue an mdoc.
-    pub fn issue<S, Sig>(self, signer: S) -> Result<Mdoc>
+    pub fn issue<S, Sig>(self, x5chain: X5Chain, signer: S) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
-        Sig: Signature,
+        Sig: SignatureEncoding,
     {
         let doc_type = self
             .doc_type
@@ -256,9 +276,6 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
-        let x5chain = self
-            .x5chain
-            .ok_or_else(|| anyhow!("missing parameter: 'x5chain'"))?;
 
         Mdoc::issue(
             doc_type,
@@ -269,6 +286,40 @@ impl Builder {
             x5chain,
             signer,
         )
+    }
+
+    /// Directly issue an mdoc.
+    pub async fn issue_async<S, Sig>(self, x5chain: X5Chain, signer: S) -> Result<Mdoc>
+    where
+        S: AsyncSigner<Sig> + SignatureAlgorithm,
+        Sig: SignatureEncoding + Send + 'static,
+    {
+        let doc_type = self
+            .doc_type
+            .ok_or_else(|| anyhow!("missing parameter: 'doc_type'"))?;
+        let namespaces = self
+            .namespaces
+            .ok_or_else(|| anyhow!("missing parameter: 'namespaces'"))?;
+        let validity_info = self
+            .validity_info
+            .ok_or_else(|| anyhow!("missing parameter: 'validity_info'"))?;
+        let digest_algorithm = self
+            .digest_algorithm
+            .ok_or_else(|| anyhow!("missing parameter: 'digest_algorithm'"))?;
+        let device_key_info = self
+            .device_key_info
+            .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
+
+        Mdoc::issue_async(
+            doc_type,
+            namespaces,
+            validity_info,
+            digest_algorithm,
+            device_key_info,
+            x5chain,
+            signer,
+        )
+        .await
     }
 }
 
@@ -377,7 +428,9 @@ pub mod test {
 
     use crate::definitions::traits::{FromJson, ToNamespaceMap};
     use elliptic_curve::sec1::ToEncodedPoint;
+    use p256::ecdsa::{Signature, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
+    use p256::SecretKey;
     use time::OffsetDateTime;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/issuer-cert.pem");
@@ -493,8 +546,8 @@ pub mod test {
             .to_ns_map();
 
         let namespaces = [
-            (isomdl_namespace.clone(), isomdl_data),
-            (aamva_namespace.clone(), aamva_data),
+            (isomdl_namespace, isomdl_data),
+            (aamva_namespace, aamva_data),
         ]
         .into_iter()
         .collect();
@@ -533,18 +586,17 @@ pub mod test {
             key_info: None,
         };
 
-        let signer: p256::ecdsa::SigningKey = p256::SecretKey::from_pkcs8_pem(ISSUER_KEY)
+        let signer: SigningKey = SecretKey::from_pkcs8_pem(ISSUER_KEY)
             .expect("failed to parse pem")
             .into();
 
         let mdoc = Mdoc::builder()
             .doc_type(doc_type)
             .namespaces(namespaces)
-            .x5chain(x5chain)
             .validity_info(validity_info)
             .digest_algorithm(digest_algorithm)
             .device_key_info(device_key_info)
-            .issue(signer)
+            .issue::<SigningKey, Signature>(x5chain, signer)
             .expect("failed to issue mdoc");
 
         Ok(mdoc)

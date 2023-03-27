@@ -16,6 +16,7 @@ use crate::{
     issuance::Mdoc,
 };
 use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
+use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
@@ -26,6 +27,7 @@ pub mod oid4vp;
 
 // TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
 // non-cbor serde implementors.
+// TODO: If we stored secret key bytes, it must implement Zeroize on Drop
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
@@ -156,7 +158,7 @@ impl SessionManagerInit {
 
         Ok(Self {
             documents,
-            e_device_key: e_device_key.to_be_bytes().to_vec(),
+            e_device_key: e_device_key.to_bytes().to_vec(),
             device_engagement,
         })
     }
@@ -191,7 +193,7 @@ impl SessionManagerEngaged {
         ))
         .map_err(Error::Tag24CborEncoding)?;
 
-        let e_device_key = p256::SecretKey::from_be_bytes(self.e_device_key.as_ref())?;
+        let e_device_key = p256::SecretKey::from_bytes(FieldBytes::from_slice(&self.e_device_key))?;
 
         let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key.into())
             .map_err(Error::SharedSecretGeneration)?;
@@ -689,7 +691,7 @@ pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
     let key: p256::ecdsa::SigningKey = p256::SecretKey::from_sec1_der(&der_bytes)?.into();
     use signature::Signer;
     key.try_sign(payload)
-        .map(|sig| sig.to_vec())
+        .map(|sig: p256::ecdsa::Signature| sig.to_vec())
         .map_err(Into::into)
 }
 
