@@ -80,7 +80,7 @@ pub enum Error {
     #[error("session manager was used incorrectly")]
     ApiMisuse,
     #[error("could not parse age attestation claim")]
-    ParsingError(#[from] io::Error),
+    ParsingError(ParseIntError),
 }
 
 // TODO: Do we need to support multiple documents of the same type?
@@ -726,7 +726,7 @@ pub fn nearest_age_attestation(
     let nearest_age_over = true_age_over_claims
         .iter()
         .filter(|f| f.0 >= requested_age)
-        .max_by_key(|claim| claim.0);
+        .min_by_key(|claim| claim.0);
 
     if let Some(age_attestation) = nearest_age_over {
         let element_id = format!("age_over_{age}", age = age_attestation.0);
@@ -738,7 +738,7 @@ pub fn nearest_age_attestation(
         let nearest_age_under = false_age_over_claims
             .iter()
             .filter(|f| f.0 <= requested_age)
-            .min_by_key(|claim| claim.0);
+            .max_by_key(|claim| claim.0);
 
         if let Some(age_attestation) = nearest_age_under {
             let element_id = format!("age_over_{age}", age = age_attestation.0);
@@ -753,12 +753,25 @@ pub fn nearest_age_attestation(
 }
 
 pub fn parse_age_from_element_identifier(element_identifier: String) -> Result<u8, Error> {
-    Ok(element_identifier[element_identifier.len() - 2..].parse::<u8>()?)
+    Ok(AgeOver::try_from(element_identifier)?.age_over)
+}
+
+pub struct AgeOver {
+    pub age_over: u8,
+}
+
+impl TryFrom<String> for AgeOver {
+    type Error = Error;
+    fn try_from(element_identifier: String) -> Result<Self, Self::Error> {
+        Ok(AgeOver {
+            age_over: element_identifier[element_identifier.len() - 2..].parse::<u8>()?,
+        })
+    }
 }
 
 impl From<ParseIntError> for Error {
-    fn from(_value: ParseIntError) -> Self {
-        Error::ParsingError
+    fn from(value: ParseIntError) -> Self {
+        Error::ParsingError(value)
     }
 }
 
