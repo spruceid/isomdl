@@ -82,7 +82,9 @@ pub enum Error {
     #[error("session manager was used incorrectly")]
     ApiMisuse,
     #[error("could not parse age attestation claim")]
-    ParsingError(ParseIntError),
+    ParsingError(#[from] ParseIntError),
+    #[error("age_over element identifier is malformed")]
+    PrefixError,
 }
 
 // TODO: Do we need to support multiple documents of the same type?
@@ -703,7 +705,6 @@ pub fn nearest_age_attestation(
 
     //find closest age_over_nn field that is true
     let owned_age_over_claims: Vec<(String, Tag24<IssuerSignedItem>)> = issuer_items
-        .clone()
         .into_inner()
         .into_iter()
         .filter(|element| element.0.contains("age_over"))
@@ -731,11 +732,8 @@ pub fn nearest_age_attestation(
         .min_by_key(|claim| claim.0);
 
     if let Some(age_attestation) = nearest_age_over {
-        let element_id = format!("age_over_{age}", age = age_attestation.0);
-        if let Some(item) = issuer_items.get(&element_id) {
-            return Ok(Some(item.to_owned()));
-        }
-    // if there is no appropriate true age attestation, find the closest false age attestation
+        return Ok(Some(age_attestation.1.to_owned()));
+        // if there is no appropriate true age attestation, find the closest false age attestation
     } else {
         let nearest_age_under = false_age_over_claims
             .iter()
@@ -743,10 +741,7 @@ pub fn nearest_age_attestation(
             .max_by_key(|claim| claim.0);
 
         if let Some(age_attestation) = nearest_age_under {
-            let element_id = format!("age_over_{age}", age = age_attestation.0);
-            if let Some(item) = issuer_items.get(&element_id) {
-                return Ok(Some(item.to_owned()));
-            }
+            return Ok(Some(age_attestation.1.to_owned()));
         }
     }
 
@@ -755,25 +750,20 @@ pub fn nearest_age_attestation(
 }
 
 pub fn parse_age_from_element_identifier(element_identifier: String) -> Result<u8, Error> {
-    Ok(AgeOver::try_from(element_identifier)?.age_over)
+    Ok(AgeOver::try_from(element_identifier)?.0)
 }
 
-pub struct AgeOver {
-    pub age_over: u8,
-}
+pub struct AgeOver(u8);
 
 impl TryFrom<String> for AgeOver {
     type Error = Error;
     fn try_from(element_identifier: String) -> Result<Self, Self::Error> {
-        Ok(AgeOver {
-            age_over: element_identifier[element_identifier.len() - 2..].parse::<u8>()?,
-        })
-    }
-}
-
-impl From<ParseIntError> for Error {
-    fn from(value: ParseIntError) -> Self {
-        Error::ParsingError(value)
+        if let Some(x) = element_identifier.strip_prefix("age_over_") {
+            let age_over = AgeOver(str::parse::<u8>(x)?);
+            Ok(age_over)
+        } else {
+            Err(Error::PrefixError)
+        }
     }
 }
 
@@ -850,9 +840,9 @@ mod test {
 
     #[test]
     fn test_age_attestation_response() {
-        let requested_element_identifier = "age_over_21".to_string();
+        let requested_element_identifier = "age_over_23".to_string();
         let element_identifier1 = "age_over_18".to_string();
-        let element_identifier2 = "age_over_20".to_string();
+        let element_identifier2 = "age_over_22".to_string();
         let element_identifier3 = "age_over_21".to_string();
 
         let random = vec![1, 2, 3, 4, 5];
@@ -867,7 +857,7 @@ mod test {
             digest_id: DigestId::new(2),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier2.clone(),
-            element_value: CborValue::Bool(true),
+            element_value: CborValue::Bool(false),
         };
 
         let issuer_signed_item3 = IssuerSignedItem {
@@ -880,13 +870,21 @@ mod test {
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();
         let issuer_item2 = Tag24::new(issuer_signed_item2).unwrap();
         let issuer_item3 = Tag24::new(issuer_signed_item3).unwrap();
-        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1);
-        issuer_items.insert(element_identifier2, issuer_item2);
+        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1.clone());
+        issuer_items.insert(element_identifier2, issuer_item2.clone());
         issuer_items.insert(element_identifier3, issuer_item3.clone());
 
         let result = nearest_age_attestation(requested_element_identifier, issuer_items)
             .expect("failed to process age attestation request");
 
-        assert_eq!(result.unwrap().inner_bytes, issuer_item3.inner_bytes);
+        assert_eq!(result.unwrap().inner_bytes, issuer_item2.inner_bytes);
+    }
+
+    #[test]
+    fn test_str_to_u8() {
+        let wib = "8";
+        let x = wib.as_bytes();
+
+        println!("{:?}", x);
     }
 }
