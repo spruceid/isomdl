@@ -1,3 +1,4 @@
+use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
@@ -19,6 +20,7 @@ use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
+use std::num::ParseIntError;
 use uuid::Uuid;
 
 pub mod oid4vp;
@@ -79,6 +81,10 @@ pub enum Error {
     CborEncoding(serde_cbor::Error),
     #[error("session manager was used incorrectly")]
     ApiMisuse,
+    #[error("could not parse age attestation claim")]
+    ParsingError(#[from] ParseIntError),
+    #[error("age_over element identifier is malformed")]
+    PrefixError,
 }
 
 // TODO: Do we need to support multiple documents of the same type?
@@ -691,9 +697,82 @@ pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
         .map_err(Into::into)
 }
 
+pub fn nearest_age_attestation(
+    element_identifier: String,
+    issuer_items: NonEmptyMap<String, Tag24<IssuerSignedItem>>,
+) -> Result<Option<Tag24<IssuerSignedItem>>, Error> {
+    let requested_age: u8 = parse_age_from_element_identifier(element_identifier)?;
+
+    //find closest age_over_nn field that is true
+    let owned_age_over_claims: Vec<(String, Tag24<IssuerSignedItem>)> = issuer_items
+        .into_inner()
+        .into_iter()
+        .filter(|element| element.0.contains("age_over"))
+        .collect();
+
+    let age_over_claims_numerical: Result<Vec<(u8, Tag24<IssuerSignedItem>)>, Error> =
+        owned_age_over_claims
+            .iter()
+            .map(|f| {
+                Ok((
+                    parse_age_from_element_identifier(f.to_owned().0)?,
+                    f.to_owned().1,
+                ))
+            })
+            .collect();
+
+    let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
+        age_over_claims_numerical?
+            .into_iter()
+            .partition(|x| x.1.to_owned().into_inner().element_value == CborValue::Bool(true));
+
+    let nearest_age_over = true_age_over_claims
+        .iter()
+        .filter(|f| f.0 >= requested_age)
+        .min_by_key(|claim| claim.0);
+
+    if let Some(age_attestation) = nearest_age_over {
+        return Ok(Some(age_attestation.1.to_owned()));
+        // if there is no appropriate true age attestation, find the closest false age attestation
+    } else {
+        let nearest_age_under = false_age_over_claims
+            .iter()
+            .filter(|f| f.0 <= requested_age)
+            .max_by_key(|claim| claim.0);
+
+        if let Some(age_attestation) = nearest_age_under {
+            return Ok(Some(age_attestation.1.to_owned()));
+        }
+    }
+
+    //if there is still no appropriate attestation, do not return a value
+    Ok(None)
+}
+
+pub fn parse_age_from_element_identifier(element_identifier: String) -> Result<u8, Error> {
+    Ok(AgeOver::try_from(element_identifier)?.0)
+}
+
+pub struct AgeOver(u8);
+
+impl TryFrom<String> for AgeOver {
+    type Error = Error;
+    fn try_from(element_identifier: String) -> Result<Self, Self::Error> {
+        if let Some(x) = element_identifier.strip_prefix("age_over_") {
+            let age_over = AgeOver(str::parse::<u8>(x)?);
+            Ok(age_over)
+        } else {
+            Err(Error::PrefixError)
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use crate::definitions::helpers::ByteStr;
+
     use super::*;
+    use crate::definitions::mso::DigestId;
     use serde_json::json;
 
     #[test]
@@ -750,5 +829,62 @@ mod test {
         let filtered = super::filter_permitted(&requested, permitted);
 
         assert_eq!(expected, filtered);
+    }
+
+    #[test]
+    fn test_parse_age_from_element_identifier() {
+        let element_identifier = "age_over_88".to_string();
+        let age = parse_age_from_element_identifier(element_identifier).unwrap();
+        assert_eq!(age, 88)
+    }
+
+    #[test]
+    fn test_age_attestation_response() {
+        let requested_element_identifier = "age_over_23".to_string();
+        let element_identifier1 = "age_over_18".to_string();
+        let element_identifier2 = "age_over_22".to_string();
+        let element_identifier3 = "age_over_21".to_string();
+
+        let random = vec![1, 2, 3, 4, 5];
+        let issuer_signed_item1 = IssuerSignedItem {
+            digest_id: DigestId::new(1),
+            random: ByteStr::from(random.clone()),
+            element_identifier: element_identifier1.clone(),
+            element_value: CborValue::Bool(true),
+        };
+
+        let issuer_signed_item2 = IssuerSignedItem {
+            digest_id: DigestId::new(2),
+            random: ByteStr::from(random.clone()),
+            element_identifier: element_identifier2.clone(),
+            element_value: CborValue::Bool(false),
+        };
+
+        let issuer_signed_item3 = IssuerSignedItem {
+            digest_id: DigestId::new(3),
+            random: ByteStr::from(random),
+            element_identifier: element_identifier3.clone(),
+            element_value: CborValue::Bool(false),
+        };
+
+        let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();
+        let issuer_item2 = Tag24::new(issuer_signed_item2).unwrap();
+        let issuer_item3 = Tag24::new(issuer_signed_item3).unwrap();
+        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1.clone());
+        issuer_items.insert(element_identifier2, issuer_item2.clone());
+        issuer_items.insert(element_identifier3, issuer_item3.clone());
+
+        let result = nearest_age_attestation(requested_element_identifier, issuer_items)
+            .expect("failed to process age attestation request");
+
+        assert_eq!(result.unwrap().inner_bytes, issuer_item2.inner_bytes);
+    }
+
+    #[test]
+    fn test_str_to_u8() {
+        let wib = "8";
+        let x = wib.as_bytes();
+
+        println!("{:?}", x);
     }
 }
