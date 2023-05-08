@@ -686,17 +686,6 @@ fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> Perm
         .collect()
 }
 
-// TODO: Remove this function. This adds a temporary way to sign DeviceRequest for test mdocs.
-pub fn sign_payload(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let der = include_str!("../../test/issuance/device_key.b64");
-    let der_bytes = base64::decode(der)?;
-    let key: p256::ecdsa::SigningKey = p256::SecretKey::from_sec1_der(&der_bytes)?.into();
-    use signature::Signer;
-    key.try_sign(payload)
-        .map(|sig: p256::ecdsa::Signature| sig.to_vec())
-        .map_err(Into::into)
-}
-
 pub fn nearest_age_attestation(
     element_identifier: String,
     issuer_items: NonEmptyMap<String, Tag24<IssuerSignedItem>>,
