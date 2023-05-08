@@ -24,7 +24,6 @@ pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
 pub enum DeviceAuth {
     #[serde(rename_all = "camelCase")]
     Signature { device_signature: CoseSign1 },
-    /// TODO: Implement CoseMac0
     #[serde(rename_all = "camelCase")]
     Mac { device_mac: CborValue },
 }

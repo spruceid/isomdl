@@ -25,9 +25,6 @@ use uuid::Uuid;
 
 pub mod oid4vp;
 
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
-// TODO: If we stored secret key bytes, it must implement Zeroize on Drop
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
@@ -35,8 +32,6 @@ pub struct SessionManagerInit {
     device_engagement: Tag24<DeviceEngagement>,
 }
 
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
     documents: Documents,
@@ -45,8 +40,6 @@ pub struct SessionManagerEngaged {
     handover: Handover,
 }
 
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
     documents: Documents,
@@ -58,10 +51,7 @@ pub struct SessionManager {
     state: State,
 }
 
-#[derive(Clone, Debug, Default)]
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub enum State {
     #[default]
     AwaitingRequest,
@@ -87,15 +77,11 @@ pub enum Error {
     PrefixError,
 }
 
-// TODO: Do we need to support multiple documents of the same type?
 pub type Documents = NonEmptyMap<DocType, Document>;
 type DocType = String;
 
 /// Device-internal document datatype.
-#[derive(Debug, Clone)]
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub id: Uuid,
     pub issuer_auth: CoseSign1,
@@ -103,10 +89,7 @@ pub struct Document {
     pub namespaces: Namespaces,
 }
 
-#[derive(Debug, Clone)]
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedDeviceResponse {
     prepared_documents: Vec<PreparedDocument>,
     signed_documents: Vec<DeviceResponseDoc>,
@@ -114,10 +97,7 @@ pub struct PreparedDeviceResponse {
     status: Status,
 }
 
-#[derive(Debug, Clone)]
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PreparedDocument {
     id: Uuid,
     doc_type: String,
@@ -251,9 +231,7 @@ impl SessionManager {
             .doc_requests
             .into_inner()
             .into_iter()
-            .map(|DocRequest { items_request, .. }|
-                 // TODO: implement reader auth
-                 items_request.into_inner())
+            .map(|DocRequest { items_request, .. }| items_request.into_inner())
             .collect())
     }
 
@@ -263,7 +241,6 @@ impl SessionManager {
     }
 
     fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<RequestedItems> {
-        // TODO: Better handling for termination status and missing data.
         let data = request.data.ok_or_else(|| {
             anyhow::anyhow!("no mdoc requests received, assume session can be terminated")
         })?;
@@ -291,9 +268,7 @@ impl SessionManager {
     }
 
     /// Handle a request from the reader.
-    // TODO: Improve error handling.
     pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
-        // TODO: Check session manager state.
         let session_data: SessionData = serde_cbor::from_slice(request)?;
         self.handle_decoded_request(session_data)
     }
@@ -307,7 +282,6 @@ impl SessionManager {
     }
 
     /// Submit the externally signed signature.
-    // TODO: Remove Result -- is unnecessary if we make cbor encoding infallible.
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) -> anyhow::Result<()> {
         if matches!(self.state, State::Signing(_)) {
             match std::mem::take(&mut self.state) {
@@ -493,7 +467,6 @@ pub trait DeviceSession {
             let mut errors: BTreeMap<String, NonEmptyMap<String, DocumentErrorCode>> =
                 Default::default();
 
-            // TODO: Handle special cases, i.e. for `age_over_NN`.
             for (namespace, elements) in namespaces.into_iter() {
                 if let Some(issuer_items) = document.namespaces.get(&namespace) {
                     for element_identifier in elements.into_iter() {
@@ -534,7 +507,6 @@ pub trait DeviceSession {
             let device_namespaces = match Tag24::new(Default::default()) {
                 Ok(dp) => dp,
                 Err(_e) => {
-                    //tracing::error!("failed to convert device namespaces to cbor: {}", e);
                     let error: DocumentError =
                         [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
                             .into_iter()
@@ -551,7 +523,6 @@ pub trait DeviceSession {
             let device_auth = match Tag24::new(device_auth) {
                 Ok(da) => da,
                 Err(_e) => {
-                    //tracing::error!("failed to convert device authentication to cbor: {}", e);
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
                         .into_iter()
                         .collect();
@@ -562,7 +533,6 @@ pub trait DeviceSession {
             let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
                 Ok(dab) => dab,
                 Err(_e) => {
-                    //tracing::error!("failed to convert device authentication to cbor: {}", e);
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
                         .into_iter()
                         .collect();
@@ -578,7 +548,6 @@ pub trait DeviceSession {
             {
                 Ok(prepared) => prepared,
                 Err(_e) => {
-                    //tracing::error!("failed to prepare COSE_Sign1: {}", e);
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
                         .into_iter()
                         .collect();

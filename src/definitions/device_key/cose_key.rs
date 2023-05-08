@@ -28,12 +28,7 @@ pub enum EC2Curve {
     P256,
     P384,
     P521,
-    // TODO: secp256k1 is not defined in the 18013-5 specification. The CoseKey implementation
-    // should be moved into cose-rs, and we should have a validation step that the CoseKey being
-    // used is valid for the cipher suite.
     P256K,
-    // TODO: Support for brainpool curves can be added when they are added to the IANA COSE
-    // Elliptic Curves registry.
 }
 
 /// The RFC-8152 identifier of the curve, for OKP key type.
