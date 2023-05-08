@@ -15,8 +15,7 @@ use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
-// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
-// non-cbor serde implementors.
+
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
     session_transcript: Tag24<SessionTranscript>,
@@ -64,8 +63,6 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-// TODO: Refactor for more general implementation. This implementation will work for a simple test
-// reader application, but it is not at all configurable.
 impl SessionManager {
     pub fn establish_session(
         qr_code: String,
@@ -95,7 +92,6 @@ impl SessionManager {
         let session_transcript = Tag24::new(SessionTranscript(
             device_engagement_bytes,
             e_reader_key_public.clone(),
-            // TODO: Support NFC handover.
             Handover::QR,
         ))?;
 
@@ -150,9 +146,7 @@ impl SessionManager {
         serde_cbor::to_vec(&session).map_err(Into::into)
     }
 
-    // TODO: Support requesting specific doc types.
     fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
-        //TODO: Validate Request and determine behaviour for invalid requests
         // if !validate_request(namespaces.clone()).is_ok() {
         //     return Err(anyhow::Error::msg(
         //         "At least one of the namespaces contain an invalid combination of fields to request",
@@ -164,7 +158,6 @@ impl SessionManager {
             request_info: None,
         };
         let doc_request = DocRequest {
-            // TODO: implement reader auth.
             reader_auth: None,
             items_request: Tag24::new(items_request)?,
         };
@@ -181,14 +174,12 @@ impl SessionManager {
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
-    // TODO: Handle any doc type.
     pub fn handle_response(&mut self, response: &[u8]) -> Result<BTreeMap<String, Value>, Error> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
             Some(r) => r,
         };
-        // TODO: Handle case where session termination status code is returned with data.
         let decrypted_response = session::decrypt_device_data(
             &self.sk_device.into(),
             encrypted_response.as_ref(),
@@ -196,19 +187,6 @@ impl SessionManager {
         )
         .map_err(|_e| Error::DecryptionError)?;
         let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
-        // TODO: Mdoc authentication.
-        //
-        // 1. As part of mdoc response, mdl produces `DeviceAuth`, which is either a `DeviceSignature` or
-        //    a `DeviceMac`.
-        //
-        // 2. The reader must verify that `DeviceKey` in the MSO is the key that generated the
-        //    `DeviceAuth`.
-        //
-        // 3. The reader must verify that the `DeviceKey` is authorized by `KeyAuthorizations` to
-        //    sign over the data elements present in `DeviceNameSpaces`.
-        //
-        // 4. The reader must verify that the `DeviceKey` is the subject of the x5chain, and that the
-        //    x5chain is consistent and issued by a trusted source.
         let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
         response
             .documents

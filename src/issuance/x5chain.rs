@@ -85,7 +85,6 @@ impl Builder {
         self.with_der(&data)
     }
     pub fn build(self) -> Result<X5Chain> {
-        // TODO: Add chain validation
         Ok(X5Chain(self.certs.try_into().map_err(|_| {
             anyhow!("at least one certificate must be given to the builder")
         })?))
@@ -99,9 +98,6 @@ pub mod test {
     static CERT_256: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
     static CERT_384: &[u8] = include_bytes!("../../test/issuance/384-cert.pem");
     static CERT_521: &[u8] = include_bytes!("../../test/issuance/521-cert.pem");
-
-    // TODO: Build tooling around the x509-cert crate so we can compare certificates, inspect
-    // signature algorithm, ascertain whether one certificate issued another, etc.
 
     #[test]
     pub fn self_signed_es256() {

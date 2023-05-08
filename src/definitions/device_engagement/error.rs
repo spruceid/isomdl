@@ -2,7 +2,6 @@ use crate::definitions::device_key::cose_key::Error as CoseKeyError;
 use crate::definitions::helpers::tag24::Error as Tag24Error;
 use serde_cbor::Error as SerdeCborError;
 
-// TODO: Add more context to errors.
 /// Errors that can occur when deserialising a DeviceEngagement.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum Error {

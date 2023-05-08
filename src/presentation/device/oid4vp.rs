@@ -41,7 +41,6 @@ impl SessionManager {
         K: TryInto<CoseKey>,
         <K as TryInto<CoseKey>>::Error: Sync + Send + std::error::Error + 'static,
     {
-        //TODO: This is bad.
         let device_key = Tag24::new(
             documents
                 .as_ref()
@@ -67,8 +66,6 @@ impl SessionManager {
         let session_transcript =
             Tag24::new(SessionTranscript(device_engagement, e_reader_key, handover))?;
 
-        // TODO: Handle the document requests. For now we assume all data from all documents are
-        // being requested, with no intent to retain.
         let requested_items = documents
             .as_ref()
             .values()

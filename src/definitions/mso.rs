@@ -2,8 +2,6 @@ use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-// TODO: When deserializing DigestId, check that it is not negative.
-
 /// DigestId is a unsigned integer between 0 and (2^31 - 1) inclusive.
 /// Therefore the most straightforward way to represent it is as a i32 that is enforced to be
 /// positive.

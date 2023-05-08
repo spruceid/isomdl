@@ -129,7 +129,6 @@ impl From<EncodedPoints> for Vec<u8> {
     }
 }
 
-// TODO: Make this function cryptographically secure.
 pub fn create_p256_ephemeral_keys() -> Result<(p256::SecretKey, CoseKey), Error> {
     let private_key = p256::SecretKey::random(&mut OsRng);
 
