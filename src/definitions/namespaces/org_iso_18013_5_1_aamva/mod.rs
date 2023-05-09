@@ -68,16 +68,16 @@ mod test {
               "domestic_vehicle_class":{
                 "domestic_vehicle_class_code":"A",
                 "domestic_vehicle_class_description":"unknown",
-                "issue_date":"2022-08-09",
-                "expiry_date":"2030-10-20"
+                "issue_date":"2020-01-01",
+                "expiry_date":"2030-01-01"
               }
             },
             {
               "domestic_vehicle_class":{
                 "domestic_vehicle_class_code":"B",
                 "domestic_vehicle_class_description":"unknown",
-                "issue_date":"2022-08-09",
-                "expiry_date":"2030-10-20"
+                "issue_date":"2020-01-01",
+                "expiry_date":"2030-01-01"
               }
             }
           ],
@@ -86,15 +86,15 @@ mod test {
           "veteran":1,
           "family_name_truncation":"N",
           "given_name_truncation":"N",
-          "aka_family_name.v2":"Doe",
-          "aka_given_name.v2":"John",
+          "aka_family_name.v2":"Smithy",
+          "aka_given_name.v2":"Ally",
           "aka_suffix":"I",
           "weight_range":3,
           "race_ethnicity":"AI",
           "EDL_credential":1,
-          "sex":2,
+          "sex":1,
           "DHS_compliance":"F",
-          "resident_county":"013",
+          "resident_county":"001",
           "hazmat_endorsement_expiration_date":"2024-01-30",
           "CDL_indicator":1,
           "DHS_compliance_text":"Compliant",

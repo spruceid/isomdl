@@ -78,25 +78,25 @@ mod test {
         // Missing biometric_template, *_national_character and signature_usual_mark as we need
         // good examples for these.
         let json = serde_json::json!({
-          "family_name":"Doe",
-          "given_name":"John",
-          "birth_date":"1980-10-10",
-          "issue_date":"2020-08-10",
-          "expiry_date":"2030-10-30",
+          "family_name":"Smith",
+          "given_name":"Alice",
+          "birth_date":"1980-01-01",
+          "issue_date":"2020-01-01",
+          "expiry_date":"2030-01-01",
           "issuing_country":"US",
-          "issuing_authority":"CA DMV",
-          "document_number":"I12345678",
+          "issuing_authority":"NY DMV",
+          "document_number":"DL12345678",
           "portrait":include_str!("../../../../test/issuance/portrait.b64"),
           "driving_privileges":[
             {
                "vehicle_category_code":"A",
-               "issue_date":"2022-08-09",
-               "expiry_date":"2030-10-20"
+               "issue_date":"2020-01-01",
+               "expiry_date":"2030-01-01"
             },
             {
                "vehicle_category_code":"B",
-               "issue_date":"2022-08-09",
-               "expiry_date":"2030-10-20"
+               "issue_date":"2020-01-01",
+               "expiry_date":"2030-01-01"
             }
           ],
           "un_distinguishing_sign":"USA",
@@ -106,18 +106,18 @@ mod test {
           "weight":70,
           "eye_colour":"hazel",
           "hair_colour":"red",
-          "birth_place":"California",
-          "resident_address":"2415 1st Avenue",
-          "portrait_capture_date":"2020-08-10T12:00:00Z",
-          "age_in_years":42,
+          "birth_place":"Canada",
+          "resident_address":"138 Eagle Street",
+          "portrait_capture_date":"2020-01-01T12:00:00Z",
+          "age_in_years":43,
           "age_birth_year":1980,
           "age_over_18":true,
           "age_over_21":true,
-          "issuing_jurisdiction":"US-CA",
+          "issuing_jurisdiction":"US-NY",
           "nationality":"US",
-          "resident_city":"Sacramento",
-          "resident_state":"California",
-          "resident_postal_code":"95818",
+          "resident_city":"Albany",
+          "resident_state":"New York",
+          "resident_postal_code":"12202-1719",
           "resident_country": "US"
         });
 
