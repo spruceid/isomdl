@@ -16,6 +16,9 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+pub mod oid4vp;
+// TODO: Consider removing serde derivations down the line as Tag24 does not round-trip with
+// non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
     session_transcript: Tag24<SessionTranscript>,
@@ -212,6 +215,10 @@ impl SessionManager {
             });
         Ok(parsed_response)
     }
+}
+
+pub trait ReaderSession {
+    fn handle_response(&mut self) -> Result<BTreeMap<String, Value>, Error>;
 }
 
 fn parse_response(value: CborValue) -> Result<Value, Error> {

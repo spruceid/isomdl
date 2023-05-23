@@ -1,7 +1,7 @@
 use super::{DeviceSession, Documents, PreparedDeviceResponse, RequestedItems};
 use crate::definitions::{
     device_engagement::{DeviceEngagement, Security},
-    device_request::ItemsRequest,
+    device_request::{ItemsRequest},
     device_response::Status,
     helpers::{NonEmptyMap, NonEmptyVec, Tag24},
     oid4vp::DeviceResponse,
@@ -208,14 +208,5 @@ mod test {
             let signature: Signature = device_key.sign(payload);
             prepared_response.submit_next_signature(signature.to_bytes().to_vec());
         }
-
-        let _documents: String = serde_cbor::to_vec(&prepared_response.finalize_oid4vp_response())
-            .map(|docs| base64::encode_config(docs, base64::URL_SAFE_NO_PAD))
-            .unwrap();
-
-        // Record generated response:
-        // use std::io::Write;
-        // let mut file = std::fs::File::create("vp_token").unwrap();
-        // file.write_all(_documents[0].as_bytes()).unwrap()
     }
 }

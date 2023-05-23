@@ -467,6 +467,7 @@ pub trait DeviceSession {
             let mut errors: BTreeMap<String, NonEmptyMap<String, DocumentErrorCode>> =
                 Default::default();
 
+            // TODO: Handle special cases, i.e. for `age_over_NN`.
             for (namespace, elements) in namespaces.into_iter() {
                 if let Some(issuer_items) = document.namespaces.get(&namespace) {
                     for element_identifier in elements.into_iter() {
@@ -836,13 +837,5 @@ mod test {
             .expect("failed to process age attestation request");
 
         assert_eq!(result.unwrap().inner_bytes, issuer_item2.inner_bytes);
-    }
-
-    #[test]
-    fn test_str_to_u8() {
-        let wib = "8";
-        let x = wib.as_bytes();
-
-        println!("{:?}", x);
     }
 }
