@@ -47,6 +47,7 @@ pub struct Builder {
     validity_info: Option<ValidityInfo>,
     digest_algorithm: Option<DigestAlgorithm>,
     device_key_info: Option<DeviceKeyInfo>,
+    enable_decoy_digests: Option<bool>,
 }
 
 impl Mdoc {
@@ -62,13 +63,15 @@ impl Mdoc {
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
         signature_algorithm: Algorithm,
+        enable_decoy_digests: bool,
     ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
             authorizations.validate()?;
         }
 
         let issuer_namespaces = to_issuer_namespaces(namespaces)?;
-        let value_digests = digest_namespaces(&issuer_namespaces, digest_algorithm)?;
+        let value_digests =
+            digest_namespaces(&issuer_namespaces, digest_algorithm, enable_decoy_digests)?;
 
         let mso = Mso {
             version: "1.0".to_string(),
@@ -98,6 +101,7 @@ impl Mdoc {
     }
 
     /// Directly sign and issue an mdoc.
+    #[allow(clippy::too_many_arguments)]
     pub fn issue<S, Sig>(
         doc_type: String,
         namespaces: Namespaces,
@@ -105,6 +109,7 @@ impl Mdoc {
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
         x5chain: X5Chain,
+        enable_decoy_digests: bool,
         signer: S,
     ) -> Result<Mdoc>
     where
@@ -118,6 +123,7 @@ impl Mdoc {
             digest_algorithm,
             device_key_info,
             signer.algorithm(),
+            enable_decoy_digests,
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -130,6 +136,7 @@ impl Mdoc {
     }
 
     /// Directly sign and issue an mdoc.
+    #[allow(clippy::too_many_arguments)]
     pub async fn issue_async<S, Sig>(
         doc_type: String,
         namespaces: Namespaces,
@@ -137,6 +144,7 @@ impl Mdoc {
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
         x5chain: X5Chain,
+        enable_decoy_digests: bool,
         signer: S,
     ) -> Result<Mdoc>
     where
@@ -150,6 +158,7 @@ impl Mdoc {
             digest_algorithm,
             device_key_info,
             signer.algorithm(),
+            enable_decoy_digests,
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -224,6 +233,12 @@ impl Builder {
         self
     }
 
+    /// Enable the use of decoy digests.
+    pub fn enable_decoy_digests(mut self, enable_decoy_digests: bool) -> Self {
+        self.enable_decoy_digests = Some(enable_decoy_digests);
+        self
+    }
+
     /// Prepare the mdoc for remote signing.
     ///
     /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
@@ -244,6 +259,7 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
+        let enable_decoy_digests = self.enable_decoy_digests.unwrap_or(true);
 
         Mdoc::prepare(
             doc_type,
@@ -252,6 +268,7 @@ impl Builder {
             digest_algorithm,
             device_key_info,
             signature_algorithm,
+            enable_decoy_digests,
         )
     }
 
@@ -276,6 +293,7 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
+        let enable_decoy_digests = self.enable_decoy_digests.unwrap_or(true);
 
         Mdoc::issue(
             doc_type,
@@ -284,6 +302,7 @@ impl Builder {
             digest_algorithm,
             device_key_info,
             x5chain,
+            enable_decoy_digests,
             signer,
         )
     }
@@ -309,6 +328,7 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
+        let enable_decoy_digests = self.enable_decoy_digests.unwrap_or_default();
 
         Mdoc::issue_async(
             doc_type,
@@ -317,6 +337,7 @@ impl Builder {
             digest_algorithm,
             device_key_info,
             x5chain,
+            enable_decoy_digests,
             signer,
         )
         .await
@@ -363,16 +384,23 @@ fn to_issuer_signed_items(
 fn digest_namespaces(
     namespaces: &IssuerNamespaces,
     digest_algorithm: DigestAlgorithm,
+    enable_decoy_digests: bool,
 ) -> Result<BTreeMap<String, DigestIds>> {
     namespaces
         .iter()
-        .map(|(name, elements)| Ok((name.clone(), digest_namespace(elements, digest_algorithm)?)))
+        .map(|(name, elements)| {
+            Ok((
+                name.clone(),
+                digest_namespace(elements, digest_algorithm, enable_decoy_digests)?,
+            ))
+        })
         .collect()
 }
 
 fn digest_namespace(
     elements: &[IssuerSignedItemBytes],
     digest_algorithm: DigestAlgorithm,
+    enable_decoy_digests: bool,
 ) -> Result<DigestIds> {
     let mut used_ids = elements
         .iter()
@@ -389,7 +417,11 @@ fn digest_namespace(
     let random_digests = random_ids
         .zip(random_bytes)
         .map(Result::<_, anyhow::Error>::Ok)
-        .take(rand::thread_rng().gen_range(5..10));
+        .take(if enable_decoy_digests {
+            rand::thread_rng().gen_range(5..10)
+        } else {
+            0
+        });
 
     elements
         .iter()
@@ -533,7 +565,7 @@ pub mod test {
         Ok(())
     }
 
-    pub fn minimal_test_mdoc() -> anyhow::Result<Mdoc> {
+    fn minimal_test_mdoc_builder() -> Builder {
         let doc_type = String::from("org.iso.18013.5.1.mDL");
         let isomdl_namespace = String::from("org.iso.18013.5.1");
         let aamva_namespace = String::from("org.iso.18013.5.1.aamva");
@@ -551,12 +583,6 @@ pub mod test {
         ]
         .into_iter()
         .collect();
-
-        let x5chain = X5Chain::builder()
-            .with_pem(ISSUER_CERT)
-            .unwrap()
-            .build()
-            .unwrap();
 
         let validity_info = ValidityInfo {
             signed: OffsetDateTime::now_utc(),
@@ -586,19 +612,91 @@ pub mod test {
             key_info: None,
         };
 
-        let signer: SigningKey = SecretKey::from_pkcs8_pem(ISSUER_KEY)
-            .expect("failed to parse pem")
-            .into();
-
-        let mdoc = Mdoc::builder()
+        Mdoc::builder()
             .doc_type(doc_type)
             .namespaces(namespaces)
             .validity_info(validity_info)
             .digest_algorithm(digest_algorithm)
             .device_key_info(device_key_info)
-            .issue::<SigningKey, Signature>(x5chain, signer)
-            .expect("failed to issue mdoc");
+    }
 
-        Ok(mdoc)
+    pub fn minimal_test_mdoc() -> anyhow::Result<Mdoc> {
+        let mdoc_builder = minimal_test_mdoc_builder();
+
+        let x5chain = X5Chain::builder()
+            .with_pem(ISSUER_CERT)
+            .unwrap()
+            .build()
+            .unwrap();
+        let signer: SigningKey = SecretKey::from_pkcs8_pem(ISSUER_KEY)
+            .expect("failed to parse pem")
+            .into();
+
+        Ok(mdoc_builder
+            .issue::<SigningKey, Signature>(x5chain, signer)
+            .expect("failed to issue mdoc"))
+    }
+
+    #[test]
+    fn decoy_digests() {
+        let mdoc_builder = minimal_test_mdoc_builder();
+        let x5chain = X5Chain::builder()
+            .with_pem(ISSUER_CERT)
+            .unwrap()
+            .build()
+            .unwrap();
+        let signer: SigningKey = SecretKey::from_pkcs8_pem(ISSUER_KEY)
+            .expect("failed to parse pem")
+            .into();
+
+        let mdoc_decoy = &mdoc_builder
+            .clone()
+            .issue::<SigningKey, Signature>(x5chain.clone(), signer.clone())
+            .unwrap();
+
+        let mdoc_builder = mdoc_builder.enable_decoy_digests(false);
+        let mdoc_no_decoy_1 = &mdoc_builder
+            .clone()
+            .issue::<SigningKey, Signature>(x5chain.clone(), signer.clone())
+            .unwrap();
+        let mdoc_no_decoy_2 = &mdoc_builder
+            .issue::<SigningKey, Signature>(x5chain, signer)
+            .unwrap();
+
+        // Asserting on number of digests
+        assert_eq!(
+            mdoc_decoy
+                .namespaces
+                .values()
+                .fold(0, |acc, x| acc + x.len()),
+            mdoc_no_decoy_1
+                .namespaces
+                .values()
+                .fold(0, |acc, x| acc + x.len()),
+        );
+        assert_ne!(
+            mdoc_decoy
+                .mso
+                .value_digests
+                .values()
+                .fold(0, |acc, x| acc + x.len()),
+            mdoc_no_decoy_1
+                .mso
+                .value_digests
+                .values()
+                .fold(0, |acc, x| acc + x.len()),
+        );
+        assert_eq!(
+            mdoc_no_decoy_1
+                .mso
+                .value_digests
+                .values()
+                .fold(0, |acc, x| acc + x.len()),
+            mdoc_no_decoy_2
+                .mso
+                .value_digests
+                .values()
+                .fold(0, |acc, x| acc + x.len()),
+        );
     }
 }
