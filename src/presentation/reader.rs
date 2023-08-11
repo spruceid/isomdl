@@ -6,8 +6,9 @@ use crate::definitions::{
         self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
         SessionEstablishment,
     },
-    DeviceEngagement, DeviceResponse, SessionData, SessionTranscript,
+    DeviceEngagement, DeviceResponse, SessionData,
 };
+use crate::presentation::reader::session::AttendedSessionTranscript;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -21,7 +22,7 @@ pub mod oid4vp;
 // non-cbor serde implementors.
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
-    session_transcript: Tag24<SessionTranscript>,
+    session_transcript: Tag24<AttendedSessionTranscript>,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
@@ -92,7 +93,7 @@ impl SessionManager {
             &e_reader_key_private.into(),
         )?;
 
-        let session_transcript = Tag24::new(SessionTranscript(
+        let session_transcript = Tag24::new(AttendedSessionTranscript(
             device_engagement_bytes,
             e_reader_key_public.clone(),
             Handover::QR,

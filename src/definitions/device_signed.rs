@@ -1,11 +1,11 @@
-use crate::definitions::{
-    helpers::{NonEmptyMap, Tag24},
-    session::SessionTranscript,
-};
+use crate::definitions::helpers::{NonEmptyMap, Tag24};
+use crate::presentation::device::DeviceSession;
 use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
+
+use super::session::AttendedSessionTranscript;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,19 +28,19 @@ pub enum DeviceAuth {
     Mac { device_mac: CborValue },
 }
 
-pub type DeviceAuthenticationBytes = Tag24<DeviceAuthentication>;
+pub type DeviceAuthenticationBytes = Tag24<AttendedDeviceAuthentication>;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DeviceAuthentication(
+#[derive(Clone, Deserialize, Serialize)]
+pub struct AttendedDeviceAuthentication(
     &'static str,
-    pub SessionTranscript,
+    pub <crate::presentation::device::SessionManager as DeviceSession>::T,
     pub String,
     pub DeviceNamespacesBytes,
 );
 
-impl DeviceAuthentication {
+impl AttendedDeviceAuthentication {
     pub fn new(
-        transcript: SessionTranscript,
+        transcript: AttendedSessionTranscript,
         doc_type: String,
         namespaces_bytes: DeviceNamespacesBytes,
     ) -> Self {

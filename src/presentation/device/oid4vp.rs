@@ -1,31 +1,197 @@
 use super::{DeviceSession, Documents, PreparedDeviceResponse, RequestedItems};
+use crate::definitions::oid4vp::DeviceResponse;
 use crate::definitions::{
-    device_engagement::{DeviceEngagement, Security},
-    device_request::{ItemsRequest},
-    device_response::Status,
+    device_engagement::Security,
+    device_request::ItemsRequest,
+    device_response::{DocumentError, DocumentErrorCode, Status},
+    device_signed::AttendedDeviceAuthentication,
     helpers::{NonEmptyMap, NonEmptyVec, Tag24},
-    oid4vp::DeviceResponse,
-    session::{Handover, SessionTranscript},
-    CoseKey,
+    issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
+    session::Handover,
+    CoseKey, DeviceEngagement,
 };
+use crate::presentation::device::filter_permitted;
+use crate::presentation::device::AttendedSessionTranscript;
+use crate::presentation::device::PermittedItems;
+use crate::presentation::device::PreparedDocument;
 use anyhow::Result;
+use cose_rs::CoseSign1;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionManager {
     documents: Documents,
-    session_transcript: Tag24<SessionTranscript>,
+    session_transcript: AttendedSessionTranscript,
     requested_items: RequestedItems,
 }
 
 impl DeviceSession for SessionManager {
+    type T = AttendedSessionTranscript;
     fn documents(&self) -> &Documents {
         &self.documents
     }
 
-    fn session_transcript(&self) -> &Tag24<SessionTranscript> {
-        &self.session_transcript
+    fn session_transcript(&self) -> AttendedSessionTranscript {
+        self.session_transcript.clone()
+    }
+
+    fn prepare_response(
+        &self,
+        requests: &RequestedItems,
+        permitted: PermittedItems,
+    ) -> PreparedDeviceResponse {
+        let mut prepared_documents: Vec<PreparedDocument> = Vec::new();
+        let mut document_errors: Vec<DocumentError> = Vec::new();
+
+        for (doc_type, namespaces) in filter_permitted(requests, permitted).into_iter() {
+            let document = match self.documents().get(&doc_type) {
+                Some(doc) => doc,
+                None => {
+                    // tracing::error!("holder owns no documents of type {}", doc_type);
+                    let error: DocumentError =
+                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
+                            .into_iter()
+                            .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let signature_algorithm = match document
+                .mso
+                .device_key_info
+                .device_key
+                .signature_algorithm()
+            {
+                Some(alg) => alg,
+                None => {
+                    //tracing::error!(
+                    //    "device key for document '{}' cannot perform signing",
+                    //    document.id
+                    //);
+                    let error: DocumentError =
+                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
+                            .into_iter()
+                            .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+
+            let mut issuer_namespaces: BTreeMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
+                Default::default();
+            let mut errors: BTreeMap<String, NonEmptyMap<String, DocumentErrorCode>> =
+                Default::default();
+
+            // TODO: Handle special cases, i.e. for `age_over_NN`.
+            for (namespace, elements) in namespaces.into_iter() {
+                if let Some(issuer_items) = document.namespaces.get(&namespace) {
+                    for element_identifier in elements.into_iter() {
+                        if let Some(item) = issuer_items.get(&element_identifier) {
+                            if let Some(returned_items) = issuer_namespaces.get_mut(&namespace) {
+                                returned_items.push(item.clone());
+                            } else {
+                                let returned_items = NonEmptyVec::new(item.clone());
+                                issuer_namespaces.insert(namespace.clone(), returned_items);
+                            }
+                        } else if let Some(returned_errors) = errors.get_mut(&namespace) {
+                            returned_errors
+                                .insert(element_identifier, DocumentErrorCode::DataNotReturned);
+                        } else {
+                            let returned_errors = NonEmptyMap::new(
+                                element_identifier,
+                                DocumentErrorCode::DataNotReturned,
+                            );
+                            errors.insert(namespace.clone(), returned_errors);
+                        }
+                    }
+                } else {
+                    for element_identifier in elements.into_iter() {
+                        if let Some(returned_errors) = errors.get_mut(&namespace) {
+                            returned_errors
+                                .insert(element_identifier, DocumentErrorCode::DataNotReturned);
+                        } else {
+                            let returned_errors = NonEmptyMap::new(
+                                element_identifier,
+                                DocumentErrorCode::DataNotReturned,
+                            );
+                            errors.insert(namespace.clone(), returned_errors);
+                        }
+                    }
+                }
+            }
+
+            let device_namespaces = match Tag24::new(Default::default()) {
+                Ok(dp) => dp,
+                Err(_e) => {
+                    let error: DocumentError =
+                        [(doc_type.clone(), DocumentErrorCode::DataNotReturned)]
+                            .into_iter()
+                            .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let device_auth = AttendedDeviceAuthentication::new(
+                self.session_transcript(),
+                doc_type.clone(),
+                device_namespaces.clone(),
+            );
+            let device_auth = match Tag24::new(device_auth) {
+                Ok(da) => da,
+                Err(_e) => {
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
+                Ok(dab) => dab,
+                Err(_e) => {
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+            let prepared_cose_sign1 = match CoseSign1::builder()
+                .detached()
+                .payload(device_auth_bytes)
+                .signature_algorithm(signature_algorithm)
+                .prepare()
+            {
+                Ok(prepared) => prepared,
+                Err(_e) => {
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
+
+            let prepared_document = PreparedDocument {
+                id: document.id,
+                doc_type,
+                issuer_signed: IssuerSigned {
+                    namespaces: issuer_namespaces.try_into().ok(),
+                    issuer_auth: document.issuer_auth.clone(),
+                },
+                device_namespaces,
+                prepared_cose_sign1,
+                errors: errors.try_into().ok(),
+            };
+            prepared_documents.push(prepared_document);
+        }
+        PreparedDeviceResponse {
+            prepared_documents,
+            document_errors: document_errors.try_into().ok(),
+            status: Status::OK,
+            signed_documents: Vec::new(),
+        }
     }
 }
 
@@ -64,7 +230,7 @@ impl SessionManager {
         let handover = Handover::OID4VP(aud, nonce);
 
         let session_transcript =
-            Tag24::new(SessionTranscript(device_engagement, e_reader_key, handover))?;
+            AttendedSessionTranscript(device_engagement, e_reader_key, handover);
 
         let requested_items = documents
             .as_ref()

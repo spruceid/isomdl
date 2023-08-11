@@ -1,4 +1,5 @@
 use crate::definitions::IssuerSignedItem;
+use crate::presentation::device::session::AttendedSessionTranscript;
 use crate::{
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
@@ -7,11 +8,13 @@ use crate::{
             Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
             Errors as NamespaceErrors, Status,
         },
-        device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
+        device_signed::{
+            AttendedDeviceAuthentication, DeviceAuth, DeviceNamespacesBytes, DeviceSigned,
+        },
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
-        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment, SessionTranscript,
+        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
     },
     issuance::Mdoc,
 };
@@ -43,7 +46,7 @@ pub struct SessionManagerEngaged {
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
     documents: Documents,
-    session_transcript: Tag24<SessionTranscript>,
+    session_transcript: Tag24<AttendedSessionTranscript>,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
@@ -91,20 +94,20 @@ pub struct Document {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedDeviceResponse {
-    prepared_documents: Vec<PreparedDocument>,
-    signed_documents: Vec<DeviceResponseDoc>,
-    document_errors: Option<DocumentErrors>,
-    status: Status,
+    pub prepared_documents: Vec<PreparedDocument>,
+    pub signed_documents: Vec<DeviceResponseDoc>,
+    pub document_errors: Option<DocumentErrors>,
+    pub status: Status,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PreparedDocument {
-    id: Uuid,
-    doc_type: String,
-    issuer_signed: IssuerSigned,
-    device_namespaces: DeviceNamespacesBytes,
-    prepared_cose_sign1: PreparedCoseSign1,
-    errors: Option<NamespaceErrors>,
+pub struct PreparedDocument {
+    pub id: Uuid,
+    pub doc_type: String,
+    pub issuer_signed: IssuerSigned,
+    pub device_namespaces: DeviceNamespacesBytes,
+    pub prepared_cose_sign1: PreparedCoseSign1,
+    pub errors: Option<NamespaceErrors>,
 }
 
 type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
@@ -168,7 +171,7 @@ impl SessionManagerEngaged {
         session_establishment: SessionEstablishment,
     ) -> anyhow::Result<(SessionManager, RequestedItems)> {
         let e_reader_key = session_establishment.e_reader_key;
-        let session_transcript = Tag24::new(SessionTranscript(
+        let session_transcript = Tag24::new(AttendedSessionTranscript(
             self.device_engagement,
             e_reader_key.clone(),
             self.handover,
@@ -341,7 +344,7 @@ impl SessionManager {
 }
 
 impl PreparedDeviceResponse {
-    fn empty(status: Status) -> Self {
+    pub fn empty(status: Status) -> Self {
         PreparedDeviceResponse {
             status,
             prepared_documents: Vec::new(),
@@ -418,8 +421,27 @@ impl PreparedDocument {
 }
 
 pub trait DeviceSession {
+    type T;
     fn documents(&self) -> &Documents;
-    fn session_transcript(&self) -> &Tag24<SessionTranscript>;
+    fn session_transcript(&self) -> Self::T;
+    fn prepare_response(
+        &self,
+        requests: &RequestedItems,
+        permitted: PermittedItems,
+    ) -> PreparedDeviceResponse;
+}
+
+impl DeviceSession for SessionManager {
+    type T = AttendedSessionTranscript;
+    fn documents(&self) -> &Documents {
+        &self.documents
+    }
+
+    fn session_transcript(&self) -> AttendedSessionTranscript {
+        let ast = self.session_transcript.clone();
+        ast.into_inner()
+    }
+
     fn prepare_response(
         &self,
         requests: &RequestedItems,
@@ -516,8 +538,8 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let device_auth = DeviceAuthentication::new(
-                self.session_transcript().as_ref().clone(),
+            let device_auth = AttendedDeviceAuthentication::new(
+                self.session_transcript(),
                 doc_type.clone(),
                 device_namespaces.clone(),
             );
@@ -579,16 +601,6 @@ pub trait DeviceSession {
     }
 }
 
-impl DeviceSession for SessionManager {
-    fn documents(&self) -> &Documents {
-        &self.documents
-    }
-
-    fn session_transcript(&self) -> &Tag24<SessionTranscript> {
-        &self.session_transcript
-    }
-}
-
 impl From<Mdoc> for Document {
     fn from(mdoc: Mdoc) -> Document {
         fn extract(
@@ -628,7 +640,7 @@ impl From<Mdoc> for Document {
 }
 
 /// Filter permitted items to only permit the items that were requested.
-fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
+pub fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
     permitted
         .into_iter()
         .filter_map(|(doc_type, namespaces)| {

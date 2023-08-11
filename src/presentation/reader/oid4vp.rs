@@ -1,8 +1,8 @@
 use crate::definitions::{
     device_request::{self},
-    oid4vp::DeviceResponse
+    oid4vp::DeviceResponse,
 };
-use anyhow::{Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_json::json;
@@ -57,7 +57,7 @@ impl From<serde_json::Error> for Error {
 // reader application, but it is not at all configurable.
 impl SessionManager {
     pub fn new(device_response: DeviceResponse) -> Result<Self, Error> {
-        Ok(SessionManager{device_response})
+        Ok(SessionManager { device_response })
     }
 
     // pub fn new_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
@@ -102,7 +102,6 @@ impl SessionManager {
 
     // TODO: Handle any doc type.
     pub fn handle_response(&mut self) -> Result<BTreeMap<String, Value>, Error> {
-
         // TODO: Mdoc authentication.
         //
         // 1. As part of mdoc response, mdl produces `DeviceAuth`, which is either a `DeviceSignature` or
