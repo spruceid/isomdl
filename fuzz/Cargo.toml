@@ -1,0 +1,28 @@
+[package]
+name = "isomdl-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_cbor = "0.11.2"
+
+[dependencies.isomdl]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "mdoc"
+path = "fuzz_targets/mdoc.rs"
+test = false
+doc = false
