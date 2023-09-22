@@ -41,7 +41,7 @@ ssi-jwk = { version = "0.1" }
 isomdl-macros = { version = "0.1.0", path = "macros" }
 
 [dependencies.cose-rs]
-git = "ssh://git@github.com/spruceid/cose-rs.git"
+git = "https://github.com/spruceid/cose-rs"
 rev = "4104505"
 
 [dev-dependencies]
