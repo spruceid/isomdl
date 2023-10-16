@@ -6,7 +6,7 @@ use crate::definitions::{
         self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
         SessionEstablishment,
     },
-    DeviceEngagement, DeviceResponse, SessionData, SessionTranscript,
+    DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
-    session_transcript: Tag24<SessionTranscript>,
+    session_transcript: SessionTranscript180135,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
@@ -89,15 +89,18 @@ impl SessionManager {
             &e_reader_key_private.into(),
         )?;
 
-        let session_transcript = Tag24::new(SessionTranscript(
+        let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
             e_reader_key_public.clone(),
             Handover::QR,
-        ))?;
+        );
+
+        let session_transcript_bytes = Tag24::new(session_transcript.clone())?;
 
         //derive session keys
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true)?.into();
-        let sk_device = derive_session_key(&shared_secret, &session_transcript, false)?.into();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();
+        let sk_device =
+            derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
 
         let mut session_manager = Self {
             session_transcript,
@@ -119,7 +122,6 @@ impl SessionManager {
 
     pub fn first_central_client_uuid(&self) -> Option<&Uuid> {
         self.session_transcript
-            .as_ref()
             .0
             .as_ref()
             .device_retrieval_methods

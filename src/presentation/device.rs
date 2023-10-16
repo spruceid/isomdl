@@ -10,8 +10,10 @@ use crate::{
         device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
-        session::{self, derive_session_key, get_shared_secret, Handover, SessionData},
-        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment, SessionTranscript,
+        session::{
+            self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
+        },
+        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
     },
     issuance::Mdoc,
 };
@@ -19,11 +21,10 @@ use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
+use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
-
-pub mod oid4vp;
 
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
@@ -43,7 +44,7 @@ pub struct SessionManagerEngaged {
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
     documents: Documents,
-    session_transcript: Tag24<SessionTranscript>,
+    session_transcript: SessionTranscript180135,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
@@ -168,20 +169,19 @@ impl SessionManagerEngaged {
         session_establishment: SessionEstablishment,
     ) -> anyhow::Result<(SessionManager, RequestedItems)> {
         let e_reader_key = session_establishment.e_reader_key;
-        let session_transcript = Tag24::new(SessionTranscript(
-            self.device_engagement,
-            e_reader_key.clone(),
-            self.handover,
-        ))
-        .map_err(Error::Tag24CborEncoding)?;
+        let session_transcript =
+            SessionTranscript180135(self.device_engagement, e_reader_key.clone(), self.handover);
+        let session_transcript_bytes =
+            Tag24::new(session_transcript.clone()).map_err(Error::Tag24CborEncoding)?;
 
         let e_device_key = p256::SecretKey::from_bytes(FieldBytes::from_slice(&self.e_device_key))?;
 
         let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key.into())
             .map_err(Error::SharedSecretGeneration)?;
 
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript, true)?.into();
-        let sk_device = derive_session_key(&shared_secret, &session_transcript, false)?.into();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();
+        let sk_device =
+            derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
 
         let mut sm = SessionManager {
             documents: self.documents,
@@ -418,8 +418,10 @@ impl PreparedDocument {
 }
 
 pub trait DeviceSession {
+    type ST: SessionTranscript;
+
     fn documents(&self) -> &Documents;
-    fn session_transcript(&self) -> &Tag24<SessionTranscript>;
+    fn session_transcript(&self) -> Self::ST;
     fn prepare_response(
         &self,
         requests: &RequestedItems,
@@ -515,11 +517,20 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let device_auth = DeviceAuthentication::new(
-                self.session_transcript().as_ref().clone(),
+            let device_auth = match DeviceAuthentication::new(
+                self.session_transcript(),
                 doc_type.clone(),
                 device_namespaces.clone(),
-            );
+            ) {
+                Ok(da) => da,
+                Err(_e) => {
+                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                        .into_iter()
+                        .collect();
+                    document_errors.push(error);
+                    continue;
+                }
+            };
             let device_auth = match Tag24::new(device_auth) {
                 Ok(da) => da,
                 Err(_e) => {
@@ -579,12 +590,14 @@ pub trait DeviceSession {
 }
 
 impl DeviceSession for SessionManager {
+    type ST = SessionTranscript180135;
+
     fn documents(&self) -> &Documents {
         &self.documents
     }
 
-    fn session_transcript(&self) -> &Tag24<SessionTranscript> {
-        &self.session_transcript
+    fn session_transcript(&self) -> SessionTranscript180135 {
+        self.session_transcript.clone()
     }
 }
 

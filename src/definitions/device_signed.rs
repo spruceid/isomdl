@@ -4,7 +4,7 @@ use crate::definitions::{
 };
 use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
+use serde_cbor::{Error as CborError, Value as CborValue};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -31,24 +31,25 @@ pub enum DeviceAuth {
 pub type DeviceAuthenticationBytes = Tag24<DeviceAuthentication>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DeviceAuthentication(
-    &'static str,
-    pub SessionTranscript,
-    pub String,
-    pub DeviceNamespacesBytes,
-);
+pub struct DeviceAuthentication(&'static str, CborValue, String, DeviceNamespacesBytes);
 
 impl DeviceAuthentication {
-    pub fn new(
-        transcript: SessionTranscript,
+    pub fn new<S: SessionTranscript>(
+        transcript: S,
         doc_type: String,
         namespaces_bytes: DeviceNamespacesBytes,
-    ) -> Self {
-        Self(
+    ) -> Result<Self, Error> {
+        Ok(Self(
             "DeviceAuthentication",
-            transcript,
+            serde_cbor::value::to_value(transcript).map_err(Error::UnableToEncode)?,
             doc_type,
             namespaces_bytes,
-        )
+        ))
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Unable to encode value as CBOR: {0}")]
+    UnableToEncode(CborError),
 }
