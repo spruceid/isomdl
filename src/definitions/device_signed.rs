@@ -28,23 +28,25 @@ pub enum DeviceAuth {
     Mac { device_mac: CborValue },
 }
 
-pub type DeviceAuthenticationBytes = Tag24<DeviceAuthentication>;
+pub type DeviceAuthenticationBytes<S> = Tag24<DeviceAuthentication<S>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DeviceAuthentication(&'static str, CborValue, String, DeviceNamespacesBytes);
+pub struct DeviceAuthentication<S: SessionTranscript>(
+    &'static str,
+    // See https://github.com/serde-rs/serde/issues/1296.
+    #[serde(bound = "")] S,
+    String,
+    DeviceNamespacesBytes,
+);
 
-impl DeviceAuthentication {
-    pub fn new<S: SessionTranscript>(
-        transcript: S,
-        doc_type: String,
-        namespaces_bytes: DeviceNamespacesBytes,
-    ) -> Result<Self, Error> {
-        Ok(Self(
+impl<S: SessionTranscript> DeviceAuthentication<S> {
+    pub fn new(transcript: S, doc_type: String, namespaces_bytes: DeviceNamespacesBytes) -> Self {
+        Self(
             "DeviceAuthentication",
-            serde_cbor::value::to_value(transcript).map_err(Error::UnableToEncode)?,
+            transcript,
             doc_type,
             namespaces_bytes,
-        ))
+        )
     }
 }
 

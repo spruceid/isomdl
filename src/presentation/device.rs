@@ -517,20 +517,11 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let device_auth = match DeviceAuthentication::new(
+            let device_auth = DeviceAuthentication::new(
                 self.session_transcript(),
                 doc_type.clone(),
                 device_namespaces.clone(),
-            ) {
-                Ok(da) => da,
-                Err(_e) => {
-                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                        .into_iter()
-                        .collect();
-                    document_errors.push(error);
-                    continue;
-                }
-            };
+            );
             let device_auth = match Tag24::new(device_auth) {
                 Ok(da) => da,
                 Err(_e) => {

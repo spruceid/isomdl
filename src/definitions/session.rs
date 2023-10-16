@@ -78,7 +78,7 @@ impl TryFrom<u64> for Status {
     }
 }
 
-pub trait SessionTranscript: Serialize {}
+pub trait SessionTranscript: Serialize + for<'a> Deserialize<'a> {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionTranscript180135(
