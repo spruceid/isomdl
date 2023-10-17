@@ -7,7 +7,6 @@ pub mod helpers;
 pub mod issuer_signed;
 pub mod mso;
 pub mod namespaces;
-pub mod oid4vp;
 pub mod session;
 pub mod traits;
 pub mod validity_info;
