@@ -33,7 +33,7 @@ fn print_namespaces(mdl: String) -> Result<(), Error> {
         .namespaces
         .into_inner()
         .into_iter()
-        .map(|(ns, inner)| (ns, inner.into_inner().into_iter().map(|(k, _)| k).collect()))
+        .map(|(ns, inner)| (ns, inner.into_inner().into_keys().collect()))
         .collect::<BTreeMap<String, Vec<String>>>();
     println!("{}", serde_json::to_string_pretty(&claims)?);
     Ok(())
