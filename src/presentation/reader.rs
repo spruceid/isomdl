@@ -174,7 +174,10 @@ impl SessionManager {
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
-    pub fn handle_response(&mut self, response: &[u8]) -> Result<BTreeMap<String, Value>, Error> {
+    pub fn handle_response(
+        &mut self,
+        response: &[u8],
+    ) -> Result<BTreeMap<String, BTreeMap<String, Value>>, Error> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
@@ -187,8 +190,11 @@ impl SessionManager {
         )
         .map_err(|_e| Error::DecryptionError)?;
         let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
-        let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
-        response
+        let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
+        let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
+        let mut parsed_response = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
+
+        let mut namespaces = response
             .documents
             .ok_or(Error::DeviceTransmissionError)?
             .into_inner()
@@ -198,7 +204,9 @@ impl SessionManager {
             .issuer_signed
             .namespaces
             .ok_or(Error::NoMdlDataTransmission)?
-            .into_inner()
+            .into_inner();
+
+        namespaces
             .remove("org.iso.18013.5.1")
             .ok_or(Error::IncorrectNamespace)?
             .into_inner()
@@ -207,9 +215,27 @@ impl SessionManager {
             .for_each(|item| {
                 let value = parse_response(item.element_value.clone());
                 if let Ok(val) = value {
-                    parsed_response.insert(item.element_identifier, val);
+                    core_namespace.insert(item.element_identifier, val);
                 }
             });
+
+        parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
+
+        if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
+            aamva_response
+                .into_inner()
+                .into_iter()
+                .map(|item| item.into_inner())
+                .for_each(|item| {
+                    let value = parse_response(item.element_value.clone());
+                    if let Ok(val) = value {
+                        aamva_namespace.insert(item.element_identifier, val);
+                    }
+                });
+
+            parsed_response.insert("org.iso.18013.5.1.aamva".to_string(), aamva_namespace);
+        }
+
         Ok(parsed_response)
     }
 }
