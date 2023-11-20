@@ -4,7 +4,7 @@ use crate::definitions::{
 };
 use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
+use serde_cbor::{Error as CborError, Value as CborValue};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -28,22 +28,19 @@ pub enum DeviceAuth {
     Mac { device_mac: CborValue },
 }
 
-pub type DeviceAuthenticationBytes = Tag24<DeviceAuthentication>;
+pub type DeviceAuthenticationBytes<S> = Tag24<DeviceAuthentication<S>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DeviceAuthentication(
+pub struct DeviceAuthentication<S: SessionTranscript>(
     &'static str,
-    pub SessionTranscript,
-    pub String,
-    pub DeviceNamespacesBytes,
+    // See https://github.com/serde-rs/serde/issues/1296.
+    #[serde(bound = "")] S,
+    String,
+    DeviceNamespacesBytes,
 );
 
-impl DeviceAuthentication {
-    pub fn new(
-        transcript: SessionTranscript,
-        doc_type: String,
-        namespaces_bytes: DeviceNamespacesBytes,
-    ) -> Self {
+impl<S: SessionTranscript> DeviceAuthentication<S> {
+    pub fn new(transcript: S, doc_type: String, namespaces_bytes: DeviceNamespacesBytes) -> Self {
         Self(
             "DeviceAuthentication",
             transcript,
@@ -51,4 +48,10 @@ impl DeviceAuthentication {
             namespaces_bytes,
         )
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Unable to encode value as CBOR: {0}")]
+    UnableToEncode(CborError),
 }

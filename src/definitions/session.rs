@@ -29,7 +29,7 @@ use sha2::{Digest, Sha256};
 pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
 pub type DeviceEngagementBytes = Tag24<DeviceEngagement>;
-pub type SessionTranscriptBytes = Tag24<SessionTranscript>;
+pub type SessionTranscriptBytes = Tag24<SessionTranscript180135>;
 pub type NfcHandover = (ByteStr, Option<ByteStr>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,12 +78,16 @@ impl TryFrom<u64> for Status {
     }
 }
 
+pub trait SessionTranscript: Serialize + for<'a> Deserialize<'a> {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionTranscript(
+pub struct SessionTranscript180135(
     pub DeviceEngagementBytes,
     pub Tag24<EReaderKey>,
     pub Handover,
 );
+
+impl SessionTranscript for SessionTranscript180135 {}
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
@@ -164,7 +168,7 @@ pub fn get_shared_secret(
 
 pub fn derive_session_key(
     shared_secret: &SharedSecret<NistP256>,
-    session_transcript: &Tag24<SessionTranscript>,
+    session_transcript: &SessionTranscriptBytes,
     reader: bool,
 ) -> Result<GenericArray<u8, U32>> {
     let salt = Sha256::digest(serde_cbor::to_vec(session_transcript)?);
@@ -400,7 +404,7 @@ mod test {
         };
 
         let device_engagement_bytes = Tag24::new(device_engagement).unwrap();
-        let session_transcript = Tag24::new(SessionTranscript(
+        let session_transcript = Tag24::new(SessionTranscript180135(
             device_engagement_bytes,
             reader_key_bytes,
             Handover::QR,
@@ -456,7 +460,7 @@ mod test {
         assert_eq!(shared_secret_hex, SHARED_SECRET);
 
         let session_transcript_bytes = hex::decode(SESSION_TRANSCRIPT).unwrap();
-        let session_transcript: Tag24<SessionTranscript> =
+        let session_transcript: SessionTranscriptBytes =
             serde_cbor::from_slice(&session_transcript_bytes).unwrap();
 
         let session_key = derive_session_key(&shared_secret, &session_transcript, true).unwrap();
