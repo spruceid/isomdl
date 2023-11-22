@@ -20,6 +20,7 @@ use crate::{
 };
 use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
 use p256::FieldBytes;
+use sec1::der::asn1::Utf8StringRef;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use session::SessionTranscript180135;
