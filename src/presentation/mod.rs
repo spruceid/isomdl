@@ -1,5 +1,7 @@
 pub mod device;
+pub mod mdoc_auth;
 pub mod reader;
+pub mod trust_anchor;
 
 use anyhow::Result;
 use base64::{decode, encode};
