@@ -92,20 +92,20 @@ pub struct Document {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedDeviceResponse {
-    prepared_documents: Vec<PreparedDocument>,
-    signed_documents: Vec<DeviceResponseDoc>,
-    document_errors: Option<DocumentErrors>,
-    status: Status,
+    pub prepared_documents: Vec<PreparedDocument>,
+    pub signed_documents: Vec<DeviceResponseDoc>,
+    pub document_errors: Option<DocumentErrors>,
+    pub status: Status,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PreparedDocument {
-    id: Uuid,
-    doc_type: String,
-    issuer_signed: IssuerSigned,
-    device_namespaces: DeviceNamespacesBytes,
-    prepared_cose_sign1: PreparedCoseSign1,
-    errors: Option<NamespaceErrors>,
+pub struct PreparedDocument {
+    pub id: Uuid,
+    pub doc_type: String,
+    pub issuer_signed: IssuerSigned,
+    pub device_namespaces: DeviceNamespacesBytes,
+    pub prepared_cose_sign1: PreparedCoseSign1,
+    pub errors: Option<NamespaceErrors>,
 }
 
 type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
@@ -631,7 +631,7 @@ impl From<Mdoc> for Document {
 }
 
 /// Filter permitted items to only permit the items that were requested.
-fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
+pub fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
     permitted
         .into_iter()
         .filter_map(|(doc_type, namespaces)| {
@@ -832,9 +832,9 @@ mod test {
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();
         let issuer_item2 = Tag24::new(issuer_signed_item2).unwrap();
         let issuer_item3 = Tag24::new(issuer_signed_item3).unwrap();
-        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1.clone());
+        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1);
         issuer_items.insert(element_identifier2, issuer_item2.clone());
-        issuer_items.insert(element_identifier3, issuer_item3.clone());
+        issuer_items.insert(element_identifier3, issuer_item3);
 
         let result = nearest_age_attestation(requested_element_identifier, issuer_items)
             .expect("failed to process age attestation request");
