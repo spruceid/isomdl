@@ -1,12 +1,11 @@
 use super::{
     mdoc_auth::device_authentication, mdoc_auth::issuer_authentication,
-    trust_anchor::ValidationRuleSet,
 };
 use crate::definitions::device_key::cose_key::Error as CoseError;
 use crate::definitions::Mso;
-use crate::issuance::x5chain::X509;
+use crate::definitions::x509::x5chain::X509;
 use crate::presentation::reader::Error as ReaderError;
-use crate::presentation::trust_anchor::TrustAnchorRegistry;
+use crate::definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry, ValidationRuleSet};
 use crate::{
     definitions::{
         device_engagement::DeviceRetrievalMethod,
@@ -16,10 +15,10 @@ use crate::{
             self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
             SessionEstablishment,
         },
+        x509::error::Error as X509Error
     },
     definitions::{DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135},
-    issuance::X5Chain,
-    presentation::trust_anchor::TrustAnchor,
+    definitions::x509::X5Chain,
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -51,7 +50,7 @@ pub struct ValidatedResponse {
     pub errors: ValidationErrors,
 }
 
-pub struct ValidationErrors(pub BTreeMap<String, Vec<Error>>);
+pub struct ValidationErrors(pub BTreeMap<String, serde_json::Value>);
 
 #[derive(Serialize, Deserialize)]
 pub enum Status {
@@ -363,7 +362,7 @@ impl SessionManager {
                 validated_response
                     .errors
                     .0
-                    .insert("certificate_errors".to_string(), r);
+                    .insert("certificate_errors".to_string(), json!(r));
                 let valid_issuer_authentication =
                     issuer_authentication(x5chain.clone(), issuer_signed);
                 match valid_issuer_authentication {
@@ -375,7 +374,7 @@ impl SessionManager {
                         validated_response
                             .errors
                             .0
-                            .insert("issuer_authentication_errors".to_string(), vec![e]);
+                            .insert("issuer_authentication_errors".to_string(), json!(vec![e]));
                     }
                 }
             }
@@ -392,7 +391,7 @@ impl SessionManager {
                 validated_response
                     .errors
                     .0
-                    .insert("device_authentication_errors".to_string(), vec![e]);
+                    .insert("device_authentication_errors".to_string(), json!(vec![e]));
             }
         }
 
@@ -400,58 +399,19 @@ impl SessionManager {
     }
 }
 
-pub fn find_anchor(
-    leaf_certificate: CertificateInner,
-    trust_anchor_registry: Option<TrustAnchorRegistry>,
-) -> Result<Option<TrustAnchor>, Error> {
-    let leaf_issuer = leaf_certificate.tbs_certificate.issuer;
-
-    let Some(root_certificates) = trust_anchor_registry else {
-        return Ok(None);
-    };
-    let Some(trust_anchor) = root_certificates
-        .certificates
-        .into_iter()
-        .find(|trust_anchor| match trust_anchor {
-            TrustAnchor::Iaca(certificate) => {
-                match x509_cert::Certificate::from_der(&certificate.bytes) {
-                    Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
-                    Err(_) => false,
-                }
-            }
-            TrustAnchor::Custom(certificate, _ruleset) => {
-                match x509_cert::Certificate::from_der(&certificate.bytes) {
-                    Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
-                    Err(_) => false,
-                }
-            }
-            TrustAnchor::Aamva(certificate) => {
-                match x509_cert::Certificate::from_der(&certificate.bytes) {
-                    Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
-                    Err(_) => false,
-                }
-            }
-        })
-    else {
-        return Err(Error::MdocAuth(
-            "The certificate issuer does not match any known trusted issuer".to_string(),
-        ));
-    };
-    Ok(Some(trust_anchor))
-}
-
 // In 18013-5 the TrustAnchorRegistry is also referred to as the Verified Issuer Certificate Authority List (VICAL)
 pub fn validate_x5chain(
     x5chain: CborValue,
     trust_anchor_registry: Option<TrustAnchorRegistry>,
-) -> Result<Vec<Error>, Error> {
+) -> Result<Vec<X509Error>, Error> {
+    let mut errors: Vec<X509Error> = vec![];
     match x5chain {
         CborValue::Bytes(bytes) => {
             let chain: Vec<X509> = vec![X509 {
                 bytes: serde_cbor::from_slice(&bytes)?,
             }];
             let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            x5chain.validate(trust_anchor_registry)
+            errors.append(&mut x5chain.validate(trust_anchor_registry));
         }
         CborValue::Array(x509s) => {
             let mut chain = vec![];
@@ -472,12 +432,13 @@ pub fn validate_x5chain(
             }
 
             let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            x5chain.validate(trust_anchor_registry)
+            errors.append(&mut x5chain.validate(trust_anchor_registry));
         }
         _ => {
-            Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x5chain)))
+            return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x5chain)));
         }
     }
+    Ok(errors)
 }
 
 fn parse_response(value: CborValue) -> Result<Value, Error> {
@@ -551,8 +512,8 @@ where
 pub mod test {
     use crate::presentation::reader::validate_x5chain;
     use crate::{
-        issuance::x5chain::X509,
-        presentation::trust_anchor::{TrustAnchor, TrustAnchorRegistry},
+        definitions::x509::x5chain::X509,
+        definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry},
     };
     use anyhow::anyhow;
 

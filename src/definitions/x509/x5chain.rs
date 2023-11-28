@@ -1,9 +1,9 @@
-use crate::presentation::reader::find_anchor;
-
-use crate::presentation::reader::Error;
-use crate::presentation::trust_anchor::validate_with_trust_anchor;
-use crate::presentation::trust_anchor::TrustAnchorRegistry;
-use crate::{definitions::helpers::NonEmptyVec, presentation::trust_anchor::check_validity_period};
+use crate::definitions::x509::trust_anchor::find_anchor;
+use crate::definitions::x509::trust_anchor::validate_with_trust_anchor;
+use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
+use crate::definitions::x509::trust_anchor::check_validity_period;
+use crate::definitions::x509::error::Error as X509Error;
+use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
 
 use const_oid::AssociatedOid;
@@ -31,7 +31,7 @@ pub struct X509 {
 }
 
 impl X509 {
-    pub fn public_key<C>(&self) -> Result<PublicKey<C>, Error>
+    pub fn public_key<C>(&self) -> Result<PublicKey<C>, X509Error>
     where
         C: AssociatedOid + CurveArithmetic,
         AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
@@ -43,7 +43,7 @@ impl X509 {
             .owned_to_ref()
             .try_into()
             .map_err(|e| format!("could not parse public key from pkcs8 spki: {e}"))
-            .map_err(|_e| Error::MdocAuth("could not parse public key from pkcs8 spki".to_string()))
+            .map_err(|_e| X509Error::ValidationError("could not parse public key from pkcs8 spki".to_string()))
     }
 }
 
@@ -78,53 +78,76 @@ impl X5Chain {
     pub fn validate(
         &self,
         trust_anchor_registry: Option<TrustAnchorRegistry>,
-    ) -> Result<Vec<Error>, Error> {
+    ) -> Vec<X509Error> {
         let x5chain = self.0.as_ref();
-        let mut results: Vec<Result<(), Error>> = x5chain
+        let mut errors: Vec<X509Error> = vec![];
+        x5chain
             .windows(2)
-            .map(|chain_link| {
-                let target = &chain_link[0];
-                let issuer = &chain_link[1];
-                check_signature(target, issuer)
-            })
-            .collect();
+            .for_each(|[target, issuer]| {
+                match check_signature(target, issuer) {
+                    Ok(r) => {
+
+                    }, 
+                    Err(e) => {
+                        errors.push(e)
+                    }
+                }
+            });
 
         for x509 in x5chain {
-            let cert = x509_cert::Certificate::from_der(&x509.bytes)?;
-            results.push(check_validity_period(&cert))
+            let cert = x509_cert::Certificate::from_der(&x509.bytes);
+            match cert {
+                Ok(c) => {
+                    match check_validity_period(&c) {
+                        Ok(v) => {},
+                        Err(e) => {
+                            errors.push(e)
+                        }
+                    }
+                },
+                Err(e)=> {
+                    errors.push(e.into())
+                }
+            }
         }
-
-        let mut errors: Vec<Error> = vec![];
 
         //validate the last certificate in the chain against trust anchor
-        let last_in_chain = x5chain.to_vec().pop();
+        let last_in_chain = x5chain.last();
         if let Some(x509) = last_in_chain {
-            let inner = x509_cert::Certificate::from_der(&x509.bytes)?;
-            if let Some(trust_anchor) = find_anchor(inner, trust_anchor_registry)? {
-                errors.append(&mut validate_with_trust_anchor(x509, trust_anchor)?);
-            } else {
-                errors.push(Error::MdocAuth(
-                    "No matching trust anchor found".to_string(),
-                ));
-            };
+            match x509_cert::Certificate::from_der(&x509.bytes) {
+                Ok(cert)=> {
+
+                    match find_anchor(cert, trust_anchor_registry) {
+                        Ok(anchor) => {
+                            if let Some(trust_anchor) = anchor {
+                                errors.append(&mut validate_with_trust_anchor(*x509, trust_anchor));
+                            } else {
+                                errors.push(X509Error::ValidationError(
+                                    "No matching trust anchor found".to_string(),
+                                ));
+                            }
+                            
+                        }, 
+                        Err(e)=> {
+                            errors.push(e.into())
+                        }
+                    }
+                },
+                Err(e) => {
+                    errors.push(e.into())
+                }
+
+            }
+
         } else {
-            errors.push(Error::MdocAuth("Empty certificate chain".to_string()))
+            errors.push(X509Error::ValidationError("Empty certificate chain".to_string()))
         }
 
-        let mut sig_errors = results
-            .into_iter()
-            .filter(|result| result.is_err())
-            .collect::<Vec<Result<(), Error>>>()
-            .into_iter()
-            .map(|e| e.expect_err("something went wrong"))
-            .collect::<Vec<Error>>();
-
-        errors.append(&mut sig_errors);
-        Ok(errors)
+        errors
     }
 }
 
-pub fn check_signature(target: &X509, issuer: &X509) -> Result<(), Error> {
+pub fn check_signature(target: &X509, issuer: &X509) -> Result<(), X509Error> {
     let parent_public_key = ecdsa::VerifyingKey::from(issuer.public_key()?);
     let child_cert = x509_cert::Certificate::from_der(&target.bytes)?;
     let sig: ecdsa::Signature<NistP256> =
@@ -187,9 +210,9 @@ impl Builder {
 pub mod test {
     use super::*;
 
-    static CERT_256: &[u8] = include_bytes!("../../test/issuance/256-cert.pem");
-    static CERT_384: &[u8] = include_bytes!("../../test/issuance/384-cert.pem");
-    static CERT_521: &[u8] = include_bytes!("../../test/issuance/521-cert.pem");
+    static CERT_256: &[u8] = include_bytes!("../../../test/issuance/256-cert.pem");
+    static CERT_384: &[u8] = include_bytes!("../../../test/issuance/384-cert.pem");
+    static CERT_521: &[u8] = include_bytes!("../../../test/issuance/521-cert.pem");
 
     #[test]
     pub fn self_signed_es256() {

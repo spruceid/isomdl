@@ -10,6 +10,8 @@ pub mod namespaces;
 pub mod session;
 pub mod traits;
 pub mod validity_info;
+pub mod x509;
+pub mod validated_response;
 
 pub use device_engagement::{
     BleOptions, DeviceEngagement, DeviceRetrievalMethod, NfcOptions, Security, WifiOptions,
