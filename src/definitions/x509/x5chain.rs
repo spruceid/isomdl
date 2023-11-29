@@ -1,10 +1,10 @@
+use crate::definitions::helpers::NonEmptyVec;
+use crate::definitions::x509::error::Error as X509Error;
+use crate::definitions::x509::trust_anchor::check_validity_period;
 use crate::definitions::x509::trust_anchor::find_anchor;
 use crate::definitions::x509::trust_anchor::validate_with_trust_anchor;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use crate::definitions::x509::trust_anchor::check_validity_period;
-use crate::definitions::x509::error::Error as X509Error;
 use crate::presentation::reader::Error;
-use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
 
 use const_oid::AssociatedOid;
@@ -17,14 +17,14 @@ use p256::NistP256;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use signature::Verifier;
+use std::collections::HashSet;
+use std::hash::Hash;
 use std::{fs::File, io::Read};
 use x509_cert::der::Encode;
 use x509_cert::{
     certificate::Certificate,
     der::{referenced::OwnedToRef, Decode},
 };
-use std::hash::Hash;
-use std::collections::HashSet;
 
 pub const X5CHAIN_HEADER_LABEL: i128 = 33;
 
@@ -46,7 +46,9 @@ impl X509 {
             .owned_to_ref()
             .try_into()
             .map_err(|e| format!("could not parse public key from pkcs8 spki: {e}"))
-            .map_err(|_e| X509Error::ValidationError("could not parse public key from pkcs8 spki".to_string()))
+            .map_err(|_e| {
+                X509Error::ValidationError("could not parse public key from pkcs8 spki".to_string())
+            })
     }
 }
 
@@ -78,25 +80,17 @@ impl X5Chain {
         }
     }
 
-    pub fn validate(
-        &self,
-        trust_anchor_registry: Option<TrustAnchorRegistry>,
-    ) -> Vec<X509Error> {
+    pub fn validate(&self, trust_anchor_registry: Option<TrustAnchorRegistry>) -> Vec<X509Error> {
         let x5chain = self.0.as_ref();
         let mut errors: Vec<X509Error> = vec![];
-        x5chain
-            .windows(2)
-            .for_each(|chain_link| {
-                let target = &chain_link[0];
-                let issuer = &chain_link[1];
-                match check_signature(target, issuer) {
-                    Ok(_) => {
-                    }, 
-                    Err(e) => {
-                        errors.push(e)
-                    }
-                }
-            });
+        x5chain.windows(2).for_each(|chain_link| {
+            let target = &chain_link[0];
+            let issuer = &chain_link[1];
+            match check_signature(target, issuer) {
+                Ok(_) => {}
+                Err(e) => errors.push(e),
+            }
+        });
 
         //make sure all submitted certificates are valid
         for x509 in x5chain {
@@ -104,10 +98,8 @@ impl X5Chain {
             match cert {
                 Ok(c) => {
                     errors.append(&mut check_validity_period(&c));
-                },
-                Err(e)=> {
-                    errors.push(e.into())
                 }
+                Err(e) => errors.push(e.into()),
             }
         }
 
@@ -115,33 +107,31 @@ impl X5Chain {
         let last_in_chain = x5chain.last();
         if let Some(x509) = last_in_chain {
             match x509_cert::Certificate::from_der(&x509.bytes) {
-                Ok(cert)=> {
+                Ok(cert) => {
                     // if the issuer of the signer certificate is known in the trust anchor registry, do the validation.
                     // otherwise, report an error and skip.
                     match find_anchor(cert, trust_anchor_registry) {
                         Ok(anchor) => {
                             if let Some(trust_anchor) = anchor {
-                                errors.append(&mut validate_with_trust_anchor(x509.clone(), trust_anchor));
+                                errors.append(&mut validate_with_trust_anchor(
+                                    x509.clone(),
+                                    trust_anchor,
+                                ));
                             } else {
                                 errors.push(X509Error::ValidationError(
                                     "No matching trust anchor found".to_string(),
                                 ));
                             }
-                            
-                        }, 
-                        Err(e)=> {
-                            errors.push(e.into())
                         }
+                        Err(e) => errors.push(e.into()),
                     }
-                },
-                Err(e) => {
-                    errors.push(e.into())
                 }
-
+                Err(e) => errors.push(e.into()),
             }
-
         } else {
-            errors.push(X509Error::ValidationError("Empty certificate chain".to_string()))
+            errors.push(X509Error::ValidationError(
+                "Empty certificate chain".to_string(),
+            ))
         }
 
         errors
@@ -163,7 +153,7 @@ pub fn validate_x5chain(
     trust_anchor_registry: Option<TrustAnchorRegistry>,
 ) -> Result<Vec<X509Error>, Error> {
     let mut errors: Vec<X509Error> = vec![];
-    //the x5chain can contain one or more ceritificates 
+    //the x5chain can contain one or more ceritificates
     match x5chain {
         CborValue::Bytes(bytes) => {
             let chain: Vec<X509> = vec![X509 {

@@ -1,16 +1,15 @@
-use super::{
-    mdoc_auth::device_authentication, mdoc_auth::issuer_authentication,
-};
+use super::{mdoc_auth::device_authentication, mdoc_auth::issuer_authentication};
 use crate::definitions::device_key::cose_key::Error as CoseError;
-use crate::definitions::Mso;
-use crate::definitions::x509::x5chain::validate_x5chain;
-use crate::presentation::reader::Error as ReaderError;
 use crate::definitions::x509::trust_anchor::{TrustAnchorRegistry, ValidationRuleSet};
+use crate::definitions::x509::x5chain::validate_x5chain;
+use crate::definitions::Mso;
+use crate::definitions::{Status, ValidatedResponse, ValidationErrors};
+use crate::presentation::reader::Error as ReaderError;
 use crate::{
     definitions::{
-        device_response::Document,
         device_engagement::DeviceRetrievalMethod,
         device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
+        device_response::Document,
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
         session::{
             self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
@@ -26,7 +25,6 @@ use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
-use crate::definitions::{ValidatedResponse, ValidationErrors, Status};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SessionManager {
@@ -39,7 +37,7 @@ pub struct SessionManager {
     trust_anchor_registry: Option<TrustAnchorRegistry>,
 }
 
-#[derive(Debug, thiserror::Error,Serialize, Deserialize)]
+#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum Error {
     #[error("the qr code had the wrong prefix or the contained data could not be decoded")]
     InvalidQrCode,
@@ -125,8 +123,7 @@ impl SessionManager {
         validation_ruleset: Option<ValidationRuleSet>,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let device_engagement_bytes =
-            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
-            .map_err(|e| anyhow!(e))?;
+            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(|e| anyhow!(e))?;
 
         //generate own keys
         let key_pair = create_p256_ephemeral_keys()?;
@@ -235,10 +232,7 @@ impl SessionManager {
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
-    pub fn handle_response(
-        &mut self,
-        response: &[u8],
-    ) -> Result<ValidatedResponse, Error> {
+    pub fn handle_response(&mut self, response: &[u8]) -> Result<ValidatedResponse, Error> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
@@ -320,13 +314,17 @@ impl SessionManager {
             );
         }
 
-        let validated_response = self.validate_response(x5chain.clone(), document, parsed_response)?;
+        let validated_response =
+            self.validate_response(x5chain.clone(), document, parsed_response)?;
         Ok(validated_response)
-
-
     }
 
-    pub fn validate_response(&mut self, x5chain: CborValue, document: Document, parsed_response:BTreeMap::<String, serde_json::Value>,) -> Result<ValidatedResponse, Error>{
+    pub fn validate_response(
+        &mut self,
+        x5chain: CborValue,
+        document: Document,
+        parsed_response: BTreeMap<String, serde_json::Value>,
+    ) -> Result<ValidatedResponse, Error> {
         let mut validated_response = ValidatedResponse {
             response: parsed_response,
             issuer_authentication: Status::Unchecked,
@@ -336,11 +334,12 @@ impl SessionManager {
 
         let issuer_signed = document.issuer_signed.clone();
         let mso_bytes = issuer_signed
-        .issuer_auth
-        .payload()
-        .expect("expected a COSE_Sign1 with attached payload, found detached payload");
-        let mso: Tag24<Mso> = serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
-    
+            .issuer_auth
+            .payload()
+            .expect("expected a COSE_Sign1 with attached payload, found detached payload");
+        let mso: Tag24<Mso> =
+            serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
+
         match validate_x5chain(x5chain.to_owned(), self.trust_anchor_registry.clone()) {
             Ok(r) => {
                 if r.is_empty() {
@@ -357,19 +356,22 @@ impl SessionManager {
                         }
                     }
                 } else {
-                validated_response
-                    .errors
-                    .0
-                    .insert("certificate_errors".to_string(), json!(r));
-                validated_response.issuer_authentication = Status::Invalid
+                    validated_response
+                        .errors
+                        .0
+                        .insert("certificate_errors".to_string(), json!(r));
+                    validated_response.issuer_authentication = Status::Invalid
                 };
             }
             Err(e) => {
                 validated_response.issuer_authentication = Status::Invalid;
-                validated_response.errors.0.insert("certificate_errors".to_string(), json!(e));
-            },
+                validated_response
+                    .errors
+                    .0
+                    .insert("certificate_errors".to_string(), json!(e));
+            }
         }
-    
+
         match device_authentication(mso, document, self.session_transcript.clone()) {
             Ok(_r) => {
                 validated_response.device_authentication = Status::Valid;
@@ -382,11 +384,10 @@ impl SessionManager {
                     .insert("device_authentication_errors".to_string(), json!(vec![e]));
             }
         }
-    
+
         Ok(validated_response)
     }
 }
-
 
 fn parse_response(value: CborValue) -> Result<Value, Error> {
     match value {
@@ -450,8 +451,8 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
 pub mod test {
     use crate::presentation::reader::validate_x5chain;
     use crate::{
-        definitions::x509::x5chain::X509,
         definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry},
+        definitions::x509::x5chain::X509,
     };
     use anyhow::anyhow;
 

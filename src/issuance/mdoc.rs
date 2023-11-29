@@ -1,10 +1,10 @@
 use crate::{
+    definitions::x509::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
     definitions::{
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
         DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, ValidityInfo,
     },
-    definitions::x509::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;

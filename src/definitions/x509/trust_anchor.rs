@@ -1,14 +1,13 @@
+use crate::definitions::x509::error::Error as X509Error;
+use crate::definitions::x509::extensions::{
+    validate_iaca_root_extensions, validate_iaca_signer_extensions,
+};
 use crate::definitions::x509::x5chain::X509;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use x509_cert::attr::AttributeTypeAndValue;
 use x509_cert::certificate::CertificateInner;
 use x509_cert::der::Decode;
-use crate::definitions::x509::extensions::{
-    validate_iaca_root_extensions,
-    validate_iaca_signer_extensions,
-};
-use crate::definitions::x509::error::Error as X509Error;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum TrustAnchor {
@@ -37,18 +36,18 @@ pub struct TrustAnchorRegistry {
     pub certificates: Vec<TrustAnchor>,
 }
 
-pub fn process_validation_outcomes(leaf_certificate: CertificateInner, root_certificate: CertificateInner, rule_set: ValidationRuleSet) -> Vec<X509Error> {
+pub fn process_validation_outcomes(
+    leaf_certificate: CertificateInner,
+    root_certificate: CertificateInner,
+    rule_set: ValidationRuleSet,
+) -> Vec<X509Error> {
     let mut errors: Vec<X509Error> = vec![];
 
     //execute checks on x509 components
-    match apply_ruleset(
-        leaf_certificate,
-        root_certificate.clone(),
-        rule_set,
-    ) {
+    match apply_ruleset(leaf_certificate, root_certificate.clone(), rule_set) {
         Ok(mut v) => {
             errors.append(&mut v);
-        },
+        }
         Err(e) => {
             errors.push(e);
         }
@@ -61,7 +60,10 @@ pub fn process_validation_outcomes(leaf_certificate: CertificateInner, root_cert
     errors
 }
 
-pub fn validate_with_ruleset(leaf_certificate: CertificateInner, trust_anchor: TrustAnchor )-> Vec<X509Error> {
+pub fn validate_with_ruleset(
+    leaf_certificate: CertificateInner,
+    trust_anchor: TrustAnchor,
+) -> Vec<X509Error> {
     let mut errors: Vec<X509Error> = vec![];
 
     match trust_anchor {
@@ -72,13 +74,16 @@ pub fn validate_with_ruleset(leaf_certificate: CertificateInner, trust_anchor: T
             };
             match x509_cert::Certificate::from_der(&certificate.bytes) {
                 Ok(root_certificate) => {
-                    errors.append(&mut process_validation_outcomes(leaf_certificate, root_certificate, rule_set));
-                },
+                    errors.append(&mut process_validation_outcomes(
+                        leaf_certificate,
+                        root_certificate,
+                        rule_set,
+                    ));
+                }
                 Err(e) => {
                     errors.push(e.into());
                 }
             };
-            
         }
         TrustAnchor::Aamva(certificate) => {
             let rule_set = ValidationRuleSet {
@@ -88,8 +93,12 @@ pub fn validate_with_ruleset(leaf_certificate: CertificateInner, trust_anchor: T
             //The Aamva ruleset follows the IACA ruleset, but makes the ST value mandatory
             match x509_cert::Certificate::from_der(&certificate.bytes) {
                 Ok(root_certificate) => {
-                    errors.append(&mut process_validation_outcomes(leaf_certificate, root_certificate, rule_set));
-                },
+                    errors.append(&mut process_validation_outcomes(
+                        leaf_certificate,
+                        root_certificate,
+                        rule_set,
+                    ));
+                }
                 Err(e) => {
                     errors.push(e.into());
                 }
@@ -102,20 +111,15 @@ pub fn validate_with_ruleset(leaf_certificate: CertificateInner, trust_anchor: T
     errors
 }
 
-pub fn validate_with_trust_anchor(
-    leaf_x509: X509,
-    trust_anchor: TrustAnchor,
-) -> Vec<X509Error>{
+pub fn validate_with_trust_anchor(leaf_x509: X509, trust_anchor: TrustAnchor) -> Vec<X509Error> {
     let mut errors: Vec<X509Error> = vec![];
     let leaf_certificate = x509_cert::Certificate::from_der(&leaf_x509.bytes);
 
-    match leaf_certificate{
+    match leaf_certificate {
         Ok(leaf) => {
             errors.append(&mut validate_with_ruleset(leaf, trust_anchor));
-        }, 
-        Err(e)=> {
-            errors.push(e.into())
         }
+        Err(e) => errors.push(e.into()),
     }
     errors
 }
@@ -144,12 +148,12 @@ pub fn check_validity_period(certificate: &CertificateInner) -> Vec<X509Error> {
 }
 
 /* Validates:
-   
-    - all the correct distinghuished names are present
-    and match the 
-    - all the correct extensions are present
-    - the extensions are set to the ruleset values
-    -  */
+
+- all the correct distinghuished names are present
+and match the
+- all the correct extensions are present
+- the extensions are set to the ruleset values
+-  */
 fn apply_ruleset(
     leaf_certificate: CertificateInner,
     root_certificate: CertificateInner,
@@ -230,7 +234,6 @@ fn apply_ruleset(
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
             extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions));
             for dn in leaf_distinguished_names {
-                
                 if dn.oid.to_string() == *"2.5.4.8" {
                     let state_or_province =
                         root_distinguished_names.iter().find(|r| r.oid == dn.oid);
@@ -260,11 +263,15 @@ fn apply_ruleset(
         }
         RuleSetType::Custom => {
             //TODO
-            Err(X509Error::ValidationError("Unimplemented ruleset".to_string()))
+            Err(X509Error::ValidationError(
+                "Unimplemented ruleset".to_string(),
+            ))
         }
         RuleSetType::ReaderAuth => {
             //TODO
-            Err(X509Error::ValidationError("Unimplemented ruleset".to_string()))
+            Err(X509Error::ValidationError(
+                "Unimplemented ruleset".to_string(),
+            ))
         }
     }
 }
@@ -272,7 +279,7 @@ fn apply_ruleset(
 pub fn find_anchor(
     leaf_certificate: CertificateInner,
     trust_anchor_registry: Option<TrustAnchorRegistry>,
-    ) -> Result<Option<TrustAnchor>, X509Error> {
+) -> Result<Option<TrustAnchor>, X509Error> {
     let leaf_issuer = leaf_certificate.tbs_certificate.issuer;
 
     let Some(root_certificates) = trust_anchor_registry else {

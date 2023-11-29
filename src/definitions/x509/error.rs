@@ -1,14 +1,13 @@
 use crate::definitions::device_key::cose_key::Error as CoseError;
 use crate::definitions::helpers::non_empty_vec;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Error {
     ValidationError(String),
     DecodingError(String),
     CborDecodingError,
-    JsonError
-
+    JsonError,
 }
 
 impl From<serde_cbor::Error> for Error {

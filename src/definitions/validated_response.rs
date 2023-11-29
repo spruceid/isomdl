@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde::{Serialize, Deserialize};
+use std::collections::BTreeMap;
 
 #[derive(Serialize, Deserialize)]
 pub struct ValidatedResponse {
