@@ -37,18 +37,18 @@ const ISSUER_ALTERNATIVE_NAME: [u32; 2] = [1, 6];
     root and signer certificates are given in tables B.2 and B.4 */
 
 
-pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Result<Vec<Error>, Error> {
+pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Error> {
     //A specific subset of x509 extensions is not allowed in IACA certificates.
     //We enter an error for every present disallowed x509 extension
     let disallowed = iaca_disallowed_x509_extensions();
     let mut x509_errors: Vec<Error> = vec![];
-    let mut errors: Vec<Error> = vec![];
+
     for extension in root_extensions.clone() {
         if let Some(disallowed_extension) = disallowed
             .iter()
             .find(|oid| extension.extn_id.to_string() == **oid)
         {
-            errors.push(Error::ValidationError(format!(
+            x509_errors.push(Error::ValidationError(format!(
                 "The extension with oid: {:?} is not allowed in the IACA certificate profile",
                 disallowed_extension
             )));
@@ -59,53 +59,59 @@ pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Result<
         root_extensions.iter().filter(|ext| ext.critical).collect();
 
     // Key Usage 2.5.29.15
-    let Some(key_usage) = root_crit_extensions
+    if let Some(key_usage) = root_crit_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_KEY_USAGE)
+        .find(|ext| ext.extn_id.to_string() == *OID_KEY_USAGE) {
+            x509_errors.append(&mut validate_root_key_usage(key_usage.extn_value.as_bytes().to_vec()));
+        }
     else {
-        return Err(Error::ValidationError(
+        x509_errors.push(Error::ValidationError(
             "The root certificate is expected to have its key usage limited to keyCertSign and crlSign, but no restrictions were specified".to_string(),
         ));
     };
-    x509_errors.append(&mut validate_root_key_usage(key_usage.extn_value.as_bytes().to_vec()));
+    
     
     // Basic Constraints 2.5.29.19
-    let Some(basic_constraints) = root_crit_extensions
+    if let Some(basic_constraints) = root_crit_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_BASIC_CONSTRAINTS)
+        .find(|ext| ext.extn_id.to_string() == *OID_BASIC_CONSTRAINTS) {
+            x509_errors.append(&mut validate_basic_constraints(basic_constraints.extn_value.as_bytes().to_vec()));
+        }
     else {
-        return Err(Error::ValidationError(
+        x509_errors.push(Error::ValidationError(
             "The root certificate is expected to have critical basic constraints specificied, but the extensions was not found".to_string()
         ));
     };
-    x509_errors.append(&mut validate_basic_constraints(basic_constraints.extn_value.as_bytes().to_vec()));
-
+    
     //CRL Distribution Points  2.5.29.31
-    let Some(crl_distribution_point) = root_extensions
+    if let Some(crl_distribution_point) = root_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_CRL_DISTRIBUTION_POINTS)
+        .find(|ext| ext.extn_id.to_string() == *OID_CRL_DISTRIBUTION_POINTS) {
+            x509_errors.append(& mut validate_crl_distribution_point(crl_distribution_point.extn_value.as_bytes().to_vec()));
+        }
     else {
-        return Err(Error::ValidationError("The root certificate is expected to have a crl distribution point specificied, but the extensions was not found".to_string()));
+        x509_errors.push(Error::ValidationError("The root certificate is expected to have a crl distribution point specificied, but the extensions was not found".to_string()));
     };
-    x509_errors.append(& mut validate_crl_distribution_point(crl_distribution_point.extn_value.as_bytes().to_vec()));
-
+    
     // Issuer Alternative Name  2.5.29.18
-    let Some(issuer_alternative_name) = root_extensions
+    if let Some(issuer_alternative_name) = root_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_ISSUER_ALTERNATIVE_NAME)
+        .find(|ext| ext.extn_id.to_string() == *OID_ISSUER_ALTERNATIVE_NAME) {
+            x509_errors.append(&mut validate_issuer_alternative_name(issuer_alternative_name.extn_value.as_bytes().to_vec()));
+        }
     else {
-        return Err(Error::ValidationError(
+        x509_errors.push(Error::ValidationError(
             "The root certificate is expected to have issuer alternative name specificied, but the extensions was not found".to_string()
         ));
     };
-    x509_errors.append(&mut validate_issuer_alternative_name(issuer_alternative_name.extn_value.as_bytes().to_vec()));
+    
 
-    Ok(errors)
+    x509_errors
 }
 
 pub fn validate_iaca_signer_extensions(
     leaf_extensions: Vec<Extension>,
-) -> Result<Vec<Error>, Error> {
+) -> Vec<Error> {
     let disallowed = iaca_disallowed_x509_extensions();
     let mut x509_errors: Vec<Error> = vec![];
     let mut errors: Vec<Error> = vec![];
@@ -124,49 +130,55 @@ pub fn validate_iaca_signer_extensions(
     let leaf_crit_extensions: Vec<&Extension> =
         leaf_extensions.iter().filter(|ext| ext.critical).collect();
 
+    let mut iter = leaf_extensions.iter();
+    let mut crit_iter = leaf_crit_extensions.iter();
+
     // Key Usage 2.5.29.15
-    let Some(key_usage) = leaf_crit_extensions
+    if let Some(key_usage) = leaf_crit_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_KEY_USAGE)
-    else {
-        return Err(Error::ValidationError(
+        .find(|ext| ext.extn_id.to_string() == *OID_KEY_USAGE) {
+        x509_errors.append(&mut validate_signer_key_usage(key_usage.extn_value.as_bytes().to_vec()));
+    } else {
+        x509_errors.push(Error::ValidationError(
             "Missing critical KeyUsage extension in the signer certificate".to_string(),
         ));
-    };
-    x509_errors.append(&mut validate_signer_key_usage(key_usage.extn_value.as_bytes().to_vec()));
+    }
 
     // Extended Key Usage     2.5.29.37
-    let Some(extended_key_usage) = leaf_crit_extensions
+    if let Some(extended_key_usage) = leaf_crit_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_EXTENDED_KEY_USAGE)
+        .find(|ext| ext.extn_id.to_string() == *OID_EXTENDED_KEY_USAGE) {
+            x509_errors.append(&mut validate_extended_key_usage(extended_key_usage.extn_value.as_bytes().to_vec()));
+        }
     else {
-        return Err(Error::ValidationError(
+        x509_errors.push(Error::ValidationError(
             "Missing critical ExtendedKeyUsage extension in the signer certificate".to_string(),
         ));
     };
-    x509_errors.append(&mut validate_extended_key_usage(extended_key_usage.extn_value.as_bytes().to_vec()));
-
+    
     //CRL Distribution Points  2.5.29.31
-    let Some(crl_distribution_point) = leaf_extensions
+    if let Some(crl_distribution_point) = leaf_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_CRL_DISTRIBUTION_POINTS)
+        .find(|ext| ext.extn_id.to_string() == *OID_CRL_DISTRIBUTION_POINTS) {
+            x509_errors.append(&mut validate_crl_distribution_point(crl_distribution_point.extn_value.as_bytes().to_vec()));
+        }
     else {
-        return Err(Error::ValidationError(
+        x509_errors.push(Error::ValidationError(
             "The leaf certificate is expected to have a crl distribution point specificied, but the extensions was not found".to_string(),
         ));
     };
-    x509_errors.append(&mut validate_crl_distribution_point(crl_distribution_point.extn_value.as_bytes().to_vec()));
-
-    // Issuer Alternative Name  2.5.29.18
-    let Some(issuer_alternative_name) = leaf_extensions
-        .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_ISSUER_ALTERNATIVE_NAME)
-    else {
-        return Err(Error::ValidationError("The leaf certificate is expected to have issuer alternative name specificied, but the extensions was not found".to_string()));
-    };
-    x509_errors.append(&mut validate_issuer_alternative_name(issuer_alternative_name.extn_value.as_bytes().to_vec()));
     
-    Ok(errors)
+    // Issuer Alternative Name  2.5.29.18
+    if let Some(issuer_alternative_name) = leaf_extensions
+        .iter()
+        .find(|ext| ext.extn_id.to_string() == *OID_ISSUER_ALTERNATIVE_NAME) {
+            x509_errors.append(&mut validate_issuer_alternative_name(issuer_alternative_name.extn_value.as_bytes().to_vec()));
+        }
+    else {
+        x509_errors.push(Error::ValidationError("The leaf certificate is expected to have issuer alternative name specificied, but the extensions was not found".to_string()));
+    };
+
+    x509_errors
 }
 
 
@@ -244,10 +256,10 @@ pub fn validate_crl_distribution_point(bytes: Vec<u8>) -> Vec<Error> {
         Ok(crl_dp) => {
             for point in crl_dp.0.into_iter() {
                 if point.crl_issuer.is_some() || point.reasons.is_some() {
-                    errors.push(Error::ValidationError(format!("crl_issuer and reasons may not be set on CrlDistributionPoints, but is set for: {:?}", crl_dp)))
+                    errors.push(Error::ValidationError(format!("crl_issuer and reasons may not be set on CrlDistributionPoints, but is set for: {:?}", point)))
                 }
 
-                if !point.distribution_point.is_some_and(|dpn| {
+                if !point.distribution_point.clone().is_some_and(|dpn| {
                     match dpn {
                         DistributionPointName::FullName(names) => {
                             let type_errors: Vec<Error> = check_general_name_types(names);
@@ -262,7 +274,7 @@ pub fn validate_crl_distribution_point(bytes: Vec<u8>) -> Vec<Error> {
                         }
                     };
                 }) {
-                    errors.push(Error::ValidationError(format!("crl distribution point: {:?} has an invalid type", crl_dp)))
+                    errors.push(Error::ValidationError(format!("crl distribution point has an invalid type: {:?}", point)))
                 }
             }
         },
@@ -304,7 +316,7 @@ pub fn validate_basic_constraints(bytes: Vec<u8>) -> Vec<Error> {
 }
 
 fn check_general_name_types(names: Vec<GeneralName>) -> Vec<Error> {
-    let valid_types: Vec<bool> = names.into_iter().map(|name|{
+    let valid_types: Vec<bool> = names.iter().map(|name|{
         match name {
             GeneralName::Rfc822Name(_) => {
                 true

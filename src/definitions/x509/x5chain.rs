@@ -83,7 +83,9 @@ impl X5Chain {
         let mut errors: Vec<X509Error> = vec![];
         x5chain
             .windows(2)
-            .for_each(|[target, issuer]| {
+            .for_each(|chain_link| {
+                let target = &chain_link[0];
+                let issuer = &chain_link[1];
                 match check_signature(target, issuer) {
                     Ok(r) => {
 
@@ -120,7 +122,7 @@ impl X5Chain {
                     match find_anchor(cert, trust_anchor_registry) {
                         Ok(anchor) => {
                             if let Some(trust_anchor) = anchor {
-                                errors.append(&mut validate_with_trust_anchor(*x509, trust_anchor));
+                                errors.append(&mut validate_with_trust_anchor(x509.clone(), trust_anchor));
                             } else {
                                 errors.push(X509Error::ValidationError(
                                     "No matching trust anchor found".to_string(),

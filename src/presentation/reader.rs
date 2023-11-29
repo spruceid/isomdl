@@ -59,10 +59,10 @@ pub enum Status {
     Valid,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error,Serialize, Deserialize)]
 pub enum Error {
-    #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
-    InvalidQrCode(anyhow::Error),
+    #[error("the qr code had the wrong prefix or the contained data could not be decoded")]
+    InvalidQrCode,
     #[error("Device did not transmit any data.")]
     DeviceTransmissionError,
     #[error("Device did not transmit an mDL.")]
@@ -145,7 +145,8 @@ impl SessionManager {
         validation_ruleset: Option<ValidationRuleSet>,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let device_engagement_bytes =
-            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(Error::InvalidQrCode)?;
+            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
+            .map_err(|e| anyhow!(e))?;
 
         //generate own keys
         let key_pair = create_p256_ephemeral_keys()?;
