@@ -3,6 +3,7 @@ use crate::definitions::x509::trust_anchor::validate_with_trust_anchor;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use crate::definitions::x509::trust_anchor::check_validity_period;
 use crate::definitions::x509::error::Error as X509Error;
+use crate::presentation::reader::Error;
 use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
 
@@ -22,6 +23,8 @@ use x509_cert::{
     certificate::Certificate,
     der::{referenced::OwnedToRef, Decode},
 };
+use std::hash::Hash;
+use std::collections::HashSet;
 
 pub const X5CHAIN_HEADER_LABEL: i128 = 33;
 
@@ -87,8 +90,7 @@ impl X5Chain {
                 let target = &chain_link[0];
                 let issuer = &chain_link[1];
                 match check_signature(target, issuer) {
-                    Ok(r) => {
-
+                    Ok(_) => {
                     }, 
                     Err(e) => {
                         errors.push(e)
@@ -96,16 +98,12 @@ impl X5Chain {
                 }
             });
 
+        //make sure all submitted certificates are valid
         for x509 in x5chain {
             let cert = x509_cert::Certificate::from_der(&x509.bytes);
             match cert {
                 Ok(c) => {
-                    match check_validity_period(&c) {
-                        Ok(v) => {},
-                        Err(e) => {
-                            errors.push(e)
-                        }
-                    }
+                    errors.append(&mut check_validity_period(&c));
                 },
                 Err(e)=> {
                     errors.push(e.into())
@@ -118,7 +116,8 @@ impl X5Chain {
         if let Some(x509) = last_in_chain {
             match x509_cert::Certificate::from_der(&x509.bytes) {
                 Ok(cert)=> {
-
+                    // if the issuer of the signer certificate is known in the trust anchor registry, do the validation.
+                    // otherwise, report an error and skip.
                     match find_anchor(cert, trust_anchor_registry) {
                         Ok(anchor) => {
                             if let Some(trust_anchor) = anchor {
@@ -156,6 +155,59 @@ pub fn check_signature(target: &X509, issuer: &X509) -> Result<(), X509Error> {
         ecdsa::Signature::from_der(child_cert.signature.raw_bytes())?;
     let bytes = child_cert.tbs_certificate.to_der()?;
     Ok(parent_public_key.verify(&bytes, &sig)?)
+}
+
+// In 18013-5 the TrustAnchorRegistry is also referred to as the Verified Issuer Certificate Authority List (VICAL)
+pub fn validate_x5chain(
+    x5chain: CborValue,
+    trust_anchor_registry: Option<TrustAnchorRegistry>,
+) -> Result<Vec<X509Error>, Error> {
+    let mut errors: Vec<X509Error> = vec![];
+    //the x5chain can contain one or more ceritificates 
+    match x5chain {
+        CborValue::Bytes(bytes) => {
+            let chain: Vec<X509> = vec![X509 {
+                bytes: serde_cbor::from_slice(&bytes)?,
+            }];
+            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
+            errors.append(&mut x5chain.validate(trust_anchor_registry));
+        }
+        CborValue::Array(x509s) => {
+            let mut chain = vec![];
+            for x509 in x509s {
+                match x509 {
+                    CborValue::Bytes(bytes) => {
+                        chain.push(X509{bytes: serde_cbor::from_slice(&bytes)?})
+
+                    },
+                    _ => return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x509)))
+                }
+            }
+
+            //an x5chain is not allowed to contain any duplicate certificates
+            if !has_unique_elements(chain.clone()) {
+                return Err(Error::MdocAuth(
+                    "x5chain header contains at least one duplicate certificate".to_string(),
+                ));
+            }
+
+            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
+            errors.append(&mut x5chain.validate(trust_anchor_registry));
+        }
+        _ => {
+            return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x5chain)));
+        }
+    }
+    Ok(errors)
+}
+
+fn has_unique_elements<T>(iter: T) -> bool
+where
+    T: IntoIterator,
+    T::Item: Eq + Hash,
+{
+    let mut uniq = HashSet::new();
+    iter.into_iter().all(move |x| uniq.insert(x))
 }
 
 #[derive(Default, Debug, Clone)]

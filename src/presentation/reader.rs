@@ -3,11 +3,12 @@ use super::{
 };
 use crate::definitions::device_key::cose_key::Error as CoseError;
 use crate::definitions::Mso;
-use crate::definitions::x509::x5chain::X509;
+use crate::definitions::x509::x5chain::validate_x5chain;
 use crate::presentation::reader::Error as ReaderError;
-use crate::definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry, ValidationRuleSet};
+use crate::definitions::x509::trust_anchor::{TrustAnchorRegistry, ValidationRuleSet};
 use crate::{
     definitions::{
+        device_response::Document,
         device_engagement::DeviceRetrievalMethod,
         device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
@@ -15,10 +16,8 @@ use crate::{
             self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
             SessionEstablishment,
         },
-        x509::error::Error as X509Error
     },
     definitions::{DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135},
-    definitions::x509::X5Chain,
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -26,13 +25,10 @@ use serde_cbor::Value as CborValue;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::collections::HashSet;
-use std::hash::Hash;
 use uuid::Uuid;
+use crate::definitions::{ValidatedResponse, ValidationErrors, Status};
 
-use x509_cert::{certificate::CertificateInner, der::Decode};
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SessionManager {
     session_transcript: SessionTranscript180135,
     sk_device: [u8; 32],
@@ -41,22 +37,6 @@ pub struct SessionManager {
     reader_message_counter: u32,
     validation_ruleset: Option<ValidationRuleSet>,
     trust_anchor_registry: Option<TrustAnchorRegistry>,
-}
-
-pub struct ValidatedResponse {
-    pub response: BTreeMap<String, Value>,
-    pub issuer_authentication: Status,
-    pub device_authentication: Status,
-    pub errors: ValidationErrors,
-}
-
-pub struct ValidationErrors(pub BTreeMap<String, serde_json::Value>);
-
-#[derive(Serialize, Deserialize)]
-pub enum Status {
-    Unchecked,
-    Invalid,
-    Valid,
 }
 
 #[derive(Debug, thiserror::Error,Serialize, Deserialize)]
@@ -258,7 +238,6 @@ impl SessionManager {
     pub fn handle_response(
         &mut self,
         response: &[u8],
-        session_transcript: SessionTranscript180135,
     ) -> Result<ValidatedResponse, Error> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
@@ -286,13 +265,6 @@ impl SessionManager {
             .ok_or(ReaderError::DocumentTypeError)?;
 
         let issuer_signed = document.issuer_signed.clone();
-
-        let mso_bytes = issuer_signed
-            .issuer_auth
-            .payload()
-            .expect("expected a COSE_Sign1 with attached payload, found detached payload");
-        let mso: Tag24<Mso> =
-            serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
 
         let header = issuer_signed.issuer_auth.unprotected();
         let Some(x5chain) = header.get_i(33) else {
@@ -348,6 +320,13 @@ impl SessionManager {
             );
         }
 
+        let validated_response = self.validate_response(x5chain.clone(), document, parsed_response)?;
+        Ok(validated_response)
+
+
+    }
+
+    pub fn validate_response(&mut self, x5chain: CborValue, document: Document, parsed_response:BTreeMap::<String, serde_json::Value>,) -> Result<ValidatedResponse, Error>{
         let mut validated_response = ValidatedResponse {
             response: parsed_response,
             issuer_authentication: Status::Unchecked,
@@ -355,35 +334,43 @@ impl SessionManager {
             errors: ValidationErrors(BTreeMap::new()),
         };
 
-        let certificate_errors =
-            validate_x5chain(x5chain.to_owned(), self.trust_anchor_registry.clone());
-
-        match certificate_errors {
+        let issuer_signed = document.issuer_signed.clone();
+        let mso_bytes = issuer_signed
+        .issuer_auth
+        .payload()
+        .expect("expected a COSE_Sign1 with attached payload, found detached payload");
+        let mso: Tag24<Mso> = serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
+    
+        match validate_x5chain(x5chain.to_owned(), self.trust_anchor_registry.clone()) {
             Ok(r) => {
+                if r.is_empty() {
+                    match issuer_authentication(x5chain.clone(), issuer_signed) {
+                        Ok(_) => {
+                            validated_response.issuer_authentication = Status::Valid;
+                        }
+                        Err(e) => {
+                            validated_response.issuer_authentication = Status::Invalid;
+                            validated_response
+                                .errors
+                                .0
+                                .insert("issuer_authentication_errors".to_string(), json!(vec![e]));
+                        }
+                    }
+                } else {
                 validated_response
                     .errors
                     .0
                     .insert("certificate_errors".to_string(), json!(r));
-                let valid_issuer_authentication =
-                    issuer_authentication(x5chain.clone(), issuer_signed);
-                match valid_issuer_authentication {
-                    Ok(_r) => {
-                        validated_response.issuer_authentication = Status::Valid;
-                    }
-                    Err(e) => {
-                        validated_response.issuer_authentication = Status::Invalid;
-                        validated_response
-                            .errors
-                            .0
-                            .insert("issuer_authentication_errors".to_string(), json!(vec![e]));
-                    }
-                }
+                validated_response.issuer_authentication = Status::Invalid
+                };
             }
-            Err(_e) => validated_response.issuer_authentication = Status::Invalid,
+            Err(e) => {
+                validated_response.issuer_authentication = Status::Invalid;
+                validated_response.errors.0.insert("certificate_errors".to_string(), json!(e));
+            },
         }
-
-        let valid_device_authentication = device_authentication(mso, document, session_transcript);
-        match valid_device_authentication {
+    
+        match device_authentication(mso, document, self.session_transcript.clone()) {
             Ok(_r) => {
                 validated_response.device_authentication = Status::Valid;
             }
@@ -395,52 +382,11 @@ impl SessionManager {
                     .insert("device_authentication_errors".to_string(), json!(vec![e]));
             }
         }
-
+    
         Ok(validated_response)
     }
 }
 
-// In 18013-5 the TrustAnchorRegistry is also referred to as the Verified Issuer Certificate Authority List (VICAL)
-pub fn validate_x5chain(
-    x5chain: CborValue,
-    trust_anchor_registry: Option<TrustAnchorRegistry>,
-) -> Result<Vec<X509Error>, Error> {
-    let mut errors: Vec<X509Error> = vec![];
-    match x5chain {
-        CborValue::Bytes(bytes) => {
-            let chain: Vec<X509> = vec![X509 {
-                bytes: serde_cbor::from_slice(&bytes)?,
-            }];
-            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            errors.append(&mut x5chain.validate(trust_anchor_registry));
-        }
-        CborValue::Array(x509s) => {
-            let mut chain = vec![];
-            for x509 in x509s {
-                match x509 {
-                    CborValue::Bytes(bytes) => {
-                        chain.push(X509{bytes: serde_cbor::from_slice(&bytes)?})
-
-                    },
-                    _ => return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x509)))
-                }
-            }
-
-            if !has_unique_elements(chain.clone()) {
-                return Err(Error::MdocAuth(
-                    "x5chain header contains at least one duplicate certificate".to_string(),
-                ));
-            }
-
-            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            errors.append(&mut x5chain.validate(trust_anchor_registry));
-        }
-        _ => {
-            return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x5chain)));
-        }
-    }
-    Ok(errors)
-}
 
 fn parse_response(value: CborValue) -> Result<Value, Error> {
     match value {
@@ -498,15 +444,6 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
     }
 
     Ok(true)
-}
-
-fn has_unique_elements<T>(iter: T) -> bool
-where
-    T: IntoIterator,
-    T::Item: Eq + Hash,
-{
-    let mut uniq = HashSet::new();
-    iter.into_iter().all(move |x| uniq.insert(x))
 }
 
 #[cfg(test)]

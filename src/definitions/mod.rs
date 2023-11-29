@@ -25,3 +25,4 @@ pub use issuer_signed::{IssuerSigned, IssuerSignedItem};
 pub use mso::{DigestAlgorithm, DigestId, DigestIds, Mso};
 pub use session::{SessionData, SessionEstablishment, SessionTranscript180135};
 pub use validity_info::ValidityInfo;
+pub use validated_response::{ValidatedResponse, ValidationErrors, Status};

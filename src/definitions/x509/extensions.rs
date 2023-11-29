@@ -12,6 +12,9 @@ const OID_BASIC_CONSTRAINTS: &str = "2.5.29.19";
 const OID_CRL_DISTRIBUTION_POINTS: &str = "2.5.29.31";
 const OID_EXTENDED_KEY_USAGE: &str = "2.5.29.37";
 
+// A Specific OID defined for mDL signing
+const VALUE_EXTENDED_KEY_USAGE: &str = "1.0.18013.5.1.2";
+
 // -- 18013-5 IACA SPECIFIC ROOT EXTENSION VALUE CHECKS -- //
 // Key Usage: 5, 6 (keyCertSign, crlSign)
 // Basic Constraints: Pathlen:0
@@ -23,21 +26,13 @@ const OID_EXTENDED_KEY_USAGE: &str = "2.5.29.37";
 // Key Usage: 0 (digitalSignature)
 // CRL Distribution Points must have tag 0
 // Issuer Alternative Name must be of type rfc822Name or a URI (tag 1 and tag 6)
-//
 
-const EXTENDED_KEY_USAGE: &str = "1.0.18013.5.1.2";
-const ROOT_KEY_USAGE: [usize; 2] = [5, 6];
-const LEAF_KEY_USAGE: [usize; 1] = [0];
-const BASIC_CONSTRAINTS: [u32; 1] = [0];
-const CRL_DISTRIBUTION_POINT: [u32; 1] = [0];
-const ISSUER_ALTERNATIVE_NAME: [u32; 2] = [1, 6];
 
 /*  All the checks in this file relate to requirements for IACA x509 certificates as
     detailed in Annex B of ISO18013-5. Specifically, the requirements for values in 
     root and signer certificates are given in tables B.2 and B.4 */
-
-
 pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Error> {
+
     //A specific subset of x509 extensions is not allowed in IACA certificates.
     //We enter an error for every present disallowed x509 extension
     let disallowed = iaca_disallowed_x509_extensions();
@@ -129,9 +124,6 @@ pub fn validate_iaca_signer_extensions(
 
     let leaf_crit_extensions: Vec<&Extension> =
         leaf_extensions.iter().filter(|ext| ext.critical).collect();
-
-    let mut iter = leaf_extensions.iter();
-    let mut crit_iter = leaf_crit_extensions.iter();
 
     // Key Usage 2.5.29.15
     if let Some(key_usage) = leaf_crit_extensions
@@ -236,7 +228,7 @@ pub fn validate_extended_key_usage(bytes: Vec<u8>) -> Vec<Error> {
     let extended_key_usage = ExtendedKeyUsage::from_der(&bytes);
     match extended_key_usage {
         Ok(eku) => {
-            if !eku.0.into_iter().find(|oid| oid.to_string() == EXTENDED_KEY_USAGE).is_some() {
+            if !eku.0.into_iter().find(|oid| oid.to_string() == VALUE_EXTENDED_KEY_USAGE).is_some() {
                 return vec![Error::ValidationError("Invalid extended key usage, expected: 1.0.18013.5.1.2".to_string())]
             };
             vec![]

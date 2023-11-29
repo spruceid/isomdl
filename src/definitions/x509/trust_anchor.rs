@@ -1,10 +1,9 @@
 use crate::definitions::x509::x5chain::X509;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use time::OffsetDateTime;
 use x509_cert::attr::AttributeTypeAndValue;
 use x509_cert::certificate::CertificateInner;
-use x509_cert::{der::Decode, Certificate};
+use x509_cert::der::Decode;
 use crate::definitions::x509::extensions::{
     validate_iaca_root_extensions,
     validate_iaca_signer_extensions,
@@ -38,19 +37,15 @@ pub struct TrustAnchorRegistry {
     pub certificates: Vec<TrustAnchor>,
 }
 
-pub fn process_validation_outcomes(leaf_certificate: CertificateInner, root_certificate: CertificateInner ) -> Vec<X509Error> {
+pub fn process_validation_outcomes(leaf_certificate: CertificateInner, root_certificate: CertificateInner, rule_set: ValidationRuleSet) -> Vec<X509Error> {
     let mut errors: Vec<X509Error> = vec![];
-    let rule_set = ValidationRuleSet {
-        distinguished_names: vec!["2.5.4.6".to_string(), "2.5.4.8".to_string()],
-        typ: RuleSetType::IACA,
-    };
 
-    let validation = apply_ruleset(
+    //execute checks on x509 components
+    match apply_ruleset(
         leaf_certificate,
         root_certificate.clone(),
         rule_set,
-    );
-    match validation {
+    ) {
         Ok(mut v) => {
             errors.append(&mut v);
         },
@@ -59,28 +54,25 @@ pub fn process_validation_outcomes(leaf_certificate: CertificateInner, root_cert
         }
     }
 
-    let validity = check_validity_period(&root_certificate);
-    match validity {
-        Ok(v)=> {
-        },
-        Err(e) => {
-            errors.push(e);
-        }
-    }
+    // make sure that the trust anchor is still valid
+    errors.append(&mut check_validity_period(&root_certificate));
+
+    //TODO: check CRL to make sure the certificates have not been revoked
     errors
 }
 
-pub fn helper_with_ruleset(leaf_certificate: CertificateInner, trust_anchor: TrustAnchor )-> Vec<X509Error> {
+pub fn validate_with_ruleset(leaf_certificate: CertificateInner, trust_anchor: TrustAnchor )-> Vec<X509Error> {
     let mut errors: Vec<X509Error> = vec![];
 
     match trust_anchor {
-        //TODO: AAMVA TrustAnchor rules
         TrustAnchor::Iaca(certificate) => {
-            // 18013-5 specifies checks that shall be performed for IACA certificates
-
+            let rule_set = ValidationRuleSet {
+                distinguished_names: vec!["2.5.4.6".to_string(), "2.5.4.8".to_string()],
+                typ: RuleSetType::IACA,
+            };
             match x509_cert::Certificate::from_der(&certificate.bytes) {
                 Ok(root_certificate) => {
-                    errors.append(&mut process_validation_outcomes(leaf_certificate, root_certificate));
+                    errors.append(&mut process_validation_outcomes(leaf_certificate, root_certificate, rule_set));
                 },
                 Err(e) => {
                     errors.push(e.into());
@@ -89,10 +81,14 @@ pub fn helper_with_ruleset(leaf_certificate: CertificateInner, trust_anchor: Tru
             
         }
         TrustAnchor::Aamva(certificate) => {
+            let rule_set = ValidationRuleSet {
+                distinguished_names: vec!["2.5.4.6".to_string(), "2.5.4.8".to_string()],
+                typ: RuleSetType::AAMVA,
+            };
             //The Aamva ruleset follows the IACA ruleset, but makes the ST value mandatory
             match x509_cert::Certificate::from_der(&certificate.bytes) {
                 Ok(root_certificate) => {
-                    errors.append(&mut process_validation_outcomes(leaf_certificate, root_certificate));
+                    errors.append(&mut process_validation_outcomes(leaf_certificate, root_certificate, rule_set));
                 },
                 Err(e) => {
                     errors.push(e.into());
@@ -115,7 +111,7 @@ pub fn validate_with_trust_anchor(
 
     match leaf_certificate{
         Ok(leaf) => {
-            errors.append(&mut helper_with_ruleset(leaf, trust_anchor));
+            errors.append(&mut validate_with_ruleset(leaf, trust_anchor));
         }, 
         Err(e)=> {
             errors.push(e.into())
@@ -124,12 +120,13 @@ pub fn validate_with_trust_anchor(
     errors
 }
 
-pub fn check_validity_period(certificate: &CertificateInner) -> Result<(), X509Error> {
+pub fn check_validity_period(certificate: &CertificateInner) -> Vec<X509Error> {
     let validity = certificate.tbs_certificate.validity;
+    let mut errors: Vec<X509Error> = vec![];
     if validity.not_after.to_unix_duration().as_secs()
         < OffsetDateTime::now_utc().unix_timestamp() as u64
     {
-        return Err(X509Error::ValidationError(format!(
+        errors.push(X509Error::ValidationError(format!(
             "Expired certificate with subject: {:?}",
             certificate.tbs_certificate.subject
         )));
@@ -137,15 +134,22 @@ pub fn check_validity_period(certificate: &CertificateInner) -> Result<(), X509E
     if validity.not_before.to_unix_duration().as_secs()
         > OffsetDateTime::now_utc().unix_timestamp() as u64
     {
-        return Err(X509Error::ValidationError(format!(
+        errors.push(X509Error::ValidationError(format!(
             "Not yet valid certificate with subject: {:?}",
             certificate.tbs_certificate.subject
         )));
     };
 
-    Ok(())
+    errors
 }
 
+/* Validates:
+   
+    - all the correct distinghuished names are present
+    and match the 
+    - all the correct extensions are present
+    - the extensions are set to the ruleset values
+    -  */
 fn apply_ruleset(
     leaf_certificate: CertificateInner,
     root_certificate: CertificateInner,
@@ -221,11 +225,12 @@ fn apply_ruleset(
     };
 
     match rule_set.typ {
+        //Under the IACA ruleset, the values for S or ST should be the same in subject and issuer if they are present in both
         RuleSetType::IACA => {
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
             extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions));
             for dn in leaf_distinguished_names {
-                //Under the IACA ruleset, the values for S or ST should be the same in subject and issuer if they are present in both
+                
                 if dn.oid.to_string() == *"2.5.4.8" {
                     let state_or_province =
                         root_distinguished_names.iter().find(|r| r.oid == dn.oid);
@@ -242,6 +247,7 @@ fn apply_ruleset(
             }
             Ok(extension_errors)
         }
+        //Under the AAMVA ruleset, S/ST is mandatory and should be the same in the subject and issuer
         RuleSetType::AAMVA => {
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
             extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions));
