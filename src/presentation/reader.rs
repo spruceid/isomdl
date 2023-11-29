@@ -343,7 +343,7 @@ impl SessionManager {
         match validate_x5chain(x5chain.to_owned(), self.trust_anchor_registry.clone()) {
             Ok(r) => {
                 if r.is_empty() {
-                    match issuer_authentication(x5chain.clone(), issuer_signed) {
+                    match issuer_authentication(x5chain, issuer_signed) {
                         Ok(_) => {
                             validated_response.issuer_authentication = Status::Valid;
                         }

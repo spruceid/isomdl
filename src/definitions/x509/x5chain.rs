@@ -123,7 +123,7 @@ impl X5Chain {
                                 ));
                             }
                         }
-                        Err(e) => errors.push(e.into()),
+                        Err(e) => errors.push(e),
                     }
                 }
                 Err(e) => errors.push(e.into()),

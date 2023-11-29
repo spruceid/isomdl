@@ -202,8 +202,7 @@ pub fn validate_signer_key_usage(bytes: Vec<u8>) -> Vec<Error> {
             if ku
                 .0
                 .into_iter()
-                .find(|flag| flag != &KeyUsages::DigitalSignature)
-                .is_some()
+                .any(|flag| flag != KeyUsages::DigitalSignature)
             {
                 errors.push(Error::ValidationError(
                     "Key usage is set beyond scope of IACA signer certificates".to_string(),
@@ -238,8 +237,7 @@ pub fn validate_root_key_usage(bytes: Vec<u8>) -> Vec<Error> {
             if ku
                 .0
                 .into_iter()
-                .find(|flag| flag != &KeyUsages::CRLSign && flag != &KeyUsages::KeyCertSign)
-                .is_some()
+                .any(|flag| flag != KeyUsages::CRLSign && flag != KeyUsages::KeyCertSign)
             {
                 errors.push(Error::ValidationError(format!("The key usage of the root certificate goes beyond the scope of IACA root certificates {:?}", ku)))
             };
@@ -261,8 +259,7 @@ pub fn validate_extended_key_usage(bytes: Vec<u8>) -> Vec<Error> {
             if !eku
                 .0
                 .into_iter()
-                .find(|oid| oid.to_string() == VALUE_EXTENDED_KEY_USAGE)
-                .is_some()
+                .any(|oid| oid.to_string() == VALUE_EXTENDED_KEY_USAGE)
             {
                 return vec![Error::ValidationError(
                     "Invalid extended key usage, expected: 1.0.18013.5.1.2".to_string(),
@@ -292,16 +289,12 @@ pub fn validate_crl_distribution_point(bytes: Vec<u8>) -> Vec<Error> {
                     match dpn {
                         DistributionPointName::FullName(names) => {
                             let type_errors: Vec<Error> = check_general_name_types(names);
-                            if type_errors.is_empty() {
-                                return true;
-                            } else {
-                                return false;
-                            }
+                            type_errors.is_empty()
                         }
                         DistributionPointName::NameRelativeToCRLIssuer(_) => {
-                            return false;
+                            false
                         }
-                    };
+                    }
                 }) {
                     errors.push(Error::ValidationError(format!(
                         "crl distribution point has an invalid type: {:?}",
@@ -332,7 +325,7 @@ pub fn validate_basic_constraints(bytes: Vec<u8>) -> Vec<Error> {
     let basic_constraints = BasicConstraints::from_der(&bytes);
     match basic_constraints {
         Ok(bc) => {
-            if !bc.path_len_constraint.is_some_and(|path_len| path_len == 0) && bc.ca == true {
+            if !bc.path_len_constraint.is_some_and(|path_len| path_len == 0) && bc.ca {
                 return vec![Error::ValidationError(format!(
                     "Basic constraints expected to be CA:true, path_len:0, but found: {:?}",
                     bc
@@ -349,20 +342,16 @@ pub fn validate_basic_constraints(bytes: Vec<u8>) -> Vec<Error> {
 fn check_general_name_types(names: Vec<GeneralName>) -> Vec<Error> {
     let valid_types: Vec<bool> = names
         .iter()
-        .map(|name| match name {
-            GeneralName::Rfc822Name(_) => true,
-            GeneralName::UniformResourceIdentifier(_) => true,
-            _ => false,
-        })
+        .map(|name| matches!(name, GeneralName::Rfc822Name(_) | GeneralName::UniformResourceIdentifier(_)))
         .collect();
 
     if valid_types.contains(&false) {
-        return vec![Error::ValidationError(format!(
+        vec![Error::ValidationError(format!(
             "Invalid type found in GeneralNames: {:?}",
             names
-        ))];
+        ))]
     } else {
-        return vec![];
+        vec![]
     }
 }
 
