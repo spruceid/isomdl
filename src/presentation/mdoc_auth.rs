@@ -89,13 +89,6 @@ pub fn device_authentication(
 
 fn get_signer_key(x5chain: &CborValue) -> Result<VerifyingKey, Error> {
     let signer = match x5chain {
-        CborValue::Text(t) => {
-            let x509 = x509_cert::Certificate::from_der(t.as_bytes())?;
-
-            x509.tbs_certificate
-                .subject_public_key_info
-                .subject_public_key
-        }
         CborValue::Array(a) => match a.first() {
             Some(CborValue::Text(t)) => {
                 let x509 = x509_cert::Certificate::from_der(t.as_bytes())?;

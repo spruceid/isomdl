@@ -333,12 +333,22 @@ impl SessionManager {
         };
 
         let issuer_signed = document.issuer_signed.clone();
-        let mso_bytes = issuer_signed
-            .issuer_auth
-            .payload()
-            .expect("expected a COSE_Sign1 with attached payload, found detached payload");
-        let mso: Tag24<Mso> =
-            serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
+        if let Some(mso_bytes) = issuer_signed.issuer_auth.payload() {
+            let mso: Tag24<Mso> =
+                serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
+            match device_authentication(mso, document, self.session_transcript.clone()) {
+                Ok(_r) => {
+                    validated_response.device_authentication = Status::Valid;
+                }
+                Err(e) => {
+                    validated_response.device_authentication = Status::Invalid;
+                    validated_response
+                        .errors
+                        .0
+                        .insert("device_authentication_errors".to_string(), json!(vec![e]));
+                }
+            }
+        }
 
         match validate_x5chain(x5chain.to_owned(), self.trust_anchor_registry.clone()) {
             Ok(r) => {
@@ -369,19 +379,6 @@ impl SessionManager {
                     .errors
                     .0
                     .insert("certificate_errors".to_string(), json!(e));
-            }
-        }
-
-        match device_authentication(mso, document, self.session_transcript.clone()) {
-            Ok(_r) => {
-                validated_response.device_authentication = Status::Valid;
-            }
-            Err(e) => {
-                validated_response.device_authentication = Status::Invalid;
-                validated_response
-                    .errors
-                    .0
-                    .insert("device_authentication_errors".to_string(), json!(vec![e]));
             }
         }
 

@@ -53,6 +53,8 @@ pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Err
     let root_crit_extensions: Vec<&Extension> =
         root_extensions.iter().filter(|ext| ext.critical).collect();
 
+    //TODO: check for any critical extensions beyond what is expected
+
     // Key Usage 2.5.29.15
     if let Some(key_usage) = root_crit_extensions
         .iter()
@@ -285,17 +287,17 @@ pub fn validate_crl_distribution_point(bytes: Vec<u8>) -> Vec<Error> {
                     errors.push(Error::ValidationError(format!("crl_issuer and reasons may not be set on CrlDistributionPoints, but is set for: {:?}", point)))
                 }
 
-                if !point.distribution_point.clone().is_some_and(|dpn| {
-                    match dpn {
+                if !point
+                    .distribution_point
+                    .clone()
+                    .is_some_and(|dpn| match dpn {
                         DistributionPointName::FullName(names) => {
                             let type_errors: Vec<Error> = check_general_name_types(names);
                             type_errors.is_empty()
                         }
-                        DistributionPointName::NameRelativeToCRLIssuer(_) => {
-                            false
-                        }
-                    }
-                }) {
+                        DistributionPointName::NameRelativeToCRLIssuer(_) => false,
+                    })
+                {
                     errors.push(Error::ValidationError(format!(
                         "crl distribution point has an invalid type: {:?}",
                         point
@@ -342,7 +344,12 @@ pub fn validate_basic_constraints(bytes: Vec<u8>) -> Vec<Error> {
 fn check_general_name_types(names: Vec<GeneralName>) -> Vec<Error> {
     let valid_types: Vec<bool> = names
         .iter()
-        .map(|name| matches!(name, GeneralName::Rfc822Name(_) | GeneralName::UniformResourceIdentifier(_)))
+        .map(|name| {
+            matches!(
+                name,
+                GeneralName::Rfc822Name(_) | GeneralName::UniformResourceIdentifier(_)
+            )
+        })
         .collect();
 
     if valid_types.contains(&false) {
