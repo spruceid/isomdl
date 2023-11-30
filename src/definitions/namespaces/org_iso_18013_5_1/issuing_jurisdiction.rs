@@ -34,9 +34,7 @@ impl FromJsonMap for IssuingJurisdiction {
             .and_then(Alpha2::from_json)?;
 
         if !jurisdiction.starts_with(country.as_str()) {
-            return Err(Error::CountryMismatch)
-                .map_err(Into::into)
-                .map_err(FromJsonError::Parsing);
+            return Err(FromJsonError::Parsing(Into::into(Error::CountryMismatch)));
         }
 
         Ok(Self(jurisdiction))
