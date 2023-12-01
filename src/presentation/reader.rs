@@ -337,7 +337,7 @@ impl SessionManager {
             let mso: Tag24<Mso> =
                 serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
             match device_authentication(mso, document, self.session_transcript.clone()) {
-                Ok(_r) => {
+                Ok(_) => {
                     validated_response.device_authentication = Status::Valid;
                 }
                 Err(e) => {
@@ -351,8 +351,8 @@ impl SessionManager {
         }
 
         match validate_x5chain(x5chain.to_owned(), self.trust_anchor_registry.clone()) {
-            Ok(r) => {
-                if r.is_empty() {
+            Ok(errors) => {
+                if errors.is_empty() {
                     match issuer_authentication(x5chain, issuer_signed) {
                         Ok(_) => {
                             validated_response.issuer_authentication = Status::Valid;
@@ -369,7 +369,7 @@ impl SessionManager {
                     validated_response
                         .errors
                         .0
-                        .insert("certificate_errors".to_string(), json!(r));
+                        .insert("certificate_errors".to_string(), json!(errors));
                     validated_response.issuer_authentication = Status::Invalid
                 };
             }
@@ -484,7 +484,8 @@ pub mod test {
             serde_cbor::Value::Bytes(serde_cbor::to_vec(&bytes).unwrap());
 
         let result = validate_x5chain(x5chain, Some(trust_anchor_registry));
-        println!("result: {:?}", result)
+        assert!(result.is_ok());
+        assert!(result.unwrap().len() == 0);
     }
 
     #[test]
@@ -505,7 +506,8 @@ pub mod test {
             serde_cbor::Value::Bytes(serde_cbor::to_vec(&bytes).unwrap());
 
         let result = validate_x5chain(x5chain, Some(trust_anchor_registry));
-        println!("result: {:?}", result)
+        assert!(result.is_ok());
+        assert!(result.unwrap().len() > 0);
     }
 
     #[test]
@@ -520,13 +522,11 @@ pub mod test {
         };
 
         let intermediate_bytes = pem_rfc7468::decode_vec(IACA_INTERMEDIATE)
-            .map_err(|e| anyhow!("unable to parse pem: {}", e))
-            .unwrap()
+            .expect("unable to parse pem")
             .1;
 
         let leaf_signer_bytes = pem_rfc7468::decode_vec(IACA_LEAF_SIGNER)
-            .map_err(|e| anyhow!("unable to parse pem: {}", e))
-            .unwrap()
+            .expect("unable to parse pem")
             .1;
 
         let intermediate_b =
@@ -536,6 +536,6 @@ pub mod test {
 
         let x5chain = serde_cbor::Value::Array(vec![leaf_signer_b, intermediate_b]);
         let result = validate_x5chain(x5chain, Some(trust_anchor_registry));
-        println!("result: {:?}", result)
+        assert!(result.is_ok())
     }
 }
