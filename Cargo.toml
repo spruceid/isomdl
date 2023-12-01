@@ -44,6 +44,7 @@ clap-stdin = "0.2.1"
 der = { version = "0.7", features = ["std", "derive", "alloc"] }
 hex = "0.4.3"
 asn1-rs = { version = "0.5.2", features = ["bits"]}
+reqwest = "0.11.22"
 
 [dependencies.cose-rs]
 git = "https://github.com/spruceid/cose-rs"
