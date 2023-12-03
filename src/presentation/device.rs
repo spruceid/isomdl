@@ -25,6 +25,10 @@ use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
+use x509_cert::der::Decode;
+use x509_cert::attr::AttributeTypeAndValue;
+use x509_cert::der::asn1::Utf8StringRef;
+use asn1_rs::Utf8String;
 
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
@@ -76,6 +80,14 @@ pub enum Error {
     ParsingError(#[from] ParseIntError),
     #[error("age_over element identifier is malformed")]
     PrefixError,
+    #[error("error decoding reader authentication certificate")]
+    CertificateError,
+}
+
+impl From<x509_cert::der::Error> for Error {
+    fn from(_value: x509_cert::der::Error) -> Self {
+        Error::CertificateError
+    }
 }
 
 pub type Documents = NonEmptyMap<DocType, Document>;
@@ -167,7 +179,7 @@ impl SessionManagerEngaged {
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
-    ) -> anyhow::Result<(SessionManager, RequestedItems)> {
+    ) -> anyhow::Result<(SessionManager, RequestedItems, Option<String>)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript =
             SessionTranscript180135(self.device_engagement, e_reader_key.clone(), self.handover);
@@ -193,12 +205,12 @@ impl SessionManagerEngaged {
             state: State::AwaitingRequest,
         };
 
-        let requested_data = sm.handle_decoded_request(SessionData {
+        let (requested_data, reader_cn) = sm.handle_decoded_request(SessionData {
             data: Some(session_establishment.data),
             status: None,
         })?;
 
-        Ok((sm, requested_data))
+        Ok((sm, requested_data, reader_cn))
     }
 }
 
@@ -218,7 +230,7 @@ impl SessionManager {
     fn validate_request(
         &self,
         request: DeviceRequest,
-    ) -> Result<Vec<ItemsRequest>, PreparedDeviceResponse> {
+    ) -> Result<(Vec<ItemsRequest>, Option<String>), PreparedDeviceResponse> {
         if request.version != DeviceRequest::VERSION {
             // tracing::error!(
             //     "unsupported DeviceRequest version: {} ({} is supported)",
@@ -227,12 +239,25 @@ impl SessionManager {
             // );
             return Err(PreparedDeviceResponse::empty(Status::GeneralError));
         }
-        Ok(request
+        //safe unwrap as doc_requests is a NonEmptyVec
+        //TODO: validate all doc_requests
+        let cn = SessionManager::reader_authentication(&self, request.doc_requests.first().unwrap().clone());
+        let items_requests: Vec<ItemsRequest> = request
             .doc_requests
             .into_inner()
             .into_iter()
             .map(|DocRequest { items_request, .. }| items_request.into_inner())
-            .collect())
+            .collect();
+
+
+        match cn {
+            Ok(r) => {
+                return Ok((items_requests, r))
+            },
+            Err(_e) => {
+                return Ok((items_requests, None))
+            }
+        }
     }
 
     pub fn prepare_response(&mut self, requests: &RequestedItems, permitted: PermittedItems) {
@@ -240,7 +265,7 @@ impl SessionManager {
         self.state = State::Signing(prepared_response);
     }
 
-    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<RequestedItems> {
+    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<(RequestedItems, Option<String>)> {
         let data = request.data.ok_or_else(|| {
             anyhow::anyhow!("no mdoc requests received, assume session can be terminated")
         })?;
@@ -257,6 +282,7 @@ impl SessionManager {
                 return Ok(Default::default());
             }
         };
+
         let request = match self.validate_request(request) {
             Ok(r) => r,
             Err(e) => {
@@ -267,8 +293,48 @@ impl SessionManager {
         Ok(request)
     }
 
+    pub fn reader_authentication(&self, doc_request: DocRequest)-> Result<Option<String>, Error>{
+        //TODO validate the reader authentication. This code only grabs the CN from the x5chain
+        if let Some(reader_auth) = doc_request.reader_auth {
+            let x5chain = reader_auth.unprotected().get_i(33);
+            if x5chain.is_some() {
+                let x5c = x5chain.unwrap();
+                match x5c {
+                    CborValue::Bytes(x509) => {
+                        let cert = x509_cert::Certificate::from_der(&x509)?;
+                        let distinguished_names: Vec<AttributeTypeAndValue> = cert.tbs_certificate.subject.0.into_iter().map(|rdn| {
+                            rdn.0.into_vec()
+                            .into_iter()
+                            .filter(|atv| {
+                                //common name
+                                atv.oid.to_string() == "2.5.4.3".to_string()
+                            })
+                            .collect::<Vec<AttributeTypeAndValue>>()
+                        })
+                        .collect::<Vec<Vec<AttributeTypeAndValue>>>()
+                        .into_iter()
+                        .flatten()
+                        .collect();
+
+                        let common_name = distinguished_names.first().unwrap().value.utf8_string().unwrap().to_string();
+                        return Ok(Some(common_name))
+
+                    },
+                    _ => {
+                        return Ok(None)
+                    }
+                }
+
+            } else {
+                return Ok(None)
+            }
+        } else {
+            return Ok(None)
+        }
+    }
+
     /// Handle a request from the reader.
-    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
+    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<(RequestedItems, Option<String>)> {
         let session_data: SessionData = serde_cbor::from_slice(request)?;
         self.handle_decoded_request(session_data)
     }
