@@ -4,8 +4,9 @@ use crate::definitions::x509::trust_anchor::check_validity_period;
 use crate::definitions::x509::trust_anchor::find_anchor;
 use crate::definitions::x509::trust_anchor::validate_with_trust_anchor;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use crate::presentation::reader::Error;
 use anyhow::{anyhow, Result};
+use p256::ecdsa::VerifyingKey;
+use p256::pkcs8::DecodePublicKey;
 
 use const_oid::AssociatedOid;
 
@@ -80,15 +81,60 @@ impl X5Chain {
         }
     }
 
+    pub fn from_cbor(cbor_bytes: CborValue) -> Result<Self, X509Error> {
+        match cbor_bytes {
+            CborValue::Bytes(x509) => {
+                let bytes: Vec<u8> = serde_cbor::from_slice(&x509)?;
+                Ok(X5Chain::from(NonEmptyVec::try_from(vec![X509{bytes}])?))
+            },
+            CborValue::Array(x509s) => {
+                let mut chain = vec![];
+                for x509 in x509s {
+                    match x509 {
+                        CborValue::Bytes(bytes) => {
+                            chain.push(X509{bytes: serde_cbor::from_slice(&bytes)?})
+                        },
+                        _ => return Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x509)))
+                    }
+                }
+                Ok(X5Chain::from(NonEmptyVec::try_from(chain)?))
+            },
+            _ => {Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", cbor_bytes)))}
+        }
+    }
+
+    pub fn get_signer_key(&self) -> Result<VerifyingKey, X509Error> {
+        let signer = match self.0.first() {
+            Some(x) => {
+                let x509 = x509_cert::Certificate::from_der(&x.bytes)?;
+
+                x509.tbs_certificate
+                    .subject_public_key_info
+                    .subject_public_key
+            }
+            _ => return Err(X509Error::CborDecodingError)?,
+        };
+        Ok(VerifyingKey::from_public_key_der(signer.raw_bytes())?)
+    }
+
     pub fn validate(&self, trust_anchor_registry: Option<TrustAnchorRegistry>) -> Vec<X509Error> {
         let x5chain = self.0.as_ref();
         let mut errors: Vec<X509Error> = vec![];
+
+        if !has_unique_elements(x5chain) {
+            errors.push(X509Error::ValidationError(
+                "x5chain contains duplicate certificates".to_string(),
+            ))
+        };
+
         x5chain.windows(2).for_each(|chain_link| {
             let target = &chain_link[0];
             let issuer = &chain_link[1];
-            match check_signature(target, issuer) {
-                Ok(_) => {}
-                Err(e) => errors.push(e),
+            if check_signature(target, issuer).is_err() {
+                errors.push(X509Error::ValidationError(format!(
+                    "invalid signature for target: {:?}",
+                    target
+                )));
             }
         });
 
@@ -145,50 +191,6 @@ pub fn check_signature(target: &X509, issuer: &X509) -> Result<(), X509Error> {
         ecdsa::Signature::from_der(child_cert.signature.raw_bytes())?;
     let bytes = child_cert.tbs_certificate.to_der()?;
     Ok(parent_public_key.verify(&bytes, &sig)?)
-}
-
-// In 18013-5 the TrustAnchorRegistry is also referred to as the Verified Issuer Certificate Authority List (VICAL)
-pub fn validate_x5chain(
-    x5chain: CborValue,
-    trust_anchor_registry: Option<TrustAnchorRegistry>,
-) -> Result<Vec<X509Error>, Error> {
-    let mut errors: Vec<X509Error> = vec![];
-    //the x5chain can contain one or more ceritificates
-    match x5chain {
-        CborValue::Bytes(bytes) => {
-            let chain: Vec<X509> = vec![X509 {
-                bytes: serde_cbor::from_slice(&bytes)?,
-            }];
-            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            errors.append(&mut x5chain.validate(trust_anchor_registry));
-        }
-        CborValue::Array(x509s) => {
-            let mut chain = vec![];
-            for x509 in x509s {
-                match x509 {
-                    CborValue::Bytes(bytes) => {
-                        chain.push(X509{bytes: serde_cbor::from_slice(&bytes)?})
-
-                    },
-                    _ => return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x509)))
-                }
-            }
-
-            //an x5chain is not allowed to contain any duplicate certificates
-            if !has_unique_elements(chain.clone()) {
-                return Err(Error::MdocAuth(
-                    "x5chain header contains at least one duplicate certificate".to_string(),
-                ));
-            }
-
-            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            errors.append(&mut x5chain.validate(trust_anchor_registry));
-        }
-        _ => {
-            return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x5chain)));
-        }
-    }
-    Ok(errors)
 }
 
 fn has_unique_elements<T>(iter: T) -> bool

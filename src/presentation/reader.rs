@@ -1,8 +1,7 @@
 use super::{mdoc_auth::device_authentication, mdoc_auth::issuer_authentication};
 use crate::definitions::device_key::cose_key::Error as CoseError;
 use crate::definitions::x509::trust_anchor::{TrustAnchorRegistry, ValidationRuleSet};
-use crate::definitions::x509::x5chain::validate_x5chain;
-use crate::definitions::Mso;
+use crate::definitions::x509::X5Chain;
 use crate::definitions::{Status, ValidatedResponse, ValidationErrors};
 use crate::presentation::reader::Error as ReaderError;
 use crate::{
@@ -70,6 +69,12 @@ pub enum Error {
 impl From<serde_cbor::Error> for Error {
     fn from(_: serde_cbor::Error) -> Self {
         Error::CborDecodingError
+    }
+}
+
+impl From<crate::definitions::x509::error::Error> for Error {
+    fn from(value: crate::definitions::x509::error::Error) -> Self {
+        Error::MdocAuth(value.to_string())
     }
 }
 
@@ -261,7 +266,7 @@ impl SessionManager {
         let issuer_signed = document.issuer_signed.clone();
 
         let header = issuer_signed.issuer_auth.unprotected();
-        let Some(x5chain) = header.get_i(33) else {
+        let Some(x5chain_bytes) = header.get_i(33) else {
             return Err(ReaderError::MdocAuth("Missing x5chain header".to_string()));
         };
 
@@ -314,17 +319,17 @@ impl SessionManager {
             );
         }
 
-        let validated_response =
-            self.validate_response(x5chain.clone(), document, parsed_response)?;
-        Ok(validated_response)
+        let x5chain = X5Chain::from_cbor(x5chain_bytes.clone())?;
+
+        Ok(self.validate_response(x5chain, document, parsed_response))
     }
 
     pub fn validate_response(
         &mut self,
-        x5chain: CborValue,
+        x5chain: X5Chain,
         document: Document,
         parsed_response: BTreeMap<String, serde_json::Value>,
-    ) -> Result<ValidatedResponse, Error> {
+    ) -> ValidatedResponse {
         let mut validated_response = ValidatedResponse {
             response: parsed_response,
             issuer_authentication: Status::Unchecked,
@@ -334,55 +339,54 @@ impl SessionManager {
 
         let issuer_signed = document.issuer_signed.clone();
         if let Some(mso_bytes) = issuer_signed.issuer_auth.payload() {
-            let mso: Tag24<Mso> =
-                serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
-            match device_authentication(mso, document, self.session_transcript.clone()) {
-                Ok(_) => {
-                    validated_response.device_authentication = Status::Valid;
-                }
-                Err(e) => {
-                    validated_response.device_authentication = Status::Invalid;
-                    validated_response
-                        .errors
-                        .0
-                        .insert("device_authentication_errors".to_string(), json!(vec![e]));
-                }
-            }
-        }
-
-        match validate_x5chain(x5chain.to_owned(), self.trust_anchor_registry.clone()) {
-            Ok(errors) => {
-                if errors.is_empty() {
-                    match issuer_authentication(x5chain, issuer_signed) {
+            match serde_cbor::from_slice(mso_bytes) {
+                Ok(mso) => {
+                    match device_authentication(mso, document, self.session_transcript.clone()) {
                         Ok(_) => {
-                            validated_response.issuer_authentication = Status::Valid;
+                            validated_response.device_authentication = Status::Valid;
                         }
                         Err(e) => {
-                            validated_response.issuer_authentication = Status::Invalid;
+                            validated_response.device_authentication = Status::Invalid;
                             validated_response
                                 .errors
                                 .0
-                                .insert("issuer_authentication_errors".to_string(), json!(vec![e]));
+                                .insert("device_authentication_errors".to_string(), json!(vec![e]));
                         }
                     }
-                } else {
-                    validated_response
-                        .errors
-                        .0
-                        .insert("certificate_errors".to_string(), json!(errors));
-                    validated_response.issuer_authentication = Status::Invalid
-                };
-            }
-            Err(e) => {
-                validated_response.issuer_authentication = Status::Invalid;
-                validated_response
-                    .errors
-                    .0
-                    .insert("certificate_errors".to_string(), json!(e));
+                }
+                Err(e) => {
+                    validated_response.issuer_authentication = Status::Invalid;
+                    validated_response.errors.0.insert(
+                        "device_authentication_errors".to_string(),
+                        json!(vec![Error::MdocAuth(e.to_string())]),
+                    );
+                }
             }
         }
 
-        Ok(validated_response)
+        let validation_errors = x5chain.validate(self.trust_anchor_registry.clone());
+        if validation_errors.is_empty() {
+            match issuer_authentication(x5chain, issuer_signed) {
+                Ok(_) => {
+                    validated_response.issuer_authentication = Status::Valid;
+                }
+                Err(e) => {
+                    validated_response.issuer_authentication = Status::Invalid;
+                    validated_response
+                        .errors
+                        .0
+                        .insert("issuer_authentication_errors".to_string(), json!(vec![e]));
+                }
+            }
+        } else {
+            validated_response
+                .errors
+                .0
+                .insert("certificate_errors".to_string(), json!(validation_errors));
+            validated_response.issuer_authentication = Status::Invalid
+        };
+
+        validated_response
     }
 }
 
@@ -446,10 +450,9 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
 
 #[cfg(test)]
 pub mod test {
-    use crate::presentation::reader::validate_x5chain;
     use crate::{
         definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry},
-        definitions::x509::x5chain::X509,
+        definitions::x509::{x5chain::X509, X5Chain},
     };
     use anyhow::anyhow;
 
@@ -480,12 +483,13 @@ pub mod test {
             .map_err(|e| anyhow!("unable to parse pem: {}", e))
             .unwrap()
             .1;
-        let x5chain: serde_cbor::Value =
+        let x5chain_cbor: serde_cbor::Value =
             serde_cbor::Value::Bytes(serde_cbor::to_vec(&bytes).unwrap());
 
-        let result = validate_x5chain(x5chain, Some(trust_anchor_registry));
-        assert!(result.is_ok());
-        assert!(result.unwrap().len() == 0);
+        let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
+
+        let result = x5chain.validate(Some(trust_anchor_registry));
+        assert!(result.len() == 0);
     }
 
     #[test]
@@ -502,12 +506,13 @@ pub mod test {
             .map_err(|e| anyhow!("unable to parse pem: {}", e))
             .unwrap()
             .1;
-        let x5chain: serde_cbor::Value =
+        let x5chain_cbor: serde_cbor::Value =
             serde_cbor::Value::Bytes(serde_cbor::to_vec(&bytes).unwrap());
 
-        let result = validate_x5chain(x5chain, Some(trust_anchor_registry));
-        assert!(result.is_ok());
-        assert!(result.unwrap().len() > 0);
+        let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
+
+        let result = x5chain.validate(Some(trust_anchor_registry));
+        assert!(result.len() > 0);
     }
 
     #[test]
@@ -534,8 +539,12 @@ pub mod test {
         let leaf_signer_b =
             serde_cbor::Value::Bytes(serde_cbor::to_vec(&leaf_signer_bytes).unwrap());
 
-        let x5chain = serde_cbor::Value::Array(vec![leaf_signer_b, intermediate_b]);
-        let result = validate_x5chain(x5chain, Some(trust_anchor_registry));
-        assert!(result.is_ok())
+        let x5chain_cbor: serde_cbor::Value =
+            serde_cbor::Value::Array(vec![leaf_signer_b, intermediate_b]);
+
+        let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
+
+        let result = x5chain.validate(Some(trust_anchor_registry));
+        assert!(result.len() > 0)
     }
 }

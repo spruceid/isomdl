@@ -1,5 +1,6 @@
 use crate::definitions::device_response::Document;
 use crate::definitions::issuer_signed;
+use crate::definitions::x509::X5Chain;
 use crate::definitions::DeviceAuth;
 use crate::definitions::Mso;
 use crate::definitions::{
@@ -12,14 +13,11 @@ use elliptic_curve::generic_array::GenericArray;
 use issuer_signed::IssuerSigned;
 use p256::ecdsa::Signature;
 use p256::ecdsa::VerifyingKey;
-use p256::pkcs8::DecodePublicKey;
-use serde_cbor::Value as CborValue;
 use ssi_jwk::Params;
 use ssi_jwk::JWK as SsiJwk;
-use x509_cert::der::Decode;
 
-pub fn issuer_authentication(x5chain: CborValue, issuer_signed: IssuerSigned) -> Result<(), Error> {
-    let signer_key = get_signer_key(&x5chain)?;
+pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: IssuerSigned) -> Result<(), Error> {
+    let signer_key = x5chain.get_signer_key()?;
     let issuer_auth = issuer_signed.issuer_auth;
     let verification_result: cose_rs::sign1::VerificationResult =
         issuer_auth.verify::<VerifyingKey, Signature>(&signer_key, None, None);
@@ -85,33 +83,4 @@ pub fn device_authentication(
         }
         _ => Err(Error::MdocAuth("Unsupported device_key type".to_string())),
     }
-}
-
-fn get_signer_key(x5chain: &CborValue) -> Result<VerifyingKey, Error> {
-    let signer = match x5chain {
-        CborValue::Array(a) => match a.first() {
-            Some(CborValue::Text(t)) => {
-                let x509 = x509_cert::Certificate::from_der(t.as_bytes())?;
-
-                x509.tbs_certificate
-                    .subject_public_key_info
-                    .subject_public_key
-            }
-            _ => return Err(ReaderError::CborDecodingError)?,
-        },
-        CborValue::Bytes(b) => {
-            let x509 = x509_cert::Certificate::from_der(b)?;
-
-            x509.tbs_certificate
-                .subject_public_key_info
-                .subject_public_key
-        }
-        _ => {
-            return Err(ReaderError::MdocAuth(format!(
-                "Unexpected type for x5chain header: {:?} ",
-                x5chain
-            )))
-        }
-    };
-    Ok(VerifyingKey::from_public_key_der(signer.raw_bytes())?)
 }
