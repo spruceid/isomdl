@@ -9,11 +9,15 @@ use x509_cert::attr::AttributeTypeAndValue;
 use x509_cert::certificate::CertificateInner;
 use x509_cert::der::Decode;
 
+const MDOC_VALUE_EXTENDED_KEY_USAGE: &str = "1.0.18013.5.1.2";
+const READER_VALUE_EXTENDED_KEY_USAGE: &str = "1.0.18013.5.1.6";
+
 #[derive(Serialize, Deserialize, Clone)]
 pub enum TrustAnchor {
     Iaca(X509),
     Aamva(X509),
     Custom(X509, ValidationRuleSet),
+    IacaReader(X509),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -91,6 +95,24 @@ pub fn validate_with_ruleset(
                 typ: RuleSetType::AAMVA,
             };
             //The Aamva ruleset follows the IACA ruleset, but makes the ST value mandatory
+            match x509_cert::Certificate::from_der(&certificate.bytes) {
+                Ok(root_certificate) => {
+                    errors.append(&mut process_validation_outcomes(
+                        leaf_certificate,
+                        root_certificate,
+                        rule_set,
+                    ));
+                }
+                Err(e) => {
+                    errors.push(e.into());
+                }
+            };
+        },
+        TrustAnchor::IacaReader(certificate) => {
+            let rule_set = ValidationRuleSet {
+                distinguished_names: vec!["2.5.4.3".to_string()],
+                typ: RuleSetType::ReaderAuth,
+            };
             match x509_cert::Certificate::from_der(&certificate.bytes) {
                 Ok(root_certificate) => {
                     errors.append(&mut process_validation_outcomes(
@@ -232,7 +254,7 @@ fn apply_ruleset(
         //Under the IACA ruleset, the values for S or ST should be the same in subject and issuer if they are present in both
         RuleSetType::IACA => {
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
-            extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions));
+            extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions, MDOC_VALUE_EXTENDED_KEY_USAGE));
             for dn in leaf_distinguished_names {
                 if dn.oid.to_string() == *"2.5.4.8" {
                     let state_or_province =
@@ -253,7 +275,7 @@ fn apply_ruleset(
         //Under the AAMVA ruleset, S/ST is mandatory and should be the same in the subject and issuer
         RuleSetType::AAMVA => {
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
-            extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions));
+            extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions, MDOC_VALUE_EXTENDED_KEY_USAGE));
             for dn in leaf_distinguished_names {
                 let Some(_root_dn) = root_distinguished_names.iter().find(|r| r == &&dn) else {
                     return Err(X509Error::ValidationError(format!("Mismatch between supplied certificate issuer attribute: {:?} and the trust anchor registry.", dn.value)));
@@ -269,9 +291,8 @@ fn apply_ruleset(
         }
         RuleSetType::ReaderAuth => {
             //TODO
-            Err(X509Error::ValidationError(
-                "Unimplemented ruleset".to_string(),
-            ))
+
+            Ok(validate_iaca_signer_extensions(leaf_extensions, READER_VALUE_EXTENDED_KEY_USAGE))
         }
     }
 }
@@ -302,6 +323,12 @@ pub fn find_anchor(
                 }
             }
             TrustAnchor::Aamva(certificate) => {
+                match x509_cert::Certificate::from_der(&certificate.bytes) {
+                    Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
+                    Err(_) => false,
+                }
+            },
+            TrustAnchor::IacaReader(certificate)=> {
                 match x509_cert::Certificate::from_der(&certificate.bytes) {
                     Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
                     Err(_) => false,

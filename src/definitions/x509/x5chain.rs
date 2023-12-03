@@ -53,7 +53,7 @@ impl X509 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct X5Chain(NonEmptyVec<X509>);
 
 impl From<NonEmptyVec<X509>> for X5Chain {
@@ -150,8 +150,7 @@ impl X5Chain {
         }
 
         //validate the last certificate in the chain against trust anchor
-        let last_in_chain = x5chain.last();
-        if let Some(x509) = last_in_chain {
+        if let Some(x509) = x5chain.last() {
             match x509_cert::Certificate::from_der(&x509.bytes) {
                 Ok(cert) => {
                     // if the issuer of the signer certificate is known in the trust anchor registry, do the validation.

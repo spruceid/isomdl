@@ -42,7 +42,7 @@ pub struct SessionManager {
     validation_ruleset: Option<ValidationRuleSet>,
     trust_anchor_registry: Option<TrustAnchorRegistry>,
     reader_auth_key: [u8; 32],
-    reader_cert_bytes: Vec<u8>,
+    reader_x5chain: X5Chain,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -138,7 +138,8 @@ impl SessionManager {
         namespaces: device_request::Namespaces,
         trust_anchor_registry: Option<TrustAnchorRegistry>,
         validation_ruleset: Option<ValidationRuleSet>,
-        reader_auth: X5Chain,
+        reader_x5chain: X5Chain,
+        reader_key: &str,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let device_engagement_bytes =
             Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(|e| anyhow!(e))?;
@@ -174,14 +175,8 @@ impl SessionManager {
         let sk_device =
             derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
 
-        let reader_key_bytes = include_str!("../../test/presentation/reader_key.pem");
-        let reader_signing_key: SigningKey = ecdsa::SigningKey::from_sec1_pem(reader_key_bytes)?;
+        let reader_signing_key: SigningKey = ecdsa::SigningKey::from_sec1_pem(reader_key)?;
         let reader_auth_key: GenericArray<u8, U32> = reader_signing_key.to_bytes().into();
-
-        let reader_certificate = include_bytes!("../../test/presentation/reader_auth.pem");
-        let reader_bytes = pem_rfc7468::decode_vec(reader_certificate)
-        .map_err(|e| anyhow!("unable to parse pem: {}", e))?
-        .1;
 
         let mut session_manager = Self {
             session_transcript,
@@ -192,7 +187,7 @@ impl SessionManager {
             validation_ruleset,
             trust_anchor_registry,
             reader_auth_key: reader_auth_key.into(),
-            reader_cert_bytes: reader_bytes
+            reader_x5chain,
         };
 
         let request = session_manager.build_request(namespaces)?;
@@ -246,16 +241,16 @@ impl SessionManager {
         };
 
         //the certificate should be supplied by the reader
-        let certificate_cbor = serde_cbor::to_vec(&self.reader_cert_bytes)?;
+        //let certificate_cbor = serde_cbor::to_vec(&self.reader_cert_bytes)?;
         let mut header_map = HeaderMap::default();
-        header_map.insert_i(33, serde_cbor::Value::Bytes(certificate_cbor));
+        header_map.insert_i(33, self.reader_x5chain.into_cbor());
 
         let algorithm = Algorithm::ES256;
         let payload = ReaderAuthentication("ReaderAuthentication".to_string(), self.session_transcript.clone(), Tag24::new(items_request.clone())?);
 
         let reader_signing_key = SigningKey::from_slice(&self.reader_auth_key)?; //SigningKey::from_bytes(self.reader_auth_key.to_vec());
         let signature = reader_signing_key.sign_recoverable(&serde_cbor::to_vec(&payload)?)?;
-        let mut prepared_cosesign = CoseSign1::builder()
+        let prepared_cosesign = CoseSign1::builder()
         .detached()
         .signature_algorithm(algorithm)
         .payload(serde_cbor::to_vec(&payload)?)

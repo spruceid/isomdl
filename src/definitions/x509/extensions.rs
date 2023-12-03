@@ -14,9 +14,6 @@ const OID_BASIC_CONSTRAINTS: &str = "2.5.29.19";
 const OID_CRL_DISTRIBUTION_POINTS: &str = "2.5.29.31";
 const OID_EXTENDED_KEY_USAGE: &str = "2.5.29.37";
 
-// A Specific OID defined for mDL signing
-const VALUE_EXTENDED_KEY_USAGE: &str = "1.0.18013.5.1.2";
-
 // -- 18013-5 IACA SPECIFIC ROOT EXTENSION VALUE CHECKS -- //
 // Key Usage: 5, 6 (keyCertSign, crlSign)
 // Basic Constraints: Pathlen:0
@@ -112,7 +109,7 @@ pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Err
     x509_errors
 }
 
-pub fn validate_iaca_signer_extensions(leaf_extensions: Vec<Extension>) -> Vec<Error> {
+pub fn validate_iaca_signer_extensions(leaf_extensions: Vec<Extension>, value_extended_key_usage: &str) -> Vec<Error> {
     let disallowed = iaca_disallowed_x509_extensions();
     let mut x509_errors: Vec<Error> = vec![];
     let mut errors: Vec<Error> = vec![];
@@ -148,10 +145,11 @@ pub fn validate_iaca_signer_extensions(leaf_extensions: Vec<Extension>) -> Vec<E
     // Extended Key Usage     2.5.29.37
     if let Some(extended_key_usage) = leaf_crit_extensions
         .iter()
-        .find(|ext| ext.extn_id.to_string() == *OID_EXTENDED_KEY_USAGE)
+        .find(|ext| ext.extn_id.to_string() == OID_EXTENDED_KEY_USAGE)
     {
         x509_errors.append(&mut validate_extended_key_usage(
             extended_key_usage.extn_value.as_bytes().to_vec(),
+            value_extended_key_usage
         ));
     } else {
         x509_errors.push(Error::ValidationError(
@@ -254,14 +252,14 @@ pub fn validate_root_key_usage(bytes: Vec<u8>) -> Vec<Error> {
 /*  Extended key usage in the signer certificate should be set to this OID meant specifically for mDL signing.
 Note that this value will be different for other types of mdocs  */
 
-pub fn validate_extended_key_usage(bytes: Vec<u8>) -> Vec<Error> {
+pub fn validate_extended_key_usage(bytes: Vec<u8>, value_extended_key_usage: &str) -> Vec<Error> {
     let extended_key_usage = ExtendedKeyUsage::from_der(&bytes);
     match extended_key_usage {
         Ok(eku) => {
             if !eku
                 .0
                 .into_iter()
-                .any(|oid| oid.to_string() == VALUE_EXTENDED_KEY_USAGE)
+                .any(|oid| oid.to_string() == value_extended_key_usage)
             {
                 return vec![Error::ValidationError(
                     "Invalid extended key usage, expected: 1.0.18013.5.1.2".to_string(),
