@@ -109,7 +109,10 @@ pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Err
     x509_errors
 }
 
-pub fn validate_iaca_signer_extensions(leaf_extensions: Vec<Extension>, value_extended_key_usage: &str) -> Vec<Error> {
+pub fn validate_iaca_signer_extensions(
+    leaf_extensions: Vec<Extension>,
+    value_extended_key_usage: &str,
+) -> Vec<Error> {
     let disallowed = iaca_disallowed_x509_extensions();
     let mut x509_errors: Vec<Error> = vec![];
     let mut errors: Vec<Error> = vec![];
@@ -149,7 +152,7 @@ pub fn validate_iaca_signer_extensions(leaf_extensions: Vec<Extension>, value_ex
     {
         x509_errors.append(&mut validate_extended_key_usage(
             extended_key_usage.extn_value.as_bytes().to_vec(),
-            value_extended_key_usage
+            value_extended_key_usage,
         ));
     } else {
         x509_errors.push(Error::ValidationError(

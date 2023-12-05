@@ -3,6 +3,7 @@ use crate::definitions::device_key::cose_key::Error as CoseError;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use crate::definitions::x509::X5Chain;
 use crate::definitions::{Status, ValidatedResponse};
+use crate::presentation::reader::device_request::ItemsRequestBytes;
 use crate::presentation::reader::Error as ReaderError;
 use crate::{
     definitions::{
@@ -17,20 +18,19 @@ use crate::{
     },
     definitions::{DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135},
 };
+use aes::cipher::{generic_array::GenericArray, typenum::U32};
 use anyhow::{anyhow, Result};
+use cose_rs::algorithm::Algorithm;
+use cose_rs::sign1::HeaderMap;
+use cose_rs::CoseSign1;
+use p256::ecdsa::SigningKey;
+use sec1::DecodeEcPrivateKey;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
-use cose_rs::CoseSign1;
-use cose_rs::algorithm::Algorithm;
-use cose_rs::sign1::HeaderMap;
-use sec1::DecodeEcPrivateKey;
-use p256::ecdsa::SigningKey;
-use aes::cipher::{generic_array::GenericArray, typenum::U32};
-use crate::presentation::reader::device_request::ItemsRequestBytes;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SessionManager {
@@ -45,7 +45,11 @@ pub struct SessionManager {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct ReaderAuthentication(pub String, pub SessionTranscript180135, pub ItemsRequestBytes);
+pub struct ReaderAuthentication(
+    pub String,
+    pub SessionTranscript180135,
+    pub ItemsRequestBytes,
+);
 
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum Error {
@@ -76,7 +80,7 @@ pub enum Error {
     #[error("Currently unsupported format")]
     Unsupported,
     #[error("No x5chain found for mdoc authentication")]
-    X5Chain
+    X5Chain,
 }
 
 impl From<serde_cbor::Error> for Error {
@@ -245,16 +249,21 @@ impl SessionManager {
         header_map.insert_i(33, self.reader_x5chain.into_cbor());
 
         let algorithm = Algorithm::ES256;
-        let payload = ReaderAuthentication("ReaderAuthentication".to_string(), self.session_transcript.clone(), Tag24::new(items_request.clone())?);
+        let payload = ReaderAuthentication(
+            "ReaderAuthentication".to_string(),
+            self.session_transcript.clone(),
+            Tag24::new(items_request.clone())?,
+        );
 
         let reader_signing_key = SigningKey::from_slice(&self.reader_auth_key)?; //SigningKey::from_bytes(self.reader_auth_key.to_vec());
         let signature = reader_signing_key.sign_recoverable(&serde_cbor::to_vec(&payload)?)?;
         let prepared_cosesign = CoseSign1::builder()
-        .detached()
-        .signature_algorithm(algorithm)
-        .payload(serde_cbor::to_vec(&payload)?)
-        .unprotected(header_map)
-        .prepare().unwrap();
+            .detached()
+            .signature_algorithm(algorithm)
+            .payload(serde_cbor::to_vec(&payload)?)
+            .unprotected(header_map)
+            .prepare()
+            .unwrap();
 
         let cose_sign1 = prepared_cosesign.finalize(signature.0.to_vec());
 
@@ -293,52 +302,54 @@ impl SessionManager {
     }
 
     pub fn handle_response(&mut self, response: &[u8]) -> ValidatedResponse {
-        let mut validated_response =  ValidatedResponse::default();
-        
+        let mut validated_response = ValidatedResponse::default();
+
         let device_response = match self.decrypt_response(response) {
-            Ok(device_response) => {
-                device_response
-            },
+            Ok(device_response) => device_response,
             Err(e) => {
-                validated_response.errors.insert("decryption_errors".to_string(), json!(vec![e]));
-                return validated_response
+                validated_response
+                    .errors
+                    .insert("decryption_errors".to_string(), json!(vec![e]));
+                return validated_response;
             }
-            
         };
         let document = match get_document(device_response.clone()) {
-            Ok(doc) => {
-                doc
-            },
+            Ok(doc) => doc,
             Err(e) => {
-                validated_response.errors.insert("parsing_errors".to_string(), json!(vec![e]));
-                return validated_response
-
+                validated_response
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e]));
+                return validated_response;
             }
         };
         let header = document.issuer_signed.issuer_auth.unprotected().clone();
-        if let Some(x5chain_bytes) = header.get_i(33)  {
+        if let Some(x5chain_bytes) = header.get_i(33) {
             let x5chain = match X5Chain::from_cbor(x5chain_bytes.clone()) {
-                Ok(x5chain) => {
-                    x5chain
-                },
+                Ok(x5chain) => x5chain,
                 Err(e) => {
-                    validated_response.errors.insert("parsing_errors".to_string(), json!(vec![e]));
-                    return validated_response
+                    validated_response
+                        .errors
+                        .insert("parsing_errors".to_string(), json!(vec![e]));
+                    return validated_response;
                 }
             };
 
             match parse_namespaces(device_response) {
-                Ok(parsed_response)=> {
+                Ok(parsed_response) => {
                     return self.validate_response(x5chain, document, parsed_response)
-                }, 
+                }
                 Err(e) => {
-                    validated_response.errors.insert("parsing_errors".to_string(), json!(vec![e]));
-                    return validated_response
+                    validated_response
+                        .errors
+                        .insert("parsing_errors".to_string(), json!(vec![e]));
+                    return validated_response;
                 }
             };
         } else {
-            validated_response.errors.insert("parsing_errors".to_string(), json!(vec![Error::X5Chain]));
-            return validated_response
+            validated_response
+                .errors
+                .insert("parsing_errors".to_string(), json!(vec![Error::X5Chain]));
+            return validated_response;
         }
     }
 
@@ -443,13 +454,13 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
 
 fn get_document(device_response: DeviceResponse) -> Result<Document, Error> {
     device_response
-    .documents
-    .clone()
-    .ok_or(ReaderError::DeviceTransmissionError)?
-    .into_inner()
-    .into_iter()
-    .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-    .ok_or(ReaderError::DocumentTypeError)
+        .documents
+        .clone()
+        .ok_or(ReaderError::DeviceTransmissionError)?
+        .into_inner()
+        .into_iter()
+        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .ok_or(ReaderError::DocumentTypeError)
 }
 
 fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Error> {
@@ -472,7 +483,9 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
     Ok(true)
 }
 
-fn parse_namespaces(device_response: DeviceResponse) -> Result<BTreeMap::<String, serde_json::Value>, Error> {
+fn parse_namespaces(
+    device_response: DeviceResponse,
+) -> Result<BTreeMap<String, serde_json::Value>, Error> {
     let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
     let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
     let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();

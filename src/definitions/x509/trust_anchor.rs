@@ -42,9 +42,10 @@ pub struct TrustAnchorRegistry {
 
 impl TrustAnchorRegistry {
     pub fn iaca_registry_from_str(pem_strings: Vec<String>) -> Result<Self, X509Error> {
-        let certificates: Vec<TrustAnchor> = pem_strings.into_iter().filter_map(|s| {
-            trustanchor_from_str(&s).ok()
-        }).collect();
+        let certificates: Vec<TrustAnchor> = pem_strings
+            .into_iter()
+            .filter_map(|s| trustanchor_from_str(&s).ok())
+            .collect();
 
         Ok(TrustAnchorRegistry { certificates })
     }
@@ -52,11 +53,12 @@ impl TrustAnchorRegistry {
 
 fn trustanchor_from_str(pem_string: &str) -> Result<TrustAnchor, X509Error> {
     let anchor: TrustAnchor = match pem_rfc7468::decode_vec(pem_string.as_bytes()) {
-        Ok(b) => {
-            TrustAnchor::Iaca(X509{bytes: b.1})
-        },
+        Ok(b) => TrustAnchor::Iaca(X509 { bytes: b.1 }),
         Err(e) => {
-            return Err(X509Error::DecodingError(format!("unable to parse pem: {:?}", e)))
+            return Err(X509Error::DecodingError(format!(
+                "unable to parse pem: {:?}",
+                e
+            )))
         }
     };
     Ok(anchor)
@@ -129,7 +131,7 @@ pub fn validate_with_ruleset(
                     errors.push(e.into());
                 }
             };
-        },
+        }
         TrustAnchor::IacaReader(certificate) => {
             let rule_set = ValidationRuleSet {
                 distinguished_names: vec!["2.5.4.3".to_string()],
@@ -276,7 +278,10 @@ fn apply_ruleset(
         //Under the IACA ruleset, the values for S or ST should be the same in subject and issuer if they are present in both
         RuleSetType::IACA => {
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
-            extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions, MDOC_VALUE_EXTENDED_KEY_USAGE));
+            extension_errors.append(&mut validate_iaca_signer_extensions(
+                leaf_extensions,
+                MDOC_VALUE_EXTENDED_KEY_USAGE,
+            ));
             for dn in leaf_distinguished_names {
                 if dn.oid.to_string() == *"2.5.4.8" {
                     let state_or_province =
@@ -297,7 +302,10 @@ fn apply_ruleset(
         //Under the AAMVA ruleset, S/ST is mandatory and should be the same in the subject and issuer
         RuleSetType::AAMVA => {
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
-            extension_errors.append(&mut validate_iaca_signer_extensions(leaf_extensions, MDOC_VALUE_EXTENDED_KEY_USAGE));
+            extension_errors.append(&mut validate_iaca_signer_extensions(
+                leaf_extensions,
+                MDOC_VALUE_EXTENDED_KEY_USAGE,
+            ));
             for dn in leaf_distinguished_names {
                 let Some(_root_dn) = root_distinguished_names.iter().find(|r| r == &&dn) else {
                     return Err(X509Error::ValidationError(format!("Mismatch between supplied certificate issuer attribute: {:?} and the trust anchor registry.", dn.value)));
@@ -314,7 +322,10 @@ fn apply_ruleset(
         RuleSetType::ReaderAuth => {
             //TODO
 
-            Ok(validate_iaca_signer_extensions(leaf_extensions, READER_VALUE_EXTENDED_KEY_USAGE))
+            Ok(validate_iaca_signer_extensions(
+                leaf_extensions,
+                READER_VALUE_EXTENDED_KEY_USAGE,
+            ))
         }
     }
 }
@@ -349,8 +360,8 @@ pub fn find_anchor(
                     Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
                     Err(_) => false,
                 }
-            },
-            TrustAnchor::IacaReader(certificate)=> {
+            }
+            TrustAnchor::IacaReader(certificate) => {
                 match x509_cert::Certificate::from_der(&certificate.bytes) {
                     Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
                     Err(_) => false,

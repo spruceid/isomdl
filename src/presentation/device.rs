@@ -1,5 +1,9 @@
-use crate::definitions::IssuerSignedItem;
+use crate::definitions::validated_request::Status as ValidationStatus;
 use crate::definitions::validated_request::ValidatedRequest;
+use crate::definitions::x509::error::Error as X509Error;
+use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
+use crate::definitions::x509::X5Chain;
+use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
@@ -22,17 +26,13 @@ use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
+use serde_json::json;
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
-use x509_cert::der::Decode;
 use x509_cert::attr::AttributeTypeAndValue;
-use crate::definitions::x509::X5Chain;
-use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use crate::definitions::x509::error::Error as X509Error;
-use crate::definitions::ValidationErrors;
-use crate::definitions::validated_request::Status as ValidationStatus;
+use x509_cert::der::Decode;
 
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
@@ -88,7 +88,7 @@ pub enum Error {
     #[error("error decoding reader authentication certificate")]
     CertificateError,
     #[error("error while validating reader authentication certificate")]
-    ValidationError
+    ValidationError,
 }
 
 impl From<x509_cert::der::Error> for Error {
@@ -186,7 +186,7 @@ impl SessionManagerEngaged {
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
-        trusted_verifiers: Option<TrustAnchorRegistry>
+        trusted_verifiers: Option<TrustAnchorRegistry>,
     ) -> anyhow::Result<(SessionManager, ValidatedRequest)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript =
@@ -217,7 +217,7 @@ impl SessionManagerEngaged {
         let validated_request = sm.handle_decoded_request(SessionData {
             data: Some(session_establishment.data),
             status: None,
-        })?;
+        });
 
         Ok((sm, validated_request))
     }
@@ -236,24 +236,7 @@ impl SessionManager {
         })
     }
 
-    fn validate_request(
-        &self,
-        request: DeviceRequest,
-    ) -> Result<ValidatedRequest, PreparedDeviceResponse> {
-        if request.version != DeviceRequest::VERSION {
-            // tracing::error!(
-            //     "unsupported DeviceRequest version: {} ({} is supported)",
-            //     request.version,
-            //     DeviceRequest::VERSION
-            // );
-            return Err(PreparedDeviceResponse::empty(Status::GeneralError));
-        }
-
-
-        //safe unwrap as doc_requests is a NonEmptyVec
-        //TODO: validate all doc_requests
-
-        
+    fn validate_request(&self, request: DeviceRequest) -> ValidatedRequest {
         let items_requests: Vec<ItemsRequest> = request
             .doc_requests
             .clone()
@@ -262,22 +245,34 @@ impl SessionManager {
             .map(|DocRequest { items_request, .. }| items_request.into_inner())
             .collect();
 
-        let mut validated_request = ValidatedRequest{ 
-                items_requests,
-                common_name: None,
-                reader_authentication: ValidationStatus::Unchecked,
-                errors: ValidationErrors(BTreeMap::new()),
-            };
+        let mut validated_request = ValidatedRequest {
+            items_requests,
+            common_name: None,
+            reader_authentication: ValidationStatus::Unchecked,
+            errors: BTreeMap::new(),
+        };
 
-        let (validation_errors, common_name) = self.reader_authentication( request.doc_requests.first().unwrap().clone());
-        
-        if validation_errors.is_empty(){
-            validated_request.reader_authentication = ValidationStatus::Valid;
+        if request.version != DeviceRequest::VERSION {
+            // tracing::error!(
+            //     "unsupported DeviceRequest version: {} ({} is supported)",
+            //     request.version,
+            //     DeviceRequest::VERSION
+            // );
+            validated_request.errors.insert(
+                "parsing_errors".to_string(),
+                json!(vec!["unsupported DeviceRequest version".to_string()]),
+            );
+        }
+        if let Some(doc_request) = request.doc_requests.first() {
+            let (validation_errors, common_name) = self.reader_authentication(doc_request.clone());
+            if validation_errors.is_empty() {
+                validated_request.reader_authentication = ValidationStatus::Valid;
+            }
+
+            validated_request.common_name = common_name;
         }
 
-        validated_request.common_name = common_name;
-        
-        Ok(validated_request)
+        validated_request
     }
 
     pub fn prepare_response(&mut self, requests: &RequestedItems, permitted: PermittedItems) {
@@ -285,108 +280,59 @@ impl SessionManager {
         self.state = State::Signing(prepared_response);
     }
 
-    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<ValidatedRequest> {
-        let data = request.data.ok_or_else(|| {
-            anyhow::anyhow!("no mdoc requests received, assume session can be terminated")
-        })?;
-        let decrypted_request = session::decrypt_reader_data(
+    fn handle_decoded_request(&mut self, request: SessionData) -> ValidatedRequest {
+        let mut validated_request = ValidatedRequest::default();
+        let data = match request.data {
+            Some(d) => d,
+            None => {
+                validated_request.errors.insert(
+                    "parsing_errors".to_string(),
+                    json!(vec![
+                        "no mdoc requests received, assume session can be terminated".to_string()
+                    ]),
+                );
+                return validated_request;
+            }
+        };
+        let decrypted_request = match session::decrypt_reader_data(
             &self.sk_reader.into(),
             data.as_ref(),
             &mut self.reader_message_counter,
         )
-        .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))
+        {
+            Ok(decrypted) => decrypted,
+            Err(e) => {
+                validated_request
+                    .errors
+                    .insert("decryption_errors".to_string(), json!(vec![e.to_string()]));
+                return validated_request;
+            }
+        };
+
         let request = match self.parse_request(&decrypted_request) {
             Ok(r) => r,
             Err(e) => {
                 self.state = State::Signing(e);
-                return Ok(ValidatedRequest {
-                items_requests: Default::default(),
-                common_name: None,
-                reader_authentication: ValidationStatus::Unchecked,
-                errors: ValidationErrors(BTreeMap::new()),
-            });
+                return ValidatedRequest::default();
             }
         };
 
-        let request = match self.validate_request(request) {
-            Ok(r) => r,
-            Err(e) => {
-                self.state = State::Signing(e);
-                return Ok(ValidatedRequest {
-                items_requests: Default::default(),
-                common_name: None,
-                reader_authentication: ValidationStatus::Unchecked,
-                errors: ValidationErrors(BTreeMap::new()),
-            });
-        }};
-        Ok(request)
-    }
-
-    pub fn reader_authentication(&self, doc_request: DocRequest)-> (Vec<X509Error>, Option<String>){
-        //TODO validate the reader authentication. This code only grabs the CN from the x5chain
-        let mut validation_errors: Vec<X509Error> = vec![];
-        if let Some(reader_auth) = doc_request.reader_auth {
-            if let Some(x5chain_cbor) = reader_auth.unprotected().get_i(33) {
-                let x5c = x5chain_cbor;
-
-                let x5chain = X5Chain::from_cbor(x5chain_cbor.clone()).map_err(|_| Error::CertificateError);
-                match x5chain {
-                    Ok(x5c) => {
-                        if let Some(trusted_verifiers) = &self.trusted_verifiers {
-                            validation_errors.append(&mut x5c.validate(Some(trusted_verifiers.clone())));
-                        }
-                    }, 
-                    Err(e) => {
-                        validation_errors.push(X509Error::ValidationError(e.to_string()));
-                    }
-                }
-
-                match x5c {
-                    CborValue::Bytes(x509) => {
-                        match x509_cert::Certificate::from_der(&x509) {
-                            Ok(cert) => {
-                                let distinguished_names: Vec<AttributeTypeAndValue> = cert.tbs_certificate.subject.0.into_iter().map(|rdn| {
-                                    rdn.0.into_vec()
-                                    .into_iter()
-                                    .filter(|atv| {
-                                        //common name
-                                        atv.oid.to_string() == "2.5.4.3".to_string()
-                                    })
-                                    .collect::<Vec<AttributeTypeAndValue>>()
-                                })
-                                .collect::<Vec<Vec<AttributeTypeAndValue>>>()
-                                .into_iter()
-                                .flatten()
-                                .collect();
-        
-                                if let Some(common_name) = distinguished_names.first() {
-                                    return (validation_errors, Some(common_name.to_string()))
-                                } else {
-                                    return (validation_errors, None)
-                                } 
-                            },
-                            Err(e) => {
-                                validation_errors.push(X509Error::ValidationError(e.to_string()));
-                                return (validation_errors, None)
-                            }
-                        }
-                    },
-                    _ => {
-                        return (validation_errors, None)
-                    }
-                }
-
-            } else {
-                return (validation_errors, None)
-            }
-        } else {
-            return (validation_errors, None)
-        }
+        self.validate_request(request)
     }
 
     /// Handle a request from the reader.
-    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<ValidatedRequest> {
-        let session_data: SessionData = serde_cbor::from_slice(request)?;
+    pub fn handle_request(&mut self, request: &[u8]) -> ValidatedRequest {
+        let mut validated_request = ValidatedRequest::default();
+        let session_data: SessionData = match serde_cbor::from_slice(request) {
+            Ok(sd) => sd,
+            Err(e) => {
+                validated_request
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e.to_string()]));
+                return validated_request;
+            }
+        };
         self.handle_decoded_request(session_data)
     }
 
@@ -453,6 +399,76 @@ impl SessionManager {
             }
         } else {
             None
+        }
+    }
+
+    pub fn reader_authentication(
+        &self,
+        doc_request: DocRequest,
+    ) -> (Vec<X509Error>, Option<String>) {
+        //TODO validate the reader authentication. This code only grabs the CN from the x5chain
+        let mut validation_errors: Vec<X509Error> = vec![];
+        if let Some(reader_auth) = doc_request.reader_auth {
+            if let Some(x5chain_cbor) = reader_auth.unprotected().get_i(33) {
+                let x5c = x5chain_cbor;
+
+                let x5chain =
+                    X5Chain::from_cbor(x5chain_cbor.clone()).map_err(|_| Error::CertificateError);
+                match x5chain {
+                    Ok(x5c) => {
+                        if let Some(trusted_verifiers) = &self.trusted_verifiers {
+                            validation_errors
+                                .append(&mut x5c.validate(Some(trusted_verifiers.clone())));
+                        }
+                    }
+                    Err(e) => {
+                        validation_errors.push(X509Error::ValidationError(e.to_string()));
+                    }
+                }
+
+                match x5c {
+                    CborValue::Bytes(x509) => {
+                        match x509_cert::Certificate::from_der(&x509) {
+                            Ok(cert) => {
+                                let distinguished_names: Vec<AttributeTypeAndValue> = cert
+                                    .tbs_certificate
+                                    .subject
+                                    .0
+                                    .into_iter()
+                                    .map(|rdn| {
+                                        rdn.0
+                                            .into_vec()
+                                            .into_iter()
+                                            .filter(|atv| {
+                                                //common name
+                                                atv.oid.to_string() == "2.5.4.3".to_string()
+                                            })
+                                            .collect::<Vec<AttributeTypeAndValue>>()
+                                    })
+                                    .collect::<Vec<Vec<AttributeTypeAndValue>>>()
+                                    .into_iter()
+                                    .flatten()
+                                    .collect();
+
+                                if let Some(common_name) = distinguished_names.first() {
+                                    return (validation_errors, Some(common_name.to_string()));
+                                } else {
+                                    return (validation_errors, None);
+                                }
+                            }
+                            Err(e) => {
+                                validation_errors.push(X509Error::ValidationError(e.to_string()));
+                                return (validation_errors, None);
+                            }
+                        }
+                    }
+                    _ => return (validation_errors, None),
+                }
+            } else {
+                return (validation_errors, None);
+            }
+        } else {
+            return (validation_errors, None);
         }
     }
 }
