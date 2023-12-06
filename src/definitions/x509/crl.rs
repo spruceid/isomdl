@@ -246,6 +246,7 @@ impl TryFrom<Option<&Any>> for CurveKind {
     }
 }
 
+/// Given a revocation `cert_list`, check if `cert` has been revoked
 pub fn check_cert_against_cert_list(
     cert: &TbsCertificate,
     cert_list: &TbsCertList,
