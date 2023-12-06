@@ -13,6 +13,7 @@ use x509_cert::{
     TbsCertificate,
 };
 
+/// All CRL parsing and revocation errors
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Cert was revoked: Reason:{0:?}")]
@@ -246,31 +247,33 @@ impl TryFrom<Option<&Any>> for CurveKind {
     }
 }
 
-/// Given a revocation `cert_list`, check if `cert` has been revoked
-pub fn check_cert_against_cert_list(
+/// Given revocation `cert_lists`, check if `cert` has been revoked
+pub fn check_cert_against_cert_lists(
     cert: &TbsCertificate,
-    cert_list: &TbsCertList,
+    cert_lists: &[TbsCertList],
 ) -> Result<(), Error> {
-    if cert.issuer != cert_list.issuer {
-        return Err(Error::IssuerMismatchBetweenCertAndCrl);
-    }
+    for cert_list in cert_lists {
+        if cert.issuer != cert_list.issuer {
+            return Err(Error::IssuerMismatchBetweenCertAndCrl);
+        }
 
-    let revoked_certs = match cert_list.revoked_certificates.as_ref() {
-        Some(revoked) => revoked,
-        None => return Ok(()),
-    };
+        let revoked_certs = match cert_list.revoked_certificates.as_ref() {
+            Some(revoked) => revoked,
+            None => return Ok(()),
+        };
 
-    for revoked_cert in revoked_certs {
-        if revoked_cert.serial_number == cert.serial_number {
-            let reason = find_reason_code(revoked_cert)?;
+        for revoked_cert in revoked_certs {
+            if revoked_cert.serial_number == cert.serial_number {
+                let reason = find_reason_code(revoked_cert)?;
 
-            let reason = match reason {
-                Some(CrlReason::Unspecified) => None,
-                Some(reason) => Some(reason),
-                None => None,
-            };
+                let reason = match reason {
+                    Some(CrlReason::Unspecified) => None,
+                    Some(reason) => Some(reason),
+                    None => None,
+                };
 
-            return Err(Error::CertRevoked(reason));
+                return Err(Error::CertRevoked(reason));
+            }
         }
     }
 
