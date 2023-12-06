@@ -2,6 +2,7 @@ use asn1_rs::{FromDer, Sequence};
 use const_oid::{AssociatedOid, ObjectIdentifier};
 use der::{Any, Decode, SliceReader};
 use signature::Verifier;
+use thiserror::Error;
 use x509_cert::{
     crl::{CertificateList, RevokedCert, TbsCertList},
     ext::pkix::{
@@ -12,27 +13,40 @@ use x509_cert::{
     TbsCertificate,
 };
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
+    #[error("Cert was revoked: Reason:{0:?}")]
     CertRevoked(Option<CrlReason>),
 
-    UnableToParseCrlExtension(der::Error),
-    UnableToParseCrlCertList(der::Error),
-    UnableToParseCurveKindExt(der::Error),
+    #[error("Unable to parse CRL component: {0} {1}")]
+    ParsingCrlComponent(&'static str, der::Error),
+    #[error("Distrbution point malformed: {0}")]
     DistributionPointMalformed(&'static str),
+    #[error("Unable to fetch CRL: {0}")]
     FetchingCrl(reqwest::Error),
-    UnableToReachDistributionPoint,
+    #[error("Unable to reach distribution point")]
+    ReachingDistributionPoint,
+    #[error("Issuer mismatch between cert and CRL")]
     IssuerMismatchBetweenCertAndCrl,
+    #[error("Unknown signature algorithm: {0:?}")]
     UnknownSignatureAlgorithm(Box<AlgorithmIdentifierOwned>),
+    #[error("Signature type mismatch: {0:?} {0:?}")]
     SignatureTypeMismatch(Box<AlgorithmIdentifierOwned>, Box<AlgorithmIdentifierOwned>),
+    #[error("Unable to extract CRL sequence signature")]
     ExtractCrlSequenceSignature(asn1_rs::Err<asn1_rs::Error>),
-    UnableToParseCrlReason(der::Error),
+    #[error("Missing curve")]
     MissingCurve,
+    #[error("Unknown curve extension: {0}")]
     UnknownCurveExt(ObjectIdentifier),
+    #[error("Missing public key")]
     MissingPublicKey,
+    #[error("Signature check of CRL failed")]
     SignatureCheckOfCrlFailed,
+    #[error("Invalid public key format")]
     InvalidPublicKeyFormat,
+    #[error("Missing signature")]
     MissingSignature,
+    #[error("Signature in wrong format")]
     SignatureInWrongFormat,
 }
 
@@ -117,10 +131,10 @@ fn read_distribution_points(cert: &TbsCertificate) -> Result<Option<CrlDistribut
     };
 
     let mut der_reader = SliceReader::new(crl_extension.extn_value.as_bytes())
-        .map_err(Error::UnableToParseCrlExtension)?;
+        .map_err(|err| Error::ParsingCrlComponent("extension", err))?;
 
-    let distribution_points =
-        CrlDistributionPoints::decode(&mut der_reader).map_err(Error::UnableToParseCrlExtension)?;
+    let distribution_points = CrlDistributionPoints::decode(&mut der_reader)
+        .map_err(|err| Error::ParsingCrlComponent("extension", err))?;
 
     Ok(Some(distribution_points))
 }
@@ -198,7 +212,8 @@ fn decode_cert_list(bytes: &[u8]) -> Result<(Vec<u8>, CertificateList), Error> {
     let cert_list_content = cert_list_sequence.into_content();
     let cert_list_bytes = cert_list_content.as_ref();
 
-    let cert_list = CertificateList::from_der(bytes).map_err(Error::UnableToParseCrlCertList)?;
+    let cert_list = CertificateList::from_der(bytes)
+        .map_err(|err| Error::ParsingCrlComponent("cert list", err))?;
 
     Ok((cert_list_bytes.to_vec(), cert_list))
 }
@@ -215,7 +230,7 @@ impl TryFrom<Option<&Any>> for CurveKind {
     fn try_from(ext_bit_string: Option<&Any>) -> Result<Self, Self::Error> {
         let ext_any = ext_bit_string.ok_or(Error::MissingCurve)?;
         let obj_id = ObjectIdentifier::from_der(ext_any.value())
-            .map_err(Error::UnableToParseCurveKindExt)?;
+            .map_err(|err| Error::ParsingCrlComponent("curve kind extension", err))?;
 
         let curve = match obj_id {
             OID_EC_CURVE_P256 => Self::P256,
@@ -264,7 +279,7 @@ fn find_reason_code(revoked_cert: &RevokedCert) -> Result<Option<CrlReason>, Err
             .find(|ext| ext.extn_id == OID_EXTENSION_REASON_CODE)
         {
             let reason = CrlReason::from_der(reason_code_ext.extn_value.as_bytes())
-                .map_err(Error::UnableToParseCrlReason)?;
+                .map_err(|err| Error::ParsingCrlComponent("crl reason", err))?;
 
             return Ok(Some(reason));
         }
