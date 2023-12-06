@@ -58,8 +58,8 @@ pub const OID_PUBLIC_KEY_ELLIPTIC_CURVE: ObjectIdentifier =
 
 const OID_EXTENSION_REASON_CODE: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.21");
 
-/// Given a cert, download and verify the associated crl listed in the cert, and verify the cert
-/// against the crl
+/// Given a cert, download and verify the associated crl listed in the cert, and verify the crl
+/// against the cert's metadata and public key.
 pub async fn fetch_and_validate_crl(root_cert: &TbsCertificate) -> Result<Vec<TbsCertList>, Error> {
     let distribution_points = match read_distribution_points(root_cert)? {
         None => return Ok(vec![]),
