@@ -59,11 +59,13 @@ const OID_EXTENSION_REASON_CODE: ObjectIdentifier = ObjectIdentifier::new_unwrap
 
 /// Given a cert, download and verify the associated crl listed in the cert, and verify the cert
 /// against the crl
-pub async fn fetch_and_validate_crl(cert: &TbsCertificate) -> Result<(), Error> {
-    let distribution_points = match read_distribution_points(cert)? {
-        None => return Ok(()),
+pub async fn fetch_and_validate_crl(root_cert: &TbsCertificate) -> Result<Vec<TbsCertList>, Error> {
+    let distribution_points = match read_distribution_points(root_cert)? {
+        None => return Ok(vec![]),
         Some(distribution_points) => distribution_points,
     };
+
+    let mut cert_lists = vec![];
 
     for distribution_point in distribution_points.0.iter() {
         let distribution_point_name = distribution_point.distribution_point.as_ref().ok_or(
@@ -75,13 +77,11 @@ pub async fn fetch_and_validate_crl(cert: &TbsCertificate) -> Result<(), Error> 
         for url in urls.iter() {
             let crl_bytes = fetch_crl(url).await?;
 
-            let tbs_cert_list = validate_crl(cert, &crl_bytes)?;
-
-            check_cert_against_cert_list(cert, &tbs_cert_list)?;
+            cert_lists.push(validate_crl(root_cert, &crl_bytes)?);
         }
     }
 
-    Ok(())
+    Ok(cert_lists)
 }
 
 fn distribution_point_urls(name: &DistributionPointName) -> Result<Vec<String>, Error> {
@@ -141,6 +141,10 @@ fn read_distribution_points(cert: &TbsCertificate) -> Result<Option<CrlDistribut
 
 fn validate_crl(cert: &TbsCertificate, crl_bytes: &[u8]) -> Result<TbsCertList, Error> {
     let (crl_raw, crl) = decode_cert_list(crl_bytes)?;
+
+    if cert.issuer != crl.tbs_cert_list.issuer {
+        return Err(Error::IssuerMismatchBetweenCertAndCrl);
+    }
 
     if cert.subject_public_key_info.algorithm != crl.signature_algorithm {
         return Err(Error::SignatureTypeMismatch(
@@ -242,7 +246,7 @@ impl TryFrom<Option<&Any>> for CurveKind {
     }
 }
 
-fn check_cert_against_cert_list(
+pub fn check_cert_against_cert_list(
     cert: &TbsCertificate,
     cert_list: &TbsCertList,
 ) -> Result<(), Error> {
