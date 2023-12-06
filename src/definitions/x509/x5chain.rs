@@ -216,7 +216,6 @@ impl Builder {
             .map_err(|e| anyhow!("unable to parse certificate from der: {}", e))?;
         let x509 = X509 {
             bytes: cert
-                .encode_to_vec(&mut vec![])?
                 .to_der()
                 .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
         };
@@ -228,7 +227,6 @@ impl Builder {
             .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
         let x509 = X509 {
             bytes: cert
-                .encode_to_vec(&mut vec![])?
                 .to_der()
                 .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
         };
