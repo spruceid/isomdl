@@ -38,9 +38,10 @@ pub struct TrustAnchorRegistry {
 
 impl TrustAnchorRegistry {
     pub fn iaca_registry_from_str(pem_strings: Vec<String>) -> Result<Self, X509Error> {
-        let certificates: Vec<TrustAnchor> = pem_strings.into_iter().filter_map(|s| {
-            trustanchor_from_str(&s).ok()
-        }).collect();
+        let certificates: Vec<TrustAnchor> = pem_strings
+            .into_iter()
+            .filter_map(|s| trustanchor_from_str(&s).ok())
+            .collect();
 
         Ok(TrustAnchorRegistry { certificates })
     }
@@ -48,11 +49,12 @@ impl TrustAnchorRegistry {
 
 fn trustanchor_from_str(pem_string: &str) -> Result<TrustAnchor, X509Error> {
     let anchor: TrustAnchor = match pem_rfc7468::decode_vec(pem_string.as_bytes()) {
-        Ok(b) => {
-            TrustAnchor::Iaca(X509{bytes: b.1})
-        },
+        Ok(b) => TrustAnchor::Iaca(X509 { bytes: b.1 }),
         Err(e) => {
-            return Err(X509Error::DecodingError(format!("unable to parse pem: {:?}", e)))
+            return Err(X509Error::DecodingError(format!(
+                "unable to parse pem: {:?}",
+                e
+            )))
         }
     };
     Ok(anchor)

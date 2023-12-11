@@ -64,7 +64,7 @@ pub enum Error {
     #[error("Currently unsupported format")]
     Unsupported,
     #[error("No x5chain found for mdoc authentication")]
-    X5Chain
+    X5Chain,
 }
 
 impl From<serde_cbor::Error> for Error {
@@ -248,58 +248,57 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
-
         let device_response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
         Ok(device_response)
     }
 
     pub fn handle_response(&mut self, response: &[u8]) -> ValidatedResponse {
-        let mut validated_response =  ValidatedResponse::default();
-        
+        let mut validated_response = ValidatedResponse::default();
+
         let device_response = match self.decrypt_response(response) {
-            Ok(device_response) => {
-                device_response
-            },
+            Ok(device_response) => device_response,
             Err(e) => {
-                validated_response.errors.insert("decryption_errors".to_string(), json!(vec![e]));
-                return validated_response
+                validated_response
+                    .errors
+                    .insert("decryption_errors".to_string(), json!(vec![e]));
+                return validated_response;
             }
-            
         };
         let document = match get_document(device_response.clone()) {
-            Ok(doc) => {
-                doc
-            },
+            Ok(doc) => doc,
             Err(e) => {
-                validated_response.errors.insert("parsing_errors".to_string(), json!(vec![e]));
-                return validated_response
-
+                validated_response
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e]));
+                return validated_response;
             }
         };
         let header = document.issuer_signed.issuer_auth.unprotected().clone();
-        if let Some(x5chain_bytes) = header.get_i(33)  {
+        if let Some(x5chain_bytes) = header.get_i(33) {
             let x5chain = match X5Chain::from_cbor(x5chain_bytes.clone()) {
-                Ok(x5chain) => {
-                    x5chain
-                },
+                Ok(x5chain) => x5chain,
                 Err(e) => {
-                    validated_response.errors.insert("parsing_errors".to_string(), json!(vec![e]));
-                    return validated_response
+                    validated_response
+                        .errors
+                        .insert("parsing_errors".to_string(), json!(vec![e]));
+                    return validated_response;
                 }
             };
 
             match parse_namespaces(device_response) {
-                Ok(parsed_response)=> {
-                    return self.validate_response(x5chain, document, parsed_response)
-                }, 
+                Ok(parsed_response) => self.validate_response(x5chain, document, parsed_response),
                 Err(e) => {
-                    validated_response.errors.insert("parsing_errors".to_string(), json!(vec![e]));
-                    return validated_response
+                    validated_response
+                        .errors
+                        .insert("parsing_errors".to_string(), json!(vec![e]));
+                    validated_response
                 }
-            };
+            }
         } else {
-            validated_response.errors.insert("parsing_errors".to_string(), json!(vec![Error::X5Chain]));
-            return validated_response
+            validated_response
+                .errors
+                .insert("parsing_errors".to_string(), json!(vec![Error::X5Chain]));
+            validated_response
         }
     }
 
@@ -404,13 +403,13 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
 
 fn get_document(device_response: DeviceResponse) -> Result<Document, Error> {
     device_response
-    .documents
-    .clone()
-    .ok_or(ReaderError::DeviceTransmissionError)?
-    .into_inner()
-    .into_iter()
-    .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-    .ok_or(ReaderError::DocumentTypeError)
+        .documents
+        .clone()
+        .ok_or(ReaderError::DeviceTransmissionError)?
+        .into_inner()
+        .into_iter()
+        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .ok_or(ReaderError::DocumentTypeError)
 }
 
 fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Error> {
@@ -433,7 +432,9 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
     Ok(true)
 }
 
-fn parse_namespaces(device_response: DeviceResponse) -> Result<BTreeMap::<String, serde_json::Value>, Error> {
+fn parse_namespaces(
+    device_response: DeviceResponse,
+) -> Result<BTreeMap<String, serde_json::Value>, Error> {
     let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
     let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
     let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
@@ -522,8 +523,7 @@ pub mod test {
             .map_err(|e| anyhow!("unable to parse pem: {}", e))
             .unwrap()
             .1;
-        let x5chain_cbor: serde_cbor::Value =
-            serde_cbor::Value::Bytes(serde_cbor::to_vec(&bytes).unwrap());
+        let x5chain_cbor: serde_cbor::Value = serde_cbor::Value::Bytes(bytes);
 
         let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
 
@@ -545,8 +545,7 @@ pub mod test {
             .map_err(|e| anyhow!("unable to parse pem: {}", e))
             .unwrap()
             .1;
-        let x5chain_cbor: serde_cbor::Value =
-            serde_cbor::Value::Bytes(serde_cbor::to_vec(&bytes).unwrap());
+        let x5chain_cbor: serde_cbor::Value = serde_cbor::Value::Bytes(bytes);
 
         let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
 
@@ -566,20 +565,17 @@ pub mod test {
         };
 
         let intermediate_bytes = pem_rfc7468::decode_vec(IACA_INTERMEDIATE)
-            .expect("unable to parse pem")
-            .1;
+            .map(|(_, bytes)| bytes)
+            .map(serde_cbor::Value::Bytes)
+            .expect("unable to parse pem");
 
         let leaf_signer_bytes = pem_rfc7468::decode_vec(IACA_LEAF_SIGNER)
-            .expect("unable to parse pem")
-            .1;
-
-        let intermediate_b =
-            serde_cbor::Value::Bytes(serde_cbor::to_vec(&intermediate_bytes).unwrap());
-        let leaf_signer_b =
-            serde_cbor::Value::Bytes(serde_cbor::to_vec(&leaf_signer_bytes).unwrap());
+            .map(|(_, bytes)| bytes)
+            .map(serde_cbor::Value::Bytes)
+            .expect("unable to parse pem");
 
         let x5chain_cbor: serde_cbor::Value =
-            serde_cbor::Value::Array(vec![leaf_signer_b, intermediate_b]);
+            serde_cbor::Value::Array(vec![leaf_signer_bytes, intermediate_bytes]);
 
         let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
 

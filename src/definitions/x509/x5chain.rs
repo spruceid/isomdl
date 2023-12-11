@@ -83,23 +83,29 @@ impl X5Chain {
 
     pub fn from_cbor(cbor_bytes: CborValue) -> Result<Self, X509Error> {
         match cbor_bytes {
-            CborValue::Bytes(x509) => {
-                let bytes: Vec<u8> = serde_cbor::from_slice(&x509)?;
-                Ok(X5Chain::from(NonEmptyVec::try_from(vec![X509{bytes}])?))
+            CborValue::Bytes(bytes) => {
+                Self::builder().with_der(&bytes).map_err(
+                    |e| X509Error::DecodingError(e.to_string())
+                )?.build().map_err(
+                    |e| X509Error::DecodingError(e.to_string())
+                )
             },
             CborValue::Array(x509s) => {
-                let mut chain = vec![];
-                for x509 in x509s {
-                    match x509 {
+                x509s.iter()
+                    .try_fold(Self::builder(), |builder, x509| match x509 {
                         CborValue::Bytes(bytes) => {
-                            chain.push(X509{bytes: serde_cbor::from_slice(&bytes)?})
+                            let builder = builder.with_der(bytes).map_err(
+                                |e| X509Error::DecodingError(e.to_string())
+                            )?;
+                            Ok(builder)
                         },
-                        _ => return Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x509)))
-                    }
-                }
-                Ok(X5Chain::from(NonEmptyVec::try_from(chain)?))
+                        _ => Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {x509:?}")))
+                    })?
+                     .build()
+                    .map_err(|e| X509Error::DecodingError(e.to_string())
+                )
             },
-            _ => {Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", cbor_bytes)))}
+            _ => Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {cbor_bytes:?}")))
         }
     }
 
@@ -338,7 +344,4 @@ pub mod test {
         //    Algorithm::ES512
         //));
     }
-
-    #[test]
-    pub fn validate_x5chain() {}
 }
