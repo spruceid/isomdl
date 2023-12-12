@@ -6,7 +6,6 @@ use crate::definitions::x509::trust_anchor::validate_with_trust_anchor;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use anyhow::{anyhow, Result};
 use p256::ecdsa::VerifyingKey;
-use p256::pkcs8::DecodePublicKey;
 
 use const_oid::AssociatedOid;
 
@@ -60,12 +59,10 @@ impl X509 {
     }
 
     pub fn from_der(bytes: &[u8]) -> Result<Self> {
-        let cert: Certificate = Certificate::from_der(bytes)
+        let _ = Certificate::from_der(bytes)
             .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
         Ok(X509 {
-            bytes: cert
-                .to_der()
-                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
+            bytes: bytes.to_vec(),
         })
     }
 }
@@ -127,17 +124,8 @@ impl X5Chain {
     }
 
     pub fn get_signer_key(&self) -> Result<VerifyingKey, X509Error> {
-        let signer = match self.0.first() {
-            Some(x) => {
-                let x509 = x509_cert::Certificate::from_der(&x.bytes)?;
-
-                x509.tbs_certificate
-                    .subject_public_key_info
-                    .subject_public_key
-            }
-            _ => return Err(X509Error::CborDecodingError)?,
-        };
-        Ok(VerifyingKey::from_public_key_der(signer.raw_bytes())?)
+        let leaf = self.0.first().ok_or(X509Error::CborDecodingError)?;
+        leaf.public_key().map(|key| key.into())
     }
 
     pub fn validate(&self, trust_anchor_registry: Option<TrustAnchorRegistry>) -> Vec<X509Error> {
