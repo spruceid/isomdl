@@ -27,7 +27,7 @@ pub struct ValidationRuleSet {
 pub enum RuleSetType {
     IACA,
     AAMVA,
-    Custom,
+    NamesOnly,
     ReaderAuth,
 }
 
@@ -128,8 +128,19 @@ pub fn validate_with_ruleset(
                 }
             };
         }
-        TrustAnchor::Custom(_certificate, _ruleset) => {
-            //TODO
+        TrustAnchor::Custom(certificate, ruleset) => {
+            match x509_cert::Certificate::from_der(&certificate.bytes) {
+                Ok(root_certificate) => {
+                    errors.append(&mut process_validation_outcomes(
+                        leaf_certificate,
+                        root_certificate,
+                        ruleset,
+                    ));
+                }
+                Err(e) => {
+                    errors.push(e.into());
+                }
+            };
         }
     }
     errors
@@ -232,11 +243,11 @@ fn apply_ruleset(
     // if all the needed distinguished names have been collected,
     // there should be the same number of names collected as are present in the ruleset
     if root_distinguished_names.len() != rule_set.distinguished_names.len() {
-        errors.push(X509Error::ValidationError("The congifured validation ruleset requires a distinguished name that is not found in the submitted root certificate".to_string()));
+        errors.push(X509Error::ValidationError("The configured validation ruleset requires a distinguished name that is not found in the submitted root certificate".to_string()));
     }
 
     if leaf_distinguished_names.len() != rule_set.distinguished_names.len() {
-        errors.push(X509Error::ValidationError("The congifured validation ruleset requires a distinguished name that is not found in the submitted signer certificate".to_string()));
+        errors.push(X509Error::ValidationError("The configured validation ruleset requires a distinguished name that is not found in the submitted signer certificate".to_string()));
     }
 
     let Some(root_extensions) = root_certificate.tbs_certificate.extensions else {
@@ -285,11 +296,13 @@ fn apply_ruleset(
             }
             Ok(extension_errors)
         }
-        RuleSetType::Custom => {
-            //TODO
-            Err(X509Error::ValidationError(
-                "Unimplemented ruleset".to_string(),
-            ))
+        RuleSetType::NamesOnly => {
+            for dn in leaf_distinguished_names {
+                let Some(_root_dn) = root_distinguished_names.iter().find(|r| r == &&dn) else {
+                    return Err(X509Error::ValidationError(format!("Mismatch between supplied certificate issuer attribute: {:?} and the trust anchor registry.", dn.value)));
+                };
+            }
+            Ok(vec![])
         }
         RuleSetType::ReaderAuth => {
             //TODO

@@ -51,6 +51,23 @@ impl X509 {
                 X509Error::ValidationError("could not parse public key from pkcs8 spki".to_string())
             })
     }
+
+    pub fn from_pem(bytes: &[u8]) -> Result<Self> {
+        let bytes = pem_rfc7468::decode_vec(bytes)
+            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
+            .1;
+        X509::from_der(&bytes)
+    }
+
+    pub fn from_der(bytes: &[u8]) -> Result<Self> {
+        let cert: Certificate = Certificate::from_der(bytes)
+            .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
+        Ok(X509 {
+            bytes: cert
+                .to_der()
+                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -215,27 +232,12 @@ pub struct Builder {
 
 impl Builder {
     pub fn with_pem(mut self, data: &[u8]) -> Result<Builder> {
-        let bytes = pem_rfc7468::decode_vec(data)
-            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
-            .1;
-        let cert: Certificate = Certificate::from_der(&bytes)
-            .map_err(|e| anyhow!("unable to parse certificate from der: {}", e))?;
-        let x509 = X509 {
-            bytes: cert
-                .to_der()
-                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
-        };
+        let x509 = X509::from_pem(data)?;
         self.certs.push(x509);
         Ok(self)
     }
     pub fn with_der(mut self, data: &[u8]) -> Result<Builder> {
-        let cert: Certificate = Certificate::from_der(data)
-            .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
-        let x509 = X509 {
-            bytes: cert
-                .to_der()
-                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
-        };
+        let x509 = X509::from_der(data)?;
         self.certs.push(x509);
         Ok(self)
     }
@@ -271,24 +273,6 @@ pub mod test {
             .expect("unable to add cert")
             .build()
             .expect("unable to build x5chain");
-
-        //let self_signed = &x5chain[0];
-
-        //assert!(self_signed.issued(self_signed) == CertificateVerifyResult::OK);
-        //assert!(self_signed
-        //    .verify(
-        //        &self_signed
-        //            .public_key()
-        //            .expect("unable to get public key of cert")
-        //    )
-        //    .expect("unable to verify public key of cert"));
-
-        //assert!(matches!(
-        //    x5chain
-        //        .key_algorithm()
-        //        .expect("unable to retrieve public key algorithm"),
-        //    Algorithm::ES256
-        //));
     }
 
     #[test]
@@ -298,24 +282,6 @@ pub mod test {
             .expect("unable to add cert")
             .build()
             .expect("unable to build x5chain");
-
-        //let self_signed = &x5chain[0];
-
-        //assert!(self_signed.issued(self_signed) == CertificateVerifyResult::OK);
-        //assert!(self_signed
-        //    .verify(
-        //        &self_signed
-        //            .public_key()
-        //            .expect("unable to get public key of cert")
-        //    )
-        //    .expect("unable to verify public key of cert"));
-
-        //assert!(matches!(
-        //    x5chain
-        //        .key_algorithm()
-        //        .expect("unable to retrieve public key algorithm"),
-        //    Algorithm::ES384
-        //));
     }
 
     #[test]
@@ -325,23 +291,27 @@ pub mod test {
             .expect("unable to add cert")
             .build()
             .expect("unable to build x5chain");
+    }
 
-        //let self_signed = &x5chain[0];
+    #[test]
+    pub fn correct_signature() {
+        let target = include_bytes!("../../../test/presentation/isomdl_iaca_signer.pem");
+        let issuer = include_bytes!("../../../test/presentation/isomdl_iaca_root_cert.pem");
+        check_signature(
+            &X509::from_pem(target).unwrap(),
+            &X509::from_pem(issuer).unwrap(),
+        )
+        .expect("issuer did not sign target cert")
+    }
 
-        //assert!(self_signed.issued(self_signed) == CertificateVerifyResult::OK);
-        //assert!(self_signed
-        //    .verify(
-        //        &self_signed
-        //            .public_key()
-        //            .expect("unable to get public key of cert")
-        //    )
-        //    .expect("unable to verify public key of cert"));
-
-        //assert!(matches!(
-        //    x5chain
-        //        .key_algorithm()
-        //        .expect("unable to retrieve public key algorithm"),
-        //    Algorithm::ES512
-        //));
+    #[test]
+    pub fn incorrect_signature() {
+        let issuer = include_bytes!("../../../test/presentation/isomdl_iaca_signer.pem");
+        let target = include_bytes!("../../../test/presentation/isomdl_iaca_root_cert.pem");
+        check_signature(
+            &X509::from_pem(target).unwrap(),
+            &X509::from_pem(issuer).unwrap(),
+        )
+        .expect_err("issuer did sign target cert");
     }
 }

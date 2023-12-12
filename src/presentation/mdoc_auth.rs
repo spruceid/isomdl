@@ -16,11 +16,12 @@ use p256::ecdsa::VerifyingKey;
 use ssi_jwk::Params;
 use ssi_jwk::JWK as SsiJwk;
 
-pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: IssuerSigned) -> Result<(), Error> {
+pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> Result<(), Error> {
     let signer_key = x5chain.get_signer_key()?;
-    let issuer_auth = issuer_signed.issuer_auth;
     let verification_result: cose_rs::sign1::VerificationResult =
-        issuer_auth.verify::<VerifyingKey, Signature>(&signer_key, None, None);
+        issuer_signed
+            .issuer_auth
+            .verify::<VerifyingKey, Signature>(&signer_key, None, None);
     if !verification_result.success() {
         Err(ReaderError::ParsingError)?
     } else {
@@ -29,10 +30,15 @@ pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: IssuerSigned) -> R
 }
 
 pub fn device_authentication(
-    mso: Tag24<Mso>,
-    document: Document,
+    document: &Document,
     session_transcript: SessionTranscript180135,
 ) -> Result<(), Error> {
+    let mso_bytes = document
+        .issuer_signed
+        .issuer_auth
+        .payload()
+        .ok_or(Error::DetachedIssuerAuth)?;
+    let mso: Tag24<Mso> = serde_cbor::from_slice(mso_bytes).map_err(|_| Error::MSOParsing)?;
     let device_key = mso.into_inner().device_key_info.device_key;
     let jwk = SsiJwk::try_from(device_key)?;
     match jwk.params {
@@ -50,16 +56,16 @@ pub fn device_authentication(
                 false,
             );
             let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)?;
-            let namespaces_bytes = document.device_signed.namespaces;
-            let device_auth: DeviceAuth = document.device_signed.device_auth;
+            let namespaces_bytes = &document.device_signed.namespaces;
+            let device_auth: &DeviceAuth = &document.device_signed.device_auth;
 
             //TODO: fix for attended use case:
             match device_auth {
                 DeviceAuth::Signature { device_signature } => {
                     let detached_payload = Tag24::new(DeviceAuthentication::new(
                         session_transcript,
-                        document.doc_type,
-                        namespaces_bytes,
+                        document.doc_type.clone(),
+                        namespaces_bytes.clone(),
                     ))
                     .map_err(|_| ReaderError::CborDecodingError)?;
                     let external_aad = None;
