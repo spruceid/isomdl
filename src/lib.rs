@@ -4,6 +4,6 @@ pub mod definitions;
 pub mod issuance;
 pub mod presentation;
 
-pub mod macros {
-    pub use isomdl_macros::{FromJson, ToCbor};
-}
+#[macro_use]
+extern crate isomdl_macros;
+pub use isomdl_macros::{FromJson, ToCbor};
