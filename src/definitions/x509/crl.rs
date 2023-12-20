@@ -24,7 +24,7 @@ pub enum Error {
     #[error("Distrbution point malformed: {0}")]
     DistributionPointMalformed(&'static str),
     #[error("Unable to fetch CRL: {0}")]
-    FetchingCrl(reqwest::Error),
+    FetchingCrl(#[from] reqwest::Error),
     #[error("Unable to reach distribution point")]
     ReachingDistributionPoint,
     #[error("Issuer mismatch between cert and CRL")]
@@ -111,8 +111,7 @@ async fn fetch_crl(url: &str) -> Result<Vec<u8>, Error> {
         .await
         .map_err(Error::FetchingCrl)?
         .bytes()
-        .await
-        .map_err(Error::FetchingCrl)?;
+        .await?;
 
     Ok(bytes.to_vec())
 }
