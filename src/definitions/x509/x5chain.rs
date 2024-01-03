@@ -4,8 +4,8 @@ use crate::definitions::x509::trust_anchor::check_validity_period;
 use crate::definitions::x509::trust_anchor::find_anchor;
 use crate::definitions::x509::trust_anchor::validate_with_trust_anchor;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use crate::presentation::reader::Error;
 use anyhow::{anyhow, Result};
+use p256::ecdsa::VerifyingKey;
 
 use const_oid::AssociatedOid;
 
@@ -50,6 +50,21 @@ impl X509 {
                 X509Error::ValidationError("could not parse public key from pkcs8 spki".to_string())
             })
     }
+
+    pub fn from_pem(bytes: &[u8]) -> Result<Self> {
+        let bytes = pem_rfc7468::decode_vec(bytes)
+            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
+            .1;
+        X509::from_der(&bytes)
+    }
+
+    pub fn from_der(bytes: &[u8]) -> Result<Self> {
+        let _ = Certificate::from_der(bytes)
+            .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
+        Ok(X509 {
+            bytes: bytes.to_vec(),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,15 +95,57 @@ impl X5Chain {
         }
     }
 
+    pub fn from_cbor(cbor_bytes: CborValue) -> Result<Self, X509Error> {
+        match cbor_bytes {
+            CborValue::Bytes(bytes) => {
+                Self::builder().with_der(&bytes).map_err(
+                    |e| X509Error::DecodingError(e.to_string())
+                )?.build().map_err(
+                    |e| X509Error::DecodingError(e.to_string())
+                )
+            },
+            CborValue::Array(x509s) => {
+                x509s.iter()
+                    .try_fold(Self::builder(), |builder, x509| match x509 {
+                        CborValue::Bytes(bytes) => {
+                            let builder = builder.with_der(bytes).map_err(
+                                |e| X509Error::DecodingError(e.to_string())
+                            )?;
+                            Ok(builder)
+                        },
+                        _ => Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {x509:?}")))
+                    })?
+                     .build()
+                    .map_err(|e| X509Error::DecodingError(e.to_string())
+                )
+            },
+            _ => Err(X509Error::ValidationError(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {cbor_bytes:?}")))
+        }
+    }
+
+    pub fn get_signer_key(&self) -> Result<VerifyingKey, X509Error> {
+        let leaf = self.0.first().ok_or(X509Error::CborDecodingError)?;
+        leaf.public_key().map(|key| key.into())
+    }
+
     pub fn validate(&self, trust_anchor_registry: Option<TrustAnchorRegistry>) -> Vec<X509Error> {
         let x5chain = self.0.as_ref();
         let mut errors: Vec<X509Error> = vec![];
+
+        if !has_unique_elements(x5chain) {
+            errors.push(X509Error::ValidationError(
+                "x5chain contains duplicate certificates".to_string(),
+            ))
+        };
+
         x5chain.windows(2).for_each(|chain_link| {
             let target = &chain_link[0];
             let issuer = &chain_link[1];
-            match check_signature(target, issuer) {
-                Ok(_) => {}
-                Err(e) => errors.push(e),
+            if check_signature(target, issuer).is_err() {
+                errors.push(X509Error::ValidationError(format!(
+                    "invalid signature for target: {:?}",
+                    target
+                )));
             }
         });
 
@@ -147,50 +204,6 @@ pub fn check_signature(target: &X509, issuer: &X509) -> Result<(), X509Error> {
     Ok(parent_public_key.verify(&bytes, &sig)?)
 }
 
-// In 18013-5 the TrustAnchorRegistry is also referred to as the Verified Issuer Certificate Authority List (VICAL)
-pub fn validate_x5chain(
-    x5chain: CborValue,
-    trust_anchor_registry: Option<TrustAnchorRegistry>,
-) -> Result<Vec<X509Error>, Error> {
-    let mut errors: Vec<X509Error> = vec![];
-    //the x5chain can contain one or more ceritificates
-    match x5chain {
-        CborValue::Bytes(bytes) => {
-            let chain: Vec<X509> = vec![X509 {
-                bytes: serde_cbor::from_slice(&bytes)?,
-            }];
-            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            errors.append(&mut x5chain.validate(trust_anchor_registry));
-        }
-        CborValue::Array(x509s) => {
-            let mut chain = vec![];
-            for x509 in x509s {
-                match x509 {
-                    CborValue::Bytes(bytes) => {
-                        chain.push(X509{bytes: serde_cbor::from_slice(&bytes)?})
-
-                    },
-                    _ => return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x509)))
-                }
-            }
-
-            //an x5chain is not allowed to contain any duplicate certificates
-            if !has_unique_elements(chain.clone()) {
-                return Err(Error::MdocAuth(
-                    "x5chain header contains at least one duplicate certificate".to_string(),
-                ));
-            }
-
-            let x5chain = X5Chain::from(NonEmptyVec::try_from(chain)?);
-            errors.append(&mut x5chain.validate(trust_anchor_registry));
-        }
-        _ => {
-            return Err(Error::MdocAuth(format!("Expecting x509 certificate in the x5chain to be a cbor encoded bytestring, but received: {:?}", x5chain)));
-        }
-    }
-    Ok(errors)
-}
-
 fn has_unique_elements<T>(iter: T) -> bool
 where
     T: IntoIterator,
@@ -207,29 +220,12 @@ pub struct Builder {
 
 impl Builder {
     pub fn with_pem(mut self, data: &[u8]) -> Result<Builder> {
-        let bytes = pem_rfc7468::decode_vec(data)
-            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
-            .1;
-        let cert: Certificate = Certificate::from_der(&bytes)
-            .map_err(|e| anyhow!("unable to parse certificate from der: {}", e))?;
-        let x509 = X509 {
-            bytes: cert
-                .encode_to_vec(&mut vec![])?
-                .to_der()
-                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
-        };
+        let x509 = X509::from_pem(data)?;
         self.certs.push(x509);
         Ok(self)
     }
     pub fn with_der(mut self, data: &[u8]) -> Result<Builder> {
-        let cert: Certificate = Certificate::from_der(data)
-            .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
-        let x509 = X509 {
-            bytes: cert
-                .encode_to_vec(&mut vec![])?
-                .to_der()
-                .map_err(|e| anyhow!("unable to convert certificate to bytes: {}", e))?,
-        };
+        let x509 = X509::from_der(data)?;
         self.certs.push(x509);
         Ok(self)
     }
@@ -265,24 +261,6 @@ pub mod test {
             .expect("unable to add cert")
             .build()
             .expect("unable to build x5chain");
-
-        //let self_signed = &x5chain[0];
-
-        //assert!(self_signed.issued(self_signed) == CertificateVerifyResult::OK);
-        //assert!(self_signed
-        //    .verify(
-        //        &self_signed
-        //            .public_key()
-        //            .expect("unable to get public key of cert")
-        //    )
-        //    .expect("unable to verify public key of cert"));
-
-        //assert!(matches!(
-        //    x5chain
-        //        .key_algorithm()
-        //        .expect("unable to retrieve public key algorithm"),
-        //    Algorithm::ES256
-        //));
     }
 
     #[test]
@@ -292,24 +270,6 @@ pub mod test {
             .expect("unable to add cert")
             .build()
             .expect("unable to build x5chain");
-
-        //let self_signed = &x5chain[0];
-
-        //assert!(self_signed.issued(self_signed) == CertificateVerifyResult::OK);
-        //assert!(self_signed
-        //    .verify(
-        //        &self_signed
-        //            .public_key()
-        //            .expect("unable to get public key of cert")
-        //    )
-        //    .expect("unable to verify public key of cert"));
-
-        //assert!(matches!(
-        //    x5chain
-        //        .key_algorithm()
-        //        .expect("unable to retrieve public key algorithm"),
-        //    Algorithm::ES384
-        //));
     }
 
     #[test]
@@ -319,26 +279,27 @@ pub mod test {
             .expect("unable to add cert")
             .build()
             .expect("unable to build x5chain");
-
-        //let self_signed = &x5chain[0];
-
-        //assert!(self_signed.issued(self_signed) == CertificateVerifyResult::OK);
-        //assert!(self_signed
-        //    .verify(
-        //        &self_signed
-        //            .public_key()
-        //            .expect("unable to get public key of cert")
-        //    )
-        //    .expect("unable to verify public key of cert"));
-
-        //assert!(matches!(
-        //    x5chain
-        //        .key_algorithm()
-        //        .expect("unable to retrieve public key algorithm"),
-        //    Algorithm::ES512
-        //));
     }
 
     #[test]
-    pub fn validate_x5chain() {}
+    pub fn correct_signature() {
+        let target = include_bytes!("../../../test/presentation/isomdl_iaca_signer.pem");
+        let issuer = include_bytes!("../../../test/presentation/isomdl_iaca_root_cert.pem");
+        check_signature(
+            &X509::from_pem(target).unwrap(),
+            &X509::from_pem(issuer).unwrap(),
+        )
+        .expect("issuer did not sign target cert")
+    }
+
+    #[test]
+    pub fn incorrect_signature() {
+        let issuer = include_bytes!("../../../test/presentation/isomdl_iaca_signer.pem");
+        let target = include_bytes!("../../../test/presentation/isomdl_iaca_root_cert.pem");
+        check_signature(
+            &X509::from_pem(target).unwrap(),
+            &X509::from_pem(issuer).unwrap(),
+        )
+        .expect_err("issuer did sign target cert");
+    }
 }

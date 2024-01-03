@@ -219,7 +219,7 @@ impl SessionManager {
         &self,
         request: DeviceRequest,
     ) -> Result<Vec<ItemsRequest>, PreparedDeviceResponse> {
-        if request.version != DeviceRequest::VERSION {
+        if !request.version.starts_with("1.") {
             // tracing::error!(
             //     "unsupported DeviceRequest version: {} ({} is supported)",
             //     request.version,
