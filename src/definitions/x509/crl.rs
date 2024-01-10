@@ -60,8 +60,8 @@ const OID_EXTENSION_REASON_CODE: ObjectIdentifier = ObjectIdentifier::new_unwrap
 
 /// Given a cert, download and verify the associated crl listed in the cert, and verify the crl
 /// against the cert's metadata and public key.
-pub async fn fetch_and_validate_crl(root_cert: &TbsCertificate) -> Result<Vec<TbsCertList>, Error> {
-    let distribution_points = match read_distribution_points(root_cert)? {
+pub async fn fetch_and_validate_crl(crl_signing_cert: &TbsCertificate) -> Result<Vec<TbsCertList>, Error> {
+    let distribution_points = match read_distribution_points(crl_signing_cert)? {
         None => return Ok(vec![]),
         Some(distribution_points) => distribution_points,
     };
@@ -78,7 +78,7 @@ pub async fn fetch_and_validate_crl(root_cert: &TbsCertificate) -> Result<Vec<Tb
         for url in urls.iter() {
             let crl_bytes = fetch_crl(url).await?;
 
-            cert_lists.push(validate_crl(root_cert, &crl_bytes)?);
+            cert_lists.push(validate_crl(crl_signing_cert, &crl_bytes)?);
         }
     }
 
