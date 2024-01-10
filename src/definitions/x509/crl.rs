@@ -154,7 +154,6 @@ fn validate_crl(cert: &TbsCertificate, crl_bytes: &[u8]) -> Result<TbsCertList, 
     }
 
     match crl.signature_algorithm.oid {
-        // OID_SIGNATURE_SHA1WITHRSA => signature_components.verify_sha1_with_rsa(pub_key),
         OID_PUBLIC_KEY_ELLIPTIC_CURVE => {
             let curve =
                 CurveKind::try_from(cert.subject_public_key_info.algorithm.parameters.as_ref())?;
