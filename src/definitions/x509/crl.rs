@@ -60,7 +60,9 @@ const OID_EXTENSION_REASON_CODE: ObjectIdentifier = ObjectIdentifier::new_unwrap
 
 /// Given a cert, download and verify the associated crl listed in the cert, and verify the crl
 /// against the cert's metadata and public key.
-pub async fn fetch_and_validate_crl(crl_signing_cert: &TbsCertificate) -> Result<Vec<TbsCertList>, Error> {
+pub async fn fetch_and_validate_crl(
+    crl_signing_cert: &TbsCertificate,
+) -> Result<Vec<TbsCertList>, Error> {
     let distribution_points = match read_distribution_points(crl_signing_cert)? {
         None => return Ok(vec![]),
         Some(distribution_points) => distribution_points,
@@ -262,15 +264,7 @@ pub fn check_cert_against_cert_lists(
 
         for revoked_cert in revoked_certs {
             if revoked_cert.serial_number == cert.serial_number {
-                let reason = find_reason_code(revoked_cert)?;
-
-                let reason = match reason {
-                    Some(CrlReason::Unspecified) => None,
-                    Some(reason) => Some(reason),
-                    None => None,
-                };
-
-                return Err(Error::CertRevoked(reason));
+                return Err(Error::CertRevoked(find_reason_code(revoked_cert)));
             }
         }
     }
@@ -278,20 +272,17 @@ pub fn check_cert_against_cert_lists(
     Ok(())
 }
 
-fn find_reason_code(revoked_cert: &RevokedCert) -> Result<Option<CrlReason>, Error> {
+fn find_reason_code(revoked_cert: &RevokedCert) -> Option<CrlReason> {
     if let Some(exts) = revoked_cert.crl_entry_extensions.as_ref() {
         if let Some(reason_code_ext) = exts
             .iter()
             .find(|ext| ext.extn_id == OID_EXTENSION_REASON_CODE)
         {
-            let reason = CrlReason::from_der(reason_code_ext.extn_value.as_bytes())
-                .map_err(|err| Error::ParsingCrlComponent("crl reason", err))?;
-
-            return Ok(Some(reason));
+            return CrlReason::from_der(reason_code_ext.extn_value.as_bytes()).ok();
         }
     }
 
-    Ok(None)
+    None
 }
 
 #[cfg(test)]
