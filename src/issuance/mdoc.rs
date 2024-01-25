@@ -328,7 +328,7 @@ impl Builder {
         let device_key_info = self
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
-        let enable_decoy_digests = self.enable_decoy_digests.unwrap_or_default();
+        let enable_decoy_digests = self.enable_decoy_digests.unwrap_or(true);
 
         Mdoc::issue_async(
             doc_type,

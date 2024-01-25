@@ -15,6 +15,14 @@ pub enum Error {
     CountryMismatch,
 }
 
+impl Error {
+    fn into_from_json_error(self) -> FromJsonError {
+        match self {
+            Self::CountryMismatch => FromJsonError::Parsing(self.into()),
+        }
+    }
+}
+
 impl From<IssuingJurisdiction> for Cbor {
     fn from(i: IssuingJurisdiction) -> Cbor {
         i.0.into()
@@ -34,7 +42,7 @@ impl FromJsonMap for IssuingJurisdiction {
             .and_then(Alpha2::from_json)?;
 
         if !jurisdiction.starts_with(country.as_str()) {
-            return Err(FromJsonError::Parsing(Into::into(Error::CountryMismatch)));
+            return Err(Error::CountryMismatch.into_from_json_error());
         }
 
         Ok(Self(jurisdiction))
