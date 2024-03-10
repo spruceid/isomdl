@@ -33,7 +33,7 @@ pub struct SessionManagerInit {
     device_engagement: Tag24<DeviceEngagement>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
     documents: Documents,
     e_device_key: Vec<u8>,
@@ -41,7 +41,7 @@ pub struct SessionManagerEngaged {
     handover: Handover,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManager {
     documents: Documents,
     session_transcript: SessionTranscript180135,
