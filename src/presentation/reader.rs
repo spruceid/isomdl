@@ -1,14 +1,31 @@
-use crate::definitions::{
-    device_engagement::DeviceRetrievalMethod,
-    device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
-    helpers::{NonEmptyVec, Tag24},
-    session::{
-        self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
-        SessionEstablishment,
+use super::{mdoc_auth::device_authentication, mdoc_auth::issuer_authentication};
+use crate::definitions::device_key::cose_key::Error as CoseError;
+use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
+use crate::definitions::x509::x5chain::X5CHAIN_HEADER_LABEL;
+use crate::definitions::x509::X5Chain;
+use crate::definitions::{Status, ValidatedResponse};
+use crate::presentation::reader::device_request::ItemsRequestBytes;
+use crate::presentation::reader::Error as ReaderError;
+use crate::{
+    definitions::{
+        device_engagement::DeviceRetrievalMethod,
+        device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
+        device_response::Document,
+        helpers::{non_empty_vec, NonEmptyVec, Tag24},
+        session::{
+            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
+            SessionEstablishment,
+        },
     },
-    DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
+    definitions::{DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135},
 };
+use aes::cipher::{generic_array::GenericArray, typenum::U32};
 use anyhow::{anyhow, Result};
+use cose_rs::algorithm::Algorithm;
+use cose_rs::sign1::HeaderMap;
+use cose_rs::CoseSign1;
+use p256::ecdsa::SigningKey;
+use sec1::DecodeEcPrivateKey;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_json::json;
@@ -16,19 +33,33 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SessionManager {
     session_transcript: SessionTranscript180135,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
+    trust_anchor_registry: Option<TrustAnchorRegistry>,
+    reader_auth_key: [u8; 32],
+    reader_x5chain: X5Chain,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Serialize, Deserialize)]
+pub struct ReaderAuthentication(
+    pub String,
+    pub SessionTranscript180135,
+    pub ItemsRequestBytes,
+);
+
+#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum Error {
-    #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
-    InvalidQrCode(anyhow::Error),
+    #[error("Received IssuerAuth had a detached payload.")]
+    DetachedIssuerAuth,
+    #[error("Could not parse MSO.")]
+    MSOParsing,
+    #[error("the qr code had the wrong prefix or the contained data could not be decoded")]
+    InvalidQrCode,
     #[error("Device did not transmit any data.")]
     DeviceTransmissionError,
     #[error("Device did not transmit an mDL.")]
@@ -49,11 +80,23 @@ pub enum Error {
     ParsingError,
     #[error("Request for data is invalid.")]
     InvalidRequest,
+    #[error("Failed mdoc authentication: {0}")]
+    MdocAuth(String),
+    #[error("Currently unsupported format")]
+    Unsupported,
+    #[error("No x5chain found for mdoc authentication")]
+    X5Chain,
 }
 
 impl From<serde_cbor::Error> for Error {
     fn from(_: serde_cbor::Error) -> Self {
         Error::CborDecodingError
+    }
+}
+
+impl From<crate::definitions::x509::error::Error> for Error {
+    fn from(value: crate::definitions::x509::error::Error) -> Self {
+        Error::MdocAuth(value.to_string())
     }
 }
 
@@ -63,13 +106,52 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+impl From<x509_cert::der::Error> for Error {
+    fn from(value: x509_cert::der::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<p256::ecdsa::Error> for Error {
+    fn from(value: p256::ecdsa::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<x509_cert::spki::Error> for Error {
+    fn from(value: x509_cert::spki::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<CoseError> for Error {
+    fn from(value: CoseError) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<non_empty_vec::Error> for Error {
+    fn from(value: non_empty_vec::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<asn1_rs::Error> for Error {
+    fn from(value: asn1_rs::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
 impl SessionManager {
     pub fn establish_session(
         qr_code: String,
         namespaces: device_request::Namespaces,
+        trust_anchor_registry: Option<TrustAnchorRegistry>,
+        reader_x5chain: X5Chain,
+        reader_key: &str,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let device_engagement_bytes =
-            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(Error::InvalidQrCode)?;
+            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(|e| anyhow!(e))?;
 
         //generate own keys
         let key_pair = create_p256_ephemeral_keys()?;
@@ -102,12 +184,18 @@ impl SessionManager {
         let sk_device =
             derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
 
+        let reader_signing_key: SigningKey = ecdsa::SigningKey::from_sec1_pem(reader_key)?;
+        let reader_auth_key: GenericArray<u8, U32> = reader_signing_key.to_bytes();
+
         let mut session_manager = Self {
             session_transcript,
             sk_device,
             device_message_counter: 0,
             sk_reader,
             reader_message_counter: 0,
+            trust_anchor_registry,
+            reader_auth_key: reader_auth_key.into(),
+            reader_x5chain,
         };
 
         let request = session_manager.build_request(namespaces)?;
@@ -159,8 +247,33 @@ impl SessionManager {
             namespaces,
             request_info: None,
         };
+
+        //the certificate should be supplied by the reader
+        //let certificate_cbor = serde_cbor::to_vec(&self.reader_cert_bytes)?;
+        let mut header_map = HeaderMap::default();
+        header_map.insert_i(33, self.reader_x5chain.into_cbor());
+
+        let algorithm = Algorithm::ES256;
+        let payload = ReaderAuthentication(
+            "ReaderAuthentication".to_string(),
+            self.session_transcript.clone(),
+            Tag24::new(items_request.clone())?,
+        );
+
+        let reader_signing_key = SigningKey::from_slice(&self.reader_auth_key)?; //SigningKey::from_bytes(self.reader_auth_key.to_vec());
+        let signature = reader_signing_key.sign_recoverable(&serde_cbor::to_vec(&payload)?)?;
+        let prepared_cosesign = CoseSign1::builder()
+            .detached()
+            .signature_algorithm(algorithm)
+            .payload(serde_cbor::to_vec(&payload)?)
+            .unprotected(header_map)
+            .prepare()
+            .unwrap();
+
+        let cose_sign1 = prepared_cosesign.finalize(signature.0.to_vec());
+
         let doc_request = DocRequest {
-            reader_auth: None,
+            reader_auth: Some(cose_sign1),
             items_request: Tag24::new(items_request)?,
         };
         let device_request = DeviceRequest {
@@ -176,10 +289,7 @@ impl SessionManager {
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
-    pub fn handle_response(
-        &mut self,
-        response: &[u8],
-    ) -> Result<BTreeMap<String, BTreeMap<String, Value>>, Error> {
+    fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, Error> {
         let session_data: SessionData = serde_cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
@@ -191,55 +301,107 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
-        let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
-        let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
-        let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
-        let mut parsed_response = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
+        let device_response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
+        Ok(device_response)
+    }
 
-        let mut namespaces = response
-            .documents
-            .ok_or(Error::DeviceTransmissionError)?
-            .into_inner()
-            .into_iter()
-            .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-            .ok_or(Error::DocumentTypeError)?
-            .issuer_signed
-            .namespaces
-            .ok_or(Error::NoMdlDataTransmission)?
-            .into_inner();
+    pub fn handle_response(&mut self, response: &[u8]) -> ValidatedResponse {
+        let mut validated_response = ValidatedResponse::default();
 
-        namespaces
-            .remove("org.iso.18013.5.1")
-            .ok_or(Error::IncorrectNamespace)?
-            .into_inner()
-            .into_iter()
-            .map(|item| item.into_inner())
-            .for_each(|item| {
-                let value = parse_response(item.element_value.clone());
-                if let Ok(val) = value {
-                    core_namespace.insert(item.element_identifier, val);
-                }
-            });
+        let device_response = match self.decrypt_response(response) {
+            Ok(device_response) => device_response,
+            Err(e) => {
+                validated_response.decryption = Status::Invalid;
+                validated_response
+                    .errors
+                    .insert("decryption_errors".to_string(), json!(vec![e]));
+                return validated_response;
+            }
+        };
+        validated_response.decryption = Status::Valid;
 
-        parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
+        let (document, x5chain, _parsed_response) = match parse(&device_response) {
+            Ok(res) => res,
+            Err(e) => {
+                validated_response.parsing = Status::Invalid;
+                validated_response
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e]));
+                return validated_response;
+            }
+        };
+        match parse_namespaces(&device_response) {
+            Ok(parsed_response) => {
+                self.validate_response(x5chain, document.clone(), parsed_response)
+            }
+            Err(e) => {
+                validated_response
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e]));
+                validated_response
+            }
+        }
+    }
 
-        if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
-            aamva_response
-                .into_inner()
-                .into_iter()
-                .map(|item| item.into_inner())
-                .for_each(|item| {
-                    let value = parse_response(item.element_value.clone());
-                    if let Ok(val) = value {
-                        aamva_namespace.insert(item.element_identifier, val);
-                    }
-                });
+    pub fn validate_response(
+        &mut self,
+        x5chain: X5Chain,
+        document: Document,
+        parsed_response: BTreeMap<String, serde_json::Value>,
+    ) -> ValidatedResponse {
+        let mut validated_response = ValidatedResponse {
+            response: parsed_response,
+            ..Default::default()
+        };
 
-            parsed_response.insert("org.iso.18013.5.1.aamva".to_string(), aamva_namespace);
+        match device_authentication(&document, self.session_transcript.clone()) {
+            Ok(_) => {
+                validated_response.device_authentication = Status::Valid;
+            }
+            Err(e) => {
+                validated_response.device_authentication = Status::Invalid;
+                validated_response
+                    .errors
+                    .insert("device_authentication_errors".to_string(), json!(vec![e]));
+            }
         }
 
-        Ok(parsed_response)
+        let validation_errors = x5chain.validate(self.trust_anchor_registry.clone());
+        if validation_errors.is_empty() {
+            match issuer_authentication(x5chain, &document.issuer_signed) {
+                Ok(_) => {
+                    validated_response.issuer_authentication = Status::Valid;
+                }
+                Err(e) => {
+                    validated_response.issuer_authentication = Status::Invalid;
+                    validated_response
+                        .errors
+                        .insert("issuer_authentication_errors".to_string(), json!(vec![e]));
+                }
+            }
+        } else {
+            validated_response
+                .errors
+                .insert("certificate_errors".to_string(), json!(validation_errors));
+            validated_response.issuer_authentication = Status::Invalid
+        };
+
+        validated_response
     }
+}
+
+fn parse(
+    device_response: &DeviceResponse,
+) -> Result<(&Document, X5Chain, BTreeMap<String, Value>), Error> {
+    let document = get_document(device_response)?;
+    let header = document.issuer_signed.issuer_auth.unprotected();
+    let x5chain = header
+        .get_i(X5CHAIN_HEADER_LABEL)
+        .cloned()
+        .ok_or(Error::X5Chain)
+        .map(X5Chain::from_cbor)??;
+    let parsed_response = parse_namespaces(device_response)?;
+    Ok((document, x5chain, parsed_response))
 }
 
 fn parse_response(value: CborValue) -> Result<Value, Error> {
@@ -280,6 +442,16 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
     }
 }
 
+fn get_document(device_response: &DeviceResponse) -> Result<&Document, Error> {
+    device_response
+        .documents
+        .as_ref()
+        .ok_or(ReaderError::DeviceTransmissionError)?
+        .iter()
+        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .ok_or(ReaderError::DocumentTypeError)
+}
+
 fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Error> {
     // Check if request follows ISO18013-5 restrictions
     // A valid mdoc request can contain a maximum of 2 age_over_NN fields
@@ -298,4 +470,146 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
     }
 
     Ok(true)
+}
+
+// TODO: Support other namespaces.
+fn parse_namespaces(
+    device_response: &DeviceResponse,
+) -> Result<BTreeMap<String, serde_json::Value>, Error> {
+    let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
+    let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
+    let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
+    let mut namespaces = device_response
+        .documents
+        .as_ref()
+        .ok_or(Error::DeviceTransmissionError)?
+        .iter()
+        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .ok_or(Error::DocumentTypeError)?
+        .issuer_signed
+        .namespaces
+        .as_ref()
+        .ok_or(Error::NoMdlDataTransmission)?
+        .clone()
+        .into_inner();
+
+    namespaces
+        .remove("org.iso.18013.5.1")
+        .ok_or(Error::IncorrectNamespace)?
+        .into_inner()
+        .into_iter()
+        .map(|item| item.into_inner())
+        .for_each(|item| {
+            let value = parse_response(item.element_value.clone());
+            if let Ok(val) = value {
+                core_namespace.insert(item.element_identifier, val);
+            }
+        });
+
+    parsed_response.insert(
+        "org.iso.18013.5.1".to_string(),
+        serde_json::to_value(core_namespace)?,
+    );
+
+    if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
+        aamva_response
+            .into_inner()
+            .into_iter()
+            .map(|item| item.into_inner())
+            .for_each(|item| {
+                let value = parse_response(item.element_value.clone());
+                if let Ok(val) = value {
+                    aamva_namespace.insert(item.element_identifier, val);
+                }
+            });
+
+        parsed_response.insert(
+            "org.iso.18013.5.1.aamva".to_string(),
+            serde_json::to_value(aamva_namespace)?,
+        );
+    }
+    Ok(parsed_response)
+}
+
+#[cfg(test)]
+pub mod test {
+    use crate::{
+        definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry},
+        definitions::x509::{error::Error as X509Error, x5chain::X509, X5Chain},
+    };
+    use anyhow::anyhow;
+
+    static IACA_ROOT: &[u8] = include_bytes!("../../test/presentation/isomdl_iaca_root_cert.pem");
+    //TODO fix this cert to contain issuer alternative name
+    // static IACA_INTERMEDIATE: &[u8] =
+    // include_bytes!("../../test/presentation/isomdl_iaca_intermediate.pem");
+    // signed by the intermediate certificate
+    //TODO fix this cert to contain issuer alternative name
+    // static IACA_LEAF_SIGNER: &[u8] =
+    // include_bytes!("../../test/presentation/isomdl_iaca_leaf_signer.pem");
+    // signed directly by the root certificate
+    static IACA_SIGNER: &[u8] = include_bytes!("../../test/presentation/isomdl_iaca_signer.pem");
+    static INCORRECT_IACA_SIGNER: &[u8] =
+        include_bytes!("../../test/presentation/isomdl_incorrect_iaca_signer.pem");
+
+    fn validate(signer: &[u8], root: &[u8]) -> Result<Vec<X509Error>, anyhow::Error> {
+        let root_bytes = pem_rfc7468::decode_vec(root)
+            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
+            .1;
+        let trust_anchor = TrustAnchor::Iaca(X509 { bytes: root_bytes });
+        let trust_anchor_registry = TrustAnchorRegistry {
+            certificates: vec![trust_anchor],
+        };
+        let bytes = pem_rfc7468::decode_vec(signer)
+            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
+            .1;
+        let x5chain_cbor: serde_cbor::Value = serde_cbor::Value::Bytes(bytes);
+
+        let x5chain = X5Chain::from_cbor(x5chain_cbor)?;
+
+        Ok(x5chain.validate(Some(trust_anchor_registry)))
+    }
+
+    #[test]
+    fn validate_x509_with_trust_anchor() {
+        let result = validate(IACA_SIGNER, IACA_ROOT).unwrap();
+        assert!(result.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn validate_incorrect_x509_with_trust_anchor() {
+        let result = validate(INCORRECT_IACA_SIGNER, IACA_ROOT).unwrap();
+        assert!(!result.is_empty(), "{result:?}");
+    }
+
+    // TODO: Fix test -- intermediate and leaf are not in a chain.
+    // #[test]
+    // fn validate_x5chain_with_trust_anchor() {
+    //     let root_bytes = pem_rfc7468::decode_vec(IACA_ROOT)
+    //         .map_err(|e| anyhow!("unable to parse pem: {}", e))
+    //         .unwrap()
+    //         .1;
+    //     let trust_anchor = TrustAnchor::Iaca(X509 { bytes: root_bytes });
+    //     let trust_anchor_registry = TrustAnchorRegistry {
+    //         certificates: vec![trust_anchor],
+    //     };
+
+    //     let intermediate_bytes = pem_rfc7468::decode_vec(IACA_INTERMEDIATE)
+    //         .map(|(_, bytes)| bytes)
+    //         .map(serde_cbor::Value::Bytes)
+    //         .expect("unable to parse pem");
+
+    //     let leaf_signer_bytes = pem_rfc7468::decode_vec(IACA_LEAF_SIGNER)
+    //         .map(|(_, bytes)| bytes)
+    //         .map(serde_cbor::Value::Bytes)
+    //         .expect("unable to parse pem");
+
+    //     let x5chain_cbor: serde_cbor::Value =
+    //         serde_cbor::Value::Array(vec![leaf_signer_bytes, intermediate_bytes]);
+
+    //     let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
+
+    //     let result = x5chain.validate(Some(trust_anchor_registry));
+    //     assert!(result.len() == 0, "{result:?}")
+    // }
 }

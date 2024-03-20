@@ -122,7 +122,7 @@ impl TryFrom<CborValue> for DeviceEngagement {
         if let CborValue::Map(mut map) = v {
             let device_engagement_version = map.remove(&CborValue::Integer(0));
             if let Some(CborValue::Text(v)) = device_engagement_version {
-                if v != "1.0" {
+                if !v.starts_with("1.") {
                     return Err(Error::UnsupportedVersion);
                 }
             } else {
