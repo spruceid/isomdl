@@ -320,7 +320,7 @@ impl SessionManager {
         };
         validated_response.decryption = Status::Valid;
 
-        let (document, x5chain, parsed_response) = match parse(&device_response) {
+        let (document, x5chain, _parsed_response) = match parse(&device_response) {
             Ok(res) => res,
             Err(e) => {
                 validated_response.parsing = Status::Invalid;
@@ -330,35 +330,17 @@ impl SessionManager {
                 return validated_response;
             }
         };
-        let header = document.issuer_signed.issuer_auth.unprotected().clone();
-        if let Some(x5chain_bytes) = header.get_i(33) {
-            let x5chain = match X5Chain::from_cbor(x5chain_bytes.clone()) {
-                Ok(x5chain) => x5chain,
-                Err(e) => {
-                    validated_response
-                        .errors
-                        .insert("parsing_errors".to_string(), json!(vec![e]));
-                    return validated_response;
-                }
-            };
-
-            match parse_namespaces(&device_response) {
-                Ok(parsed_response) => {
-                    return self.validate_response(x5chain, document.clone(), parsed_response)
-                }
-                Err(e) => {
-                    validated_response
-                        .errors
-                        .insert("parsing_errors".to_string(), json!(vec![e]));
-                    return validated_response;
-                }
-            };
-        } else {
-            validated_response
-                .errors
-                .insert("parsing_errors".to_string(), json!(vec![Error::X5Chain]));
-            return validated_response;
-        }
+        match parse_namespaces(&device_response) {
+            Ok(parsed_response) => {
+                return self.validate_response(x5chain, document.clone(), parsed_response)
+            }
+            Err(e) => {
+                validated_response
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e]));
+                return validated_response;
+            }
+        };
     }
 
     pub fn validate_response(
