@@ -4,6 +4,7 @@ use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use crate::definitions::x509::x5chain::X5CHAIN_HEADER_LABEL;
 use crate::definitions::x509::X5Chain;
 use crate::definitions::{Status, ValidatedResponse};
+use crate::presentation::reader::device_request::ItemsRequestBytes;
 use crate::presentation::reader::Error as ReaderError;
 use crate::{
     definitions::{
@@ -18,7 +19,13 @@ use crate::{
     },
     definitions::{DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135},
 };
+use aes::cipher::{generic_array::GenericArray, typenum::U32};
 use anyhow::{anyhow, Result};
+use cose_rs::algorithm::Algorithm;
+use cose_rs::sign1::HeaderMap;
+use cose_rs::CoseSign1;
+use p256::ecdsa::SigningKey;
+use sec1::DecodeEcPrivateKey;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use serde_json::json;
@@ -34,7 +41,16 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     trust_anchor_registry: Option<TrustAnchorRegistry>,
+    reader_auth_key: [u8; 32],
+    reader_x5chain: X5Chain,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct ReaderAuthentication(
+    pub String,
+    pub SessionTranscript180135,
+    pub ItemsRequestBytes,
+);
 
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum Error {
@@ -131,6 +147,8 @@ impl SessionManager {
         qr_code: String,
         namespaces: device_request::Namespaces,
         trust_anchor_registry: Option<TrustAnchorRegistry>,
+        reader_x5chain: X5Chain,
+        reader_key: &str,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let device_engagement_bytes =
             Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(|e| anyhow!(e))?;
@@ -166,6 +184,9 @@ impl SessionManager {
         let sk_device =
             derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
 
+        let reader_signing_key: SigningKey = ecdsa::SigningKey::from_sec1_pem(reader_key)?;
+        let reader_auth_key: GenericArray<u8, U32> = reader_signing_key.to_bytes().into();
+
         let mut session_manager = Self {
             session_transcript,
             sk_device,
@@ -173,6 +194,8 @@ impl SessionManager {
             sk_reader,
             reader_message_counter: 0,
             trust_anchor_registry,
+            reader_auth_key: reader_auth_key.into(),
+            reader_x5chain,
         };
 
         let request = session_manager.build_request(namespaces)?;
@@ -224,8 +247,33 @@ impl SessionManager {
             namespaces,
             request_info: None,
         };
+
+        //the certificate should be supplied by the reader
+        //let certificate_cbor = serde_cbor::to_vec(&self.reader_cert_bytes)?;
+        let mut header_map = HeaderMap::default();
+        header_map.insert_i(33, self.reader_x5chain.into_cbor());
+
+        let algorithm = Algorithm::ES256;
+        let payload = ReaderAuthentication(
+            "ReaderAuthentication".to_string(),
+            self.session_transcript.clone(),
+            Tag24::new(items_request.clone())?,
+        );
+
+        let reader_signing_key = SigningKey::from_slice(&self.reader_auth_key)?; //SigningKey::from_bytes(self.reader_auth_key.to_vec());
+        let signature = reader_signing_key.sign_recoverable(&serde_cbor::to_vec(&payload)?)?;
+        let prepared_cosesign = CoseSign1::builder()
+            .detached()
+            .signature_algorithm(algorithm)
+            .payload(serde_cbor::to_vec(&payload)?)
+            .unprotected(header_map)
+            .prepare()
+            .unwrap();
+
+        let cose_sign1 = prepared_cosesign.finalize(signature.0.to_vec());
+
         let doc_request = DocRequest {
-            reader_auth: None,
+            reader_auth: Some(cose_sign1),
             items_request: Tag24::new(items_request)?,
         };
         let device_request = DeviceRequest {
@@ -282,10 +330,49 @@ impl SessionManager {
                 return validated_response;
             }
         };
-        validated_response.parsing = Status::Valid;
-        validated_response.response = parsed_response;
+        let header = document.issuer_signed.issuer_auth.unprotected().clone();
+        if let Some(x5chain_bytes) = header.get_i(33) {
+            let x5chain = match X5Chain::from_cbor(x5chain_bytes.clone()) {
+                Ok(x5chain) => x5chain,
+                Err(e) => {
+                    validated_response
+                        .errors
+                        .insert("parsing_errors".to_string(), json!(vec![e]));
+                    return validated_response;
+                }
+            };
 
-        match device_authentication(document, self.session_transcript.clone()) {
+            match parse_namespaces(&device_response) {
+                Ok(parsed_response) => {
+                    return self.validate_response(x5chain, document.clone(), parsed_response)
+                }
+                Err(e) => {
+                    validated_response
+                        .errors
+                        .insert("parsing_errors".to_string(), json!(vec![e]));
+                    return validated_response;
+                }
+            };
+        } else {
+            validated_response
+                .errors
+                .insert("parsing_errors".to_string(), json!(vec![Error::X5Chain]));
+            return validated_response;
+        }
+    }
+
+    pub fn validate_response(
+        &mut self,
+        x5chain: X5Chain,
+        document: Document,
+        parsed_response: BTreeMap<String, serde_json::Value>,
+    ) -> ValidatedResponse {
+        let mut validated_response = ValidatedResponse {
+            response: parsed_response,
+            ..Default::default()
+        };
+
+        match device_authentication(&document, self.session_transcript.clone()) {
             Ok(_) => {
                 validated_response.device_authentication = Status::Valid;
             }
