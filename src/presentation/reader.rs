@@ -185,7 +185,7 @@ impl SessionManager {
             derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
 
         let reader_signing_key: SigningKey = ecdsa::SigningKey::from_sec1_pem(reader_key)?;
-        let reader_auth_key: GenericArray<u8, U32> = reader_signing_key.to_bytes().into();
+        let reader_auth_key: GenericArray<u8, U32> = reader_signing_key.to_bytes();
 
         let mut session_manager = Self {
             session_transcript,
@@ -332,15 +332,15 @@ impl SessionManager {
         };
         match parse_namespaces(&device_response) {
             Ok(parsed_response) => {
-                return self.validate_response(x5chain, document.clone(), parsed_response)
+                self.validate_response(x5chain, document.clone(), parsed_response)
             }
             Err(e) => {
                 validated_response
                     .errors
                     .insert("parsing_errors".to_string(), json!(vec![e]));
-                return validated_response;
+                validated_response
             }
-        };
+        }
     }
 
     pub fn validate_response(
@@ -573,13 +573,13 @@ pub mod test {
     #[test]
     fn validate_x509_with_trust_anchor() {
         let result = validate(IACA_SIGNER, IACA_ROOT).unwrap();
-        assert!(result.len() == 0, "{result:?}");
+        assert!(result.is_empty(), "{result:?}");
     }
 
     #[test]
     fn validate_incorrect_x509_with_trust_anchor() {
         let result = validate(INCORRECT_IACA_SIGNER, IACA_ROOT).unwrap();
-        assert!(result.len() > 0, "{result:?}");
+        assert!(!result.is_empty(), "{result:?}");
     }
 
     // TODO: Fix test -- intermediate and leaf are not in a chain.

@@ -428,7 +428,7 @@ impl SessionManager {
 
                 match x5c {
                     CborValue::Bytes(x509) => {
-                        match x509_cert::Certificate::from_der(&x509) {
+                        match x509_cert::Certificate::from_der(x509) {
                             Ok(cert) => {
                                 let distinguished_names: Vec<AttributeTypeAndValue> = cert
                                     .tbs_certificate
@@ -441,7 +441,7 @@ impl SessionManager {
                                             .into_iter()
                                             .filter(|atv| {
                                                 //common name
-                                                atv.oid.to_string() == "2.5.4.3".to_string()
+                                                atv.oid.to_string() == *"2.5.4.3"
                                             })
                                             .collect::<Vec<AttributeTypeAndValue>>()
                                     })
@@ -451,24 +451,24 @@ impl SessionManager {
                                     .collect();
 
                                 if let Some(common_name) = distinguished_names.first() {
-                                    return (validation_errors, Some(common_name.to_string()));
+                                    (validation_errors, Some(common_name.to_string()))
                                 } else {
-                                    return (validation_errors, None);
+                                    (validation_errors, None)
                                 }
                             }
                             Err(e) => {
                                 validation_errors.push(X509Error::ValidationError(e.to_string()));
-                                return (validation_errors, None);
+                                (validation_errors, None)
                             }
                         }
                     }
-                    _ => return (validation_errors, None),
+                    _ => (validation_errors, None),
                 }
             } else {
-                return (validation_errors, None);
+                (validation_errors, None)
             }
         } else {
-            return (validation_errors, None);
+            (validation_errors, None)
         }
     }
 }
