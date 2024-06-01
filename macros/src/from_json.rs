@@ -83,7 +83,6 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
         mod #mod_name {
             use serde_json::Value;
             use super::*;
-            use crate::definitions::traits::{FromJson, FromJsonError, FromJsonMap};
             impl FromJson for #ident {
                 fn from_json(value: &Value) -> Result<#ident, FromJsonError> {
                     let map = match value {
@@ -140,7 +139,6 @@ fn unnamed_fields(ident: Ident, mut input: FieldsUnnamed) -> TokenStream {
     let output = quote! {
         mod #mod_name {
             use super::*;
-            use crate::definitions::traits::{FromJson, FromJsonError};
             use serde_json::Value;
             impl FromJson for #ident {
                 fn from_json(value: &Value) -> Result<#ident, FromJsonError> {
