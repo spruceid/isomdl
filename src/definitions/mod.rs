@@ -9,7 +9,10 @@ pub mod mso;
 pub mod namespaces;
 pub mod session;
 pub mod traits;
+pub mod validated_request;
+pub mod validated_response;
 pub mod validity_info;
+pub mod x509;
 
 pub use device_engagement::{
     BleOptions, DeviceEngagement, DeviceRetrievalMethod, NfcOptions, Security, WifiOptions,
@@ -22,4 +25,5 @@ pub use device_signed::{DeviceAuth, DeviceSigned};
 pub use issuer_signed::{IssuerSigned, IssuerSignedItem};
 pub use mso::{DigestAlgorithm, DigestId, DigestIds, Mso};
 pub use session::{SessionData, SessionEstablishment, SessionTranscript180135};
+pub use validated_response::{Status, ValidatedResponse, ValidationErrors};
 pub use validity_info::ValidityInfo;

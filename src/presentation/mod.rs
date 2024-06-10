@@ -1,4 +1,5 @@
 pub mod device;
+pub mod mdoc_auth;
 pub mod reader;
 
 use anyhow::Result;

@@ -5,7 +5,7 @@ use serde_cbor::Error as SerdeCborError;
 /// Errors that can occur when deserialising a DeviceEngagement.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
-    #[error("Expected isomdl version 1.0")]
+    #[error("Expected isomdl major version 1")]
     UnsupportedVersion,
     #[error("Unsupported device retrieval method")]
     UnsupportedDRM,
