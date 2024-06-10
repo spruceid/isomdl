@@ -354,13 +354,11 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             Ok(json!(array_response))
         }
         CborValue::Map(m) => {
-            let mut map_response = BTreeMap::<String, String>::new();
+            let mut map_response = serde_json::Map::<String, Value>::new();
             for (key, value) in m {
                 if let CborValue::Text(k) = key {
                     let parsed = parse_response(value)?;
-                    if let Value::String(x) = parsed {
-                        map_response.insert(k, x);
-                    }
+                    map_response.insert(k, parsed);
                 }
             }
             let json = json!(map_response);
@@ -469,6 +467,32 @@ pub mod test {
         definitions::x509::{error::Error as X509Error, x5chain::X509, X5Chain},
     };
     use anyhow::anyhow;
+    use super::*;
+
+    #[test]
+    fn nested_response_values() {
+        let domestic_driving_privileges = serde_cbor::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
+        let json = parse_response(domestic_driving_privileges).unwrap();
+        let expected = serde_json::json!(
+          [
+            {
+              "domestic_vehicle_class": {
+                "issue_date": "2024-02-14",
+                "expiry_date": "2028-03-11",
+                "domestic_vehicle_class_code": "C ",
+                "domestic_vehicle_class_description": "Class C NON-COMMERCIAL"
+              },
+              "domestic_vehicle_restrictions": [
+                {
+                  "domestic_vehicle_restriction_code": "01",
+                  "domestic_vehicle_restriction_description": "MUST WEAR CORRECTIVE LENSES WHEN DRIVING"
+                }
+              ]
+            }
+          ]
+        );
+        assert_eq!(json, expected)
+    }
 
     static IACA_ROOT: &[u8] = include_bytes!("../../test/presentation/isomdl_iaca_root_cert.pem");
     //TODO fix this cert to contain issuer alternative name
