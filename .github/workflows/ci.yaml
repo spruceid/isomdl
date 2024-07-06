@@ -25,7 +25,7 @@ jobs:
         cargo test
         cd macros
         cargo test
-        cd examples
+        cd ../examples
         cargo test
         cargo run --package isomdl_examples --bin device_and_reader
 
@@ -34,7 +34,7 @@ jobs:
         cargo clippy
         cd macros
         cargo clippy
-        cd examples
+        cd ../examples
         cargo clippy
 
     - name: Fmt
@@ -42,5 +42,5 @@ jobs:
         cargo fmt -- --check
         cd macros
         cargo fmt -- --check
-        cd examples
+        cd ../examples
         cargo fmt -- --check
