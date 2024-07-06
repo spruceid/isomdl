@@ -25,15 +25,22 @@ jobs:
         cargo test
         cd macros
         cargo test
+        cd examples
+        cargo test
+        cargo run --package isomdl_examples --bin device_and_reader
 
     - name: Clippy
       run: |
         cargo clippy
         cd macros
         cargo clippy
+        cd examples
+        cargo clippy
 
     - name: Fmt
       run: |
         cargo fmt -- --check
         cd macros
+        cargo fmt -- --check
+        cd examples
         cargo fmt -- --check

@@ -7,7 +7,7 @@ readme = "README.md"
 homepage = "https://github.com/spruceid/isomdl"
 repository = "https://github.com/spruceid/isomdl"
 license = "Apache-2.0 OR MIT"
-exclude = ["test/"]
+exclude = ["test/", "examples"]
 
 [dependencies]
 anyhow = "1.0"
