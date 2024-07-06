@@ -8,8 +8,8 @@ license = "Apache-2.0 OR MIT"
 exclude = ["test/"]
 
 [[bin]]
-name = "device_and_reader"
-path = "src/device_and_reader.rs"
+name = "simulated_device_and_reader"
+path = "src/simulated_device_and_reader.rs"
 
 [dependencies]
 isomdl = { path = "../" }

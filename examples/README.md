@@ -3,11 +3,11 @@
 # Connection and data exchange between a device and a reader
 
 ```bash
- cargo run --package isomdl_examples --bin device_and_reader
+ cargo run --package isomdl_examples --bin simulated_device_and_reader
 ```
 
-This example demonstrates a connection between a device and a reader.  
-The reader requests the age_over_21 element, and the device responds with that value.
+This example demonstrates a simulated device and reader interaction.  
+The reader requests the `age_over_21` element, and the device responds with that value.
 The flow is as follows:
 
 1. **Device initialization and engagement:**
