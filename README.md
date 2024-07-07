@@ -22,7 +22,6 @@ Here are some examples of how to use the lib.
 
 ### Simulated device and reader interaction
 
-You
 This example demonstrates a simulated device and reader interaction.  
 The reader requests the `age_over_21` element, and the device responds with that value.
 The flow is as follows:
