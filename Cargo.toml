@@ -6,8 +6,9 @@ description = "ISO mDL implementation in Rust"
 readme = "README.md"
 homepage = "https://github.com/spruceid/isomdl"
 repository = "https://github.com/spruceid/isomdl"
+documentation = "https://docs.rs/isomdl"
 license = "Apache-2.0 OR MIT"
-exclude = ["test/", "examples"]
+exclude = ["test/"]
 
 [dependencies]
 anyhow = "1.0"
@@ -50,3 +51,4 @@ rev = "4104505"
 hex = "0.4.3"
 p256 = "0.13.0"
 serde_json = "*"
+

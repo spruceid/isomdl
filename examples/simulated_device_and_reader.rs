@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
@@ -6,12 +5,14 @@ use isomdl::definitions::helpers::NonEmptyMap;
 use isomdl::presentation::device::{Document, Documents, PermittedItems, RequestedItems};
 use isomdl::presentation::{device, reader, Stringify};
 
+use anyhow::{Context, Result};
+
 const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 const NAMESPACE: &str = "org.iso.18013.5.1";
 const AGE_OVER_21_ELEMENT: &str = "age_over_21";
 
 fn main() -> Result<()> {
-    let mdl_encoded = include_str!("../../test/stringified-mdl.txt");
+    let mdl_encoded = include_str!("../test/stringified-mdl.txt");
 
     // Parse the mDL
     let docs = parse_mdl(mdl_encoded)?;
@@ -53,7 +54,7 @@ fn check_for_errors(device_sm: &mut device::SessionManager) -> Result<Option<Vec
     Ok(device_sm.retrieve_response())
 }
 
-/// Parse the mDL encoded string into a [`Documents`] object.
+/// Parse the mDL encoded string into a [Documents] object.
 fn parse_mdl(encoded: &str) -> Result<NonEmptyMap<DocType, Document>> {
     let mdl = Document::parse(encoded.to_string()).context("could not parse mDL")?;
     let docs = Documents::new(DOC_TYPE.to_string(), mdl);

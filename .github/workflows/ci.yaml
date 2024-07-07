@@ -15,32 +15,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Build
-        run: cargo build
+        run: cargo build --all-targets
 
       - name: Run tests
         run: |
           cargo test
           cd macros
           cargo test
-          cd ../examples
-          cargo test
-          cargo run --package isomdl_examples --bin simulated_device_and_reader
+
+          cd ..
+          for example in examples/*.rs
+          do
+            cargo run --example "$(basename "${example%.rs}")" -- $args
+          done
 
       - name: Clippy
         run: |
-          cargo clippy
+          cargo clippy --all-targets
           cd macros
-          cargo clippy
-          cd ../examples
-          cargo clippy
+          cargo clippy --all-targets
 
       - name: Fmt
         run: |
-          cargo fmt -- --check
+          cargo fmt --all -- --check
           cd macros
-          cargo fmt -- --check
-          cd ../examples
-          cargo fmt -- --check
+          cargo fmt --all -- --check
