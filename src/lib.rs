@@ -28,19 +28,25 @@
 //!     - The reader processes the response and prints the value of the `age_over_21` element.
 //! <!-- INCLUDE-RUST: examples/simulated_device_and_reader.rs -->
 //! ```
-//! use anyhow::{Context, Result};
 //! use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
 //! use isomdl::definitions::helpers::NonEmptyMap;
 //! use isomdl::presentation::device::{Document, Documents, PermittedItems, RequestedItems};
 //! use isomdl::presentation::{device, reader, Stringify};
 //! use std::collections::BTreeMap;
 //!
+//! use anyhow::{Context, Result};
+//!
 //! const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 //! const NAMESPACE: &str = "org.iso.18013.5.1";
 //! const AGE_OVER_21_ELEMENT: &str = "age_over_21";
 //!
 //! fn main() -> Result<()> {
+//!     run_simulated_device_and_reader_interaction()
+//! }
+//!
+//! pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
 //!     let mdl_encoded = include_str!("../test/stringified-mdl.txt");
+//!
 //!     // Parse the mDL
 //!     let docs = parse_mdl(mdl_encoded)?;
 //!
@@ -71,7 +77,7 @@
 //! }
 //!
 //! /// Check if there were any errors and sign them if needed, returning the response error.
-//! fn check_for_errors(device_sm: &mut device::SessionManager) -> Result<Option<Vec<u8>>> {
+//! pub fn check_for_errors(device_sm: &mut device::SessionManager) -> Result<Option<Vec<u8>>> {
 //!     while let Some(_to_sign) = device_sm.get_next_signature_payload() {
 //!         // TODO: Implement actual signing mechanism
 //!         device_sm
@@ -82,14 +88,14 @@
 //! }
 //!
 //! /// Parse the mDL encoded string into a [Documents] object.
-//! fn parse_mdl(encoded: &str) -> Result<NonEmptyMap<DocType, Document>> {
+//! pub fn parse_mdl(encoded: &str) -> Result<NonEmptyMap<DocType, Document>> {
 //!     let mdl = Document::parse(encoded.to_string()).context("could not parse mDL")?;
 //!     let docs = Documents::new(DOC_TYPE.to_string(), mdl);
 //!     Ok(docs)
 //! }
 //!
 //! /// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
-//! fn initialize_and_engage_device(
+//! pub fn initialize_and_engage_device(
 //!     docs: Documents,
 //! ) -> Result<(device::SessionManagerEngaged, String)> {
 //!     device::SessionManagerInit::initialise(docs, None, None)
@@ -98,7 +104,7 @@
 //! }
 //!
 //! /// Establishes the reader session from the given QR code and create request for needed elements.
-//! fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u8>)> {
+//! pub fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u8>)> {
 //!     let requested_elements = Namespaces::new(
 //!         NAMESPACE.into(),
 //!         DataElements::new(AGE_OVER_21_ELEMENT.to_string(), false),
@@ -110,7 +116,7 @@
 //! }
 //!
 //! /// The Device accepts request and validates it returning requested items.
-//! fn device_accept_request(
+//! pub fn device_accept_request(
 //!     device_sm_engaged: device::SessionManagerEngaged,
 //!     session_request: Vec<u8>,
 //! ) -> Result<(device::SessionManager, RequestedItems)> {
@@ -122,7 +128,7 @@
 //! }
 //!
 //! // Prepare response with required elements.
-//! fn prepare_device_response(
+//! pub fn prepare_device_response(
 //!     device_sm: &mut device::SessionManager,
 //!     items: RequestedItems,
 //! ) -> Result<Vec<u8>> {
@@ -138,14 +144,13 @@
 //!             .submit_next_signature(vec![1, 2, 3, 4, 5])
 //!             .context("failed to submit signature")?;
 //!     }
-//!     Ok(device_sm
+//!     device_sm
 //!         .retrieve_response()
 //!         .ok_or(anyhow::anyhow!("failed to prepare response"))
-//!         .unwrap())
 //! }
 //!
 //! /// Reader Processing mDL data.
-//! fn reader_handle_device_response(
+//! pub fn reader_handle_device_response(
 //!     reader_sm: &mut reader::SessionManager,
 //!     response: Vec<u8>,
 //! ) -> Result<()> {
