@@ -3,7 +3,7 @@
 //!
 //! # Examples
 //!
-//! This example demonstrates a simulated device and reader interaction.
+//! This example demonstrates a simulated device and reader interaction.  
 //! The reader requests the `age_over_21` element, and the device responds with that value.
 //! The flow is as follows:
 //!

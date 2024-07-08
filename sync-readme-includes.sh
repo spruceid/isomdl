@@ -14,7 +14,7 @@ process_include_blocks() {
     local inside_include_block=0
     local inside_code_block=0
 
-    while IFS= read -r line; do
+      while IFS= read -r line || [ -n "$line" ]; do
         if [[ $inside_include_block -eq 0 && "$line" == *"<!-- INCLUDE-RUST: "* ]]; then
             start_marker="$line"
             include_file=$(echo "$line" | sed -n 's/.*<!-- INCLUDE-RUST: \(.*\) -->.*/\1/p')
