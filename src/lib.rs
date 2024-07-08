@@ -3,7 +3,7 @@
 //!
 //! # Examples
 //!
-//! This example demonstrates a simulated device and reader interaction.  
+//! This example demonstrates a simulated device and reader interaction.
 //! The reader requests the `age_over_21` element, and the device responds with that value.
 //! The flow is as follows:
 //!
@@ -26,7 +26,7 @@
 //!         - The response is encrypted with the device's session key.
 //! 4. Reader Processing mDL data:
 //!     - The reader processes the response and prints the value of the `age_over_21` element.
-//! <!-- INCLUDE-RUST: examples/simulated_device_and_reader.rs -->
+//! <!-- INCLUDE-RUST: ../examples/simulated_device_and_reader.rs -->
 //! ```
 //! use std::sync::{Arc, Mutex};
 //!
