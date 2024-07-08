@@ -16,9 +16,9 @@ For example, you can get the namespaces and elements defined in an mDL:
 cat test/stringified-mdl.txt | cargo run -- get-namespaces -
 ```
 
-## Lib
+## Library
 
-Here are some examples of how to use the lib.
+Here are some examples of how to use the library.
 
 ### Simulated device and reader interaction
 
@@ -172,8 +172,8 @@ fn create_response(
             .into_iter()
             .collect(),
     )]
-    .into_iter()
-    .collect();
+        .into_iter()
+        .collect();
     session_manager.prepare_response(&requested_items, permitted_items);
     let (_, sign_payload) = session_manager.get_next_signature_payload().unwrap();
     let signature: p256::ecdsa::Signature = key.sign(sign_payload);
