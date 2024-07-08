@@ -27,13 +27,15 @@ The reader requests the `age_over_21` element, and the device responds with that
 
 ```mermaid
 sequenceDiagram
-    Device ->>+ Device: Initialize
-    Device -->>- Device: Create QR Code Engagement
-    Device ->>+ Reader: Send QR Code
-    Reader ->> Reader: Establish Session
-    Reader ->>+ Device: Request age_over_21
-    Device -->>- Reader: Send age_over_21
-    Reader -->>- Reader: Process age_over_21
+    autonumber
+    Note over Device: Initialize session
+    Device ->> Device: Create QR Code Engagement
+    Device -) + Reader: Send QR Code
+    Reader ->> - Reader: Establish Session
+    Reader -) + Device: Request age_over_21
+    Device -)- Reader: Send age_over_21
+    Reader ->> Reader: Process age_over_21
+    Note over Device, Reader: Session finished
 ```
 
 The flow is as follows:
