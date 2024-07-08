@@ -48,9 +48,9 @@
 //! }
 //!
 //! pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
-//!     let mdl_encoded = include_str!("../examples_data/stringified-mdl.txt");
+//!     let mdl_encoded = include_str!("../examples/data/stringified-mdl.txt");
 //!     let key: p256::ecdsa::SigningKey =
-//!         p256::SecretKey::from_sec1_pem(include_str!("../examples_data/sec1.pem"))?.into();
+//!         p256::SecretKey::from_sec1_pem(include_str!("../examples/data/sec1.pem"))?.into();
 //!
 //!     // Parse the mDL
 //!     let docs = parse_mdl(mdl_encoded)?;

@@ -83,9 +83,9 @@ fn main() -> Result<()> {
 }
 
 pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
-    let mdl_encoded = include_str!("../examples_data/stringified-mdl.txt");
+    let mdl_encoded = include_str!("../examples/data/stringified-mdl.txt");
     let key: p256::ecdsa::SigningKey =
-        p256::SecretKey::from_sec1_pem(include_str!("../examples_data/sec1.pem"))?.into();
+        p256::SecretKey::from_sec1_pem(include_str!("../examples/data/sec1.pem"))?.into();
 
     // Parse the mDL
     let docs = parse_mdl(mdl_encoded)?;
@@ -172,8 +172,8 @@ fn create_response(
             .into_iter()
             .collect(),
     )]
-        .into_iter()
-        .collect();
+    .into_iter()
+    .collect();
     session_manager.prepare_response(&requested_items, permitted_items);
     let (_, sign_payload) = session_manager.get_next_signature_payload().unwrap();
     let signature: p256::ecdsa::Signature = key.sign(sign_payload);
