@@ -24,6 +24,17 @@ Here are some examples of how to use the lib.
 
 This example demonstrates a simulated device and reader interaction.  
 The reader requests the `age_over_21` element, and the device responds with that value.
+
+```mermaid
+sequenceDiagram
+    Device ->>+ Device: Initialize
+    Device -->>- Device: Create QR Code Engagement
+    Device ->>+ Reader: Send QR Code
+    Reader ->>+ Device: Request age_over_21
+    Device -->>- Reader: Send age_over_21
+    Reader -->>- Reader: Process age_over_21
+```
+
 The flow is as follows:
 
 1. **Device initialization and engagement:**
