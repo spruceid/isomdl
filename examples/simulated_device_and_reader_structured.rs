@@ -38,12 +38,8 @@ fn main() -> Result<()> {
 
 pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
     let mdl_encoded = include_str!("../examples_data/stringified-mdl.txt");
-    let key: Arc<p256::ecdsa::SigningKey> = Arc::new(
-        p256::SecretKey::from_sec1_pem(include_str!("../examples_data/sec1.pem"))
-            .inspect_err(|e| println!("Error: {:?}", e))
-            .unwrap()
-            .into(),
-    );
+    let key: Arc<p256::ecdsa::SigningKey> =
+        Arc::new(p256::SecretKey::from_sec1_pem(include_str!("../examples_data/sec1.pem"))?.into());
 
     // Parse the mDL
     let docs = parse_mdl(mdl_encoded)?;
@@ -62,8 +58,7 @@ pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
         key.clone(),
     )?;
     if request_data.is_none() {
-        println!("Errors sent, terminating.");
-        return Ok(());
+        anyhow::bail!("there were errors processing request");
     }
     let request_data = request_data.unwrap();
 
@@ -97,11 +92,6 @@ fn initialise_session(docs: Documents, uuid: Uuid) -> Result<SessionData> {
 
     let session = device::SessionManagerInit::initialise(docs, Some(drms), None)
         .context("failed to initialize device")?;
-    let mut ble_ident = session
-        .ble_ident()
-        .map(hex::encode)
-        .context("could not encode hex BLE ident")?;
-    ble_ident.insert_str(0, "0x");
 
     let (engaged_state, qr_code_uri) = session
         .qr_engagement()
@@ -171,7 +161,7 @@ fn create_response(session_manager: Arc<SessionManager>) -> Result<Vec<u8>> {
         .unwrap()
         .prepare_response(&session_manager.items_requests, permitted_items);
     sign_pending_and_retrieve_response(session_manager.clone(), Some(1))?
-        .ok_or_else(|| anyhow::anyhow!("no response to return"))
+        .ok_or_else(|| anyhow::anyhow!("cannot prepare response"))
 }
 
 fn sign_pending_and_retrieve_response(

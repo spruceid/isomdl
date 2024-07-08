@@ -1,54 +1,3 @@
-# isomdl
-
-ISO/IEC DIS 18013-5 mDL implementation in Rust.
-
-## CLI tool
-
-This crate contains a CLI tool. Run the `--help` command to see what actions you can perform.
-
-```bash
-cargo run -- --help
-```
-
-For example, you can get the namespaces and elements defined in an mDL:
-
-```bash
-cat test/stringified-mdl.txt | cargo run -- get-namespaces -
-```
-
-## Lib
-
-Here are some examples of how to use the lib.
-
-### Simulated device and reader interaction
-
-This example demonstrates a simulated device and reader interaction.  
-The reader requests the `age_over_21` element, and the device responds with that value.
-The flow is as follows:
-
-1. **Device initialization and engagement:**
-    - The device creates a QR code containing `DeviceEngagement` data, which includes its public key.
-    - Internally:
-        - The device initializes with the mDL data, private key, and public key.
-2. **Reader processing QR and requesting needed fields:**
-    - The reader processes the QR code and creates a request for the `age_over_21` element.
-    - Internally:
-        - Generates its private and public keys.
-        - Initiates a key exchange, and generates the session keys.
-        - The request is encrypted with the reader's session key.
-3. **Device accepting request and responding:**
-    - The device receives the request and creates a response with the `age_over_21` element.
-    - Internally:
-        - Initiates the key exchange, and generates the session keys.
-        - Decrypts the request with the reader's session key.
-        - Parse and validate it creating error response if needed.
-        - The response is encrypted with the device's session key.
-4. **Reader Processing mDL data:**
-    - The reader processes the response and prints the value of the `age_over_21` element.
-
-<!-- INCLUDE-RUST: examples/simulated_device_and_reader_basic.rs -->
-
-```rust
 use anyhow::{anyhow, Context, Result};
 use signature::{SignatureEncoding, Signer};
 use uuid::Uuid;
@@ -180,4 +129,3 @@ fn reader_handle_device_response(
     println!("{:?}", res);
     Ok(())
 }
-```
