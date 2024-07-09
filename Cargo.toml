@@ -8,7 +8,7 @@ homepage = "https://github.com/spruceid/isomdl"
 repository = "https://github.com/spruceid/isomdl"
 documentation = "https://docs.rs/isomdl"
 license = "Apache-2.0 OR MIT"
-exclude = ["test/", "examples_data/"]
+exclude = ["test/"]
 
 [dependencies]
 anyhow = "1.0"

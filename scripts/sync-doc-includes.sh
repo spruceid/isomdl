@@ -33,7 +33,7 @@ process_include_blocks() {
               echo "$line" >> "$temp_file"
               inside_include_block=0
               inside_code_block=0
-          elif [[ $inside_include_block -eq 1 && "$line" == '//! ```' ]]; then
+          elif [[ $inside_include_block -eq 1 && "$line" == '//! ```'* ]]; then
               echo "$line" >> "$temp_file"
               echo "$include_content" >> "$temp_file"
               inside_code_block=1
