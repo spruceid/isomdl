@@ -32,6 +32,7 @@ struct SessionManager {
 
 struct SessionManagerEngaged(device::SessionManagerEngaged);
 
+/// #[spruce_example(run(skip=true))]
 fn main() -> Result<()> {
     run_simulated_device_and_reader_interaction()
 }

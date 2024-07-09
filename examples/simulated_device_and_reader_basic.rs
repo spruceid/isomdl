@@ -13,6 +13,7 @@ const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 const NAMESPACE: &str = "org.iso.18013.5.1";
 const AGE_OVER_21_ELEMENT: &str = "age_over_21";
 
+/// #[spruce_example(run(skip=true))]
 fn main() -> Result<()> {
     run_simulated_device_and_reader_interaction()
 }

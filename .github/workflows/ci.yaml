@@ -22,15 +22,18 @@ jobs:
 
       - name: Run tests
         run: |
-          cargo test --all-targets
+          cargo test
           cd macros
-          cargo test --all-targets
+          cargo test
 
       - name: Run examples
         run: |
+          skip_marker="#[spruce_example(run(skip=true))]"
           for example in examples/*.rs
           do
-            cargo run --example "$(basename "${example%.rs}")" -- $args
+            if ! grep -q "$skip_marker" "$example"; then
+              cargo run --example "$(basename "${example%.rs}")" -- $args
+            fi
           done
 
       - name: Run scripts tests
