@@ -4,14 +4,20 @@ set -e
 
 # Function to process each include block
 process_include_blocks() {
+    local start_path=$1
     local start_marker
     local include_file
     local include_content
     local inside_include_block=0
     local inside_code_block=0
 
+    cd "$start_path" || exit
+
     find . -type f -name "*.rs" | while read -r file; do
       file=$(realpath "$file")
+      if ! grep -q '<!-- INCLUDE-RUST' "$file"; then
+          continue
+      fi
       parent_dir=$(dirname "$file")
 
       # Set the current directory to the parent directory of the file
@@ -50,9 +56,8 @@ process_include_blocks() {
       # Return to the original directory to continue the loop
       cd - > /dev/null
     done
-
 }
 
-process_include_blocks
+START_PATH=$1
+process_include_blocks "$START_PATH"
 
-cargo fmt -- src/lib.rs

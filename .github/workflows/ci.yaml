@@ -26,20 +26,56 @@ jobs:
           cd macros
           cargo test
 
+      - name: Run examples
+        run: |
           cd ..
           for example in examples/*.rs
           do
             cargo run --example "$(basename "${example%.rs}")" -- $args
           done
 
+      - name: Run scripts tests
+        run: |
+          test_sync_md_includes() {
+          RED='\033[0;31m'
+          local tmp="/tmp/test-md-includes"
+          rm -rf "$tmp"
+          local marker="test-42-42-42"
+          mkdir "$tmp"
+          echo "$marker" > "$tmp/test.rs"
+          echo "<!-- INCLUDE-RUST: $tmp/test.rs -->" > "$tmp/test.md"
+            echo '```rust' >> "$tmp/test.md"
+            echo '```' >> "$tmp/test.md"
+            ./scripts/sync-md-includes.sh "$tmp/test.md"
+            if ! grep -q "$marker" "$tmp/test.md"; then
+          echo "${RED}test failed: test_sync_md_includes"
+            exit 1
+            fi
+          }
+          test_sync_md_includes
+          
+          test_sync_rustdoc_includes() {
+          RED='\033[0;31m'
+          local tmp="/tmp/test-md-includes"
+          rm -rf "$tmp"
+          local marker="test-42-42-42"
+          mkdir "$tmp"
+          echo "$marker" > "$tmp/test.rs"
+          echo "//! <!-- INCLUDE-RUST: $tmp/test.rs -->" > "$tmp/test2.rs"
+            echo '/! ```' >> "$tmp/test2.rs"
+            echo '//! ```' >> "$tmp/test2.rs"
+            ./scripts/sync-rustdoc-includes.sh "$tmp"
+            if ! grep -q "$marker" "$tmp/test2.rs"; then
+          echo "${RED}test failed: test_sync_rustdoc_includes"
+            exit 1
+            fi
+          }
+          test_sync_rustdoc_includes
+
       - name: Clippy
         run: |
-          cargo clippy --all-targets
-          cd macros
           cargo clippy --all-targets
 
       - name: Fmt
         run: |
-          cargo fmt --all -- --check
-          cd macros
           cargo fmt --all -- --check

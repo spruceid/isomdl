@@ -18,7 +18,7 @@ process_include_blocks() {
         if [[ $inside_include_block -eq 0 && "$line" == *"<!-- INCLUDE-RUST: "* ]]; then
             start_marker="$line"
             include_file=$(echo "$line" | sed -n 's/.*<!-- INCLUDE-RUST: \(.*\) -->.*/\1/p')
-            echo "Processing include block for: $include_file"
+            echo "Processing '$readme_path' include block for: $include_file"
             include_content=$(<"$include_file")
             echo "$start_marker" >> "$temp_file"
             inside_include_block=1
@@ -36,7 +36,7 @@ process_include_blocks() {
     done < "$readme_path"
 }
 
-IN_FILE="README.md"
+IN_FILE=$1
 TEMP_FILE=$(mktemp)
 # Call the function to process the include blocks
 process_include_blocks "$IN_FILE" "$TEMP_FILE"

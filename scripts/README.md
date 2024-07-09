@@ -1,38 +1,44 @@
 Some useful scripts.
 
-# sync-readme-includes.sh
+# sync-md-includes.sh
 
-Useful to include code in blocks from README.md file.
-This helps to keep the README.md file updated with the code in the source files without manual copy-pasting.  
+Useful to include code in code blocks from `makrdown` (`.md`) files, like `README.md.`  
+This helps to keep the `README.md` file updated with the code in the source files without manual copy-pasting.  
 For example, if you have this:
 
 ```
-<!-- INCLUDE-RUST: examples/simulated_device_and_reader_basic.rs -->
+<!-- INCLUDE-RUST: path-to-file-relative-to-md-file -->
 
     ```rust
-    
     ```
 ```
 
-It will include the content of the `examples/simulated_device_and_reader_basic.rs` file in the code block below
+It will include the content of the file in the code block below
+the `INCLUDE-RUST`. Path to include is relative to the files where the `INCLUDE-RUST` is located.  
+It will keep the `INCLUDE-RUST` marker in the file, so you can run the script again to update the content.
+
+You need to specify the path to `md` file
+
+```bash
+sync-md-includes.sh README.md
+```
+
+# sync-rustdoc-includes.sh
+
+Similar as above just for `rustdoc`. If you have this:
+
+```
+//! <!-- INCLUDE-RUST: path-to-file-relative-to-rs-file -->
+//! ```
+//! ```
+```
+
+It will include the content of the file in the code block below
 the `INCLUDE-RUST`.  
 It will keep the `INCLUDE-RUST` marker in the file, so you can run the script again to update the content.
 
-**Run in the same folder where the README.md file is located.**
+You need to specify the start directory, and it will run on all `.rs` files recursively.
 
-# sync-doc-includes.sh
-
-Similar as above just for rustdoc comments. If you have this:
-
+```bash
+sync-rustdoc-includes.sh .
 ```
-//! <!-- INCLUDE-RUST: ../examples/simulated_device_and_reader_basic.rs -->
-//! ```
-
-//! ```
-```
-
-It will include the content of the `examples/simulated_device_and_reader_basic.rs` file in the code block below
-the `INCLUDE-RUST`.  
-It will keep the `INCLUDE-RUST` marker in the file, so you can run the script again to update the content.
-
-**Run in the root folder, it will run on all `.rs` files recursively.**
