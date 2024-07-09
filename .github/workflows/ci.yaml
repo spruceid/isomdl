@@ -22,13 +22,12 @@ jobs:
 
       - name: Run tests
         run: |
-          cargo test
+          cargo test --all-targets
           cd macros
-          cargo test
+          cargo test --all-targets
 
       - name: Run examples
         run: |
-          cd ..
           for example in examples/*.rs
           do
             cargo run --example "$(basename "${example%.rs}")" -- $args
