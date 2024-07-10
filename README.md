@@ -18,7 +18,8 @@ cat test/stringified-mdl.txt | cargo run -- get-namespaces -
 
 ## Library
 
-Here are some examples of how to use the library.
+Here are some examples of how to use the library. You can see more in [examples](examples) folder and read about in the
+dedicated [README](examples/README.md).
 
 ### Simulated device and reader interaction
 
