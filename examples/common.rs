@@ -14,6 +14,7 @@ const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 const NAMESPACE: &str = "org.iso.18013.5.1";
 const AGE_OVER_21_ELEMENT: &str = "age_over_21";
 
+/// #[spruce_example(ignore)]
 #[allow(dead_code)]
 fn main() {}
 
