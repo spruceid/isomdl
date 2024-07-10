@@ -1,32 +1,38 @@
-#![doc(test(attr(deny(warnings))))]
-//! ISO/IEC DIS 18013-5 mDL implementation in Rust.
+//! [ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) `mDL` implementation in Rust.
+//!
+//! It is intended to be used in creating apps for devices and readers that can interact with each other to exchange `mDL` data.
+//!
+//! Here are some examples of how to use the library. You can see more in [examples](examples) folder and read about in the dedicated [README](examples/README.md).
 //!
 //! # Examples
 //!
+//! ## Simulated device and reader interaction
+//!
 //! This example demonstrates a simulated device and reader interaction.  
 //! The reader requests the `age_over_21` element, and the device responds with that value.
+//!
 //! The flow is as follows:
 //!
-//! 1. Device initialization and engagement:
-//!     - The device creates a QR code containing `DeviceEngagement` data, which includes its public key.
+//! **1. Device initialization and engagement:**
+//!     - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
 //!     - Internally:
-//!         - The device initializes with the mDL data, private key, and public key.
-//! 2. Reader processing QR and requesting needed fields:
-//!     - The reader processes the QR code and creates a request for the `age_over_21` element.
+//!         - The device initializes with the `mDL` data, private key, and public key.
+//! **2. Reader processing QR code and requesting needed fields:**
+//!     - The reader processes the `QR code` and creates a request for the `age_over_21` element.
 //!     - Internally:
 //!         - Generates its private and public keys.
 //!         - Initiates a key exchange, and generates the session keys.
 //!         - The request is encrypted with the reader's session key.
-//! 3. Device accepting request and responding:
+//! **3. Device accepting request and responding:**
 //!     - The device receives the request and creates a response with the `age_over_21` element.
 //!     - Internally:
 //!         - Initiates the key exchange, and generates the session keys.
 //!         - Decrypts the request with the reader's session key.
 //!         - Parse and validate it creating error response if needed.
 //!         - The response is encrypted with the device's session key.
-//! 4. Reader Processing mDL data:
+//! **4. Reader Processing mDL data:**
 //!     - The reader processes the response and prints the value of the `age_over_21` element.
-//!
+    //!
 //! ## Device perspective
 //!
 //! The reader is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
