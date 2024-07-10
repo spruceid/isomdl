@@ -32,7 +32,7 @@
 //!         - The response is encrypted with the device's session key.
 //! **4. Reader Processing mDL data:**
 //!     - The reader processes the response and prints the value of the `age_over_21` element.
-    //!
+//!
 //! ## Device perspective
 //!
 //! The reader is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
