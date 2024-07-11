@@ -194,7 +194,7 @@
 //! From the reader's perspective, the flow is simpler.
 //! Now the device is simulated in `common` module (you can find the code in `examples`),
 //! and we focus on the code from the
-//! reader perspective. The code is considerably shorter.
+//! reader's perspective. The code is considerably shorter.
 //!
 //! ```mermaid
 //! stateDiagram
