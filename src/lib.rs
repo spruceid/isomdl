@@ -1,17 +1,33 @@
 //! [ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) `mDL` implementation in Rust.
 //!
-//! It is intended to be used in creating apps for devices and readers that can interact with each other to exchange `mDL` data.
-//!
-//! Here are some examples of how to use the library. You can see more in [examples](examples) folder and read about in the dedicated [README](examples/README.md).
+//! It is intended
+//! to be used
+//! in creating apps for `Devices` and `Readers` that can interact with each other to exchange `mDL`
+//! data.
 //!
 //! # Examples
+//! 
+//! # Simulated Device` and `Reader` interaction
 //!
-//! ## Simulated device and reader interaction
+//! Here are examples of how to use the library. You can see more in [examples](examples) folder and read about in the dedicated [README](examples/README.md).
+//! Here are examples of how to use the library.
+//! You can see more in `examples`
+//! directory and read about in the dedicated `examples/README.md`.
 //!
 //! This example demonstrates a simulated device and reader interaction.  
 //! The reader requests the `age_over_21` element, and the device responds with that value.
+//! The flow is something like this:
 //!
-//! The flow is as follows:
+//! ```plaintext
+//! Device: Initialize session
+//! Device: Create QR Code Engagement
+//! Device -) + Reader: Send QR Code
+//! Reader: Establish Session
+//! Reader -) + Device: Request age_over_21
+//! Device -)- Reader: Send age_over_21
+//! Reader: Process age_over_21
+//! Session finished
+//! ```
 //!
 //! **1. Device initialization and engagement:**
 //!     - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
@@ -35,6 +51,18 @@
 //!
 //! ## Device perspective
 //!
+//! There are several states through which the device goes during the interaction:
+//! ```plaintext
+//! *: initialise
+//! SessionManagerInit --> SessionManagerEngaged: qr_engagement
+//! SessionManagerEngaged --> SessionManager: process_session_establishment
+//! SessionManager --> SessionManager_request: handle_request
+//! SessionManager_request --> SessionManager3_response: prepare_response
+//! SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
+//! SessionManager3_sign --> SessionManager3_sign: submit_next_signature
+//! SessionManager3_sign --> SessionManager3_respond: retrieve_response
+//! SessionManager3_respond --> SessionManager: handle_request
+//! ```
 //! The reader is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
 //! device perspective.
 //!
