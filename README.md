@@ -74,8 +74,7 @@ stateDiagram
     User --> SessionManagerInit: initialise
     SessionManagerInit --> SessionManagerEngaged: qr_engagement
     SessionManagerEngaged --> SessionManager: process_session_establishment
-    SessionManager --> SessionManager_request: handle_request
-    SessionManager_request --> SessionManager3_response: prepare_response
+    SessionManager --> SessionManager3_response: prepare_response
     SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
     SessionManager3_sign --> SessionManager3_sign: submit_next_signature
     SessionManager3_sign --> SessionManager: retrieve_response
