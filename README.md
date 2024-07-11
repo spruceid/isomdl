@@ -78,8 +78,7 @@ stateDiagram
     SessionManager_request --> SessionManager3_response: prepare_response
     SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
     SessionManager3_sign --> SessionManager3_sign: submit_next_signature
-    SessionManager3_sign --> SessionManager3_respond: retrieve_response
-    SessionManager3_respond --> SessionManager: handle_request
+    SessionManager3_sign --> SessionManager: retrieve_response
 ```
 
 The reader is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
