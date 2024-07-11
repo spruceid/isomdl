@@ -57,11 +57,12 @@
 //! stateDiagram
 //! User --> SessionManagerInit: initialise
 //! SessionManagerInit --> SessionManagerEngaged: qr_engagement
-//! SessionManagerEngaged --> SessionManager: process_session_establishment
-//! SessionManager --> SessionManager3_response: prepare_response
-//! SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
-//! SessionManager3_sign --> SessionManager3_sign: submit_next_signature
-//! SessionManager3_sign --> SessionManager: retrieve_response
+//! SessionManagerEngaged --> SessionManager_AwaitingRequest: process_session_establishment
+//! SessionManager_AwaitingRequest --> SessionManager_Signing: prepare_response
+//! SessionManager_Signing --> SessionManager_Signing: get_next_signature_payload
+//! SessionManager_Signing --> SessionManager_ReadyToRespond: submit_next_signature
+//! SessionManager_ReadyToRespond --> SessionManager_AwaitingRequest: retrieve_response
+//! SessionManager_AwaitingRequest --> SessionManager_Signing: handle_request
 //! ```
 //!
 //! The reader is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
