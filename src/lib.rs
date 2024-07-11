@@ -6,7 +6,7 @@
 //! data.
 //!
 //! # Examples
-//! 
+//!
 //! # Simulated Device` and `Reader` interaction
 //!
 //! Here are examples of how to use the library. You can see more in [examples](examples) folder and read about in the dedicated [README](examples/README.md).
