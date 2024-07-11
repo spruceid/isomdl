@@ -42,6 +42,32 @@ sequenceDiagram
 4. **Reader Processing mDL data:**
     - The reader processes the response and prints the value of the `age_over_21` element.
 
+### Device perspective
+
+There are several states through which the device goes during the interaction:
+
+```mermaid
+stateDiagram
+    User --> SessionManagerInit: initialise
+    SessionManagerInit --> SessionManagerEngaged: qr_engagement
+    SessionManagerEngaged --> SessionManager: process_session_establishment
+    SessionManager --> SessionManager3_response: prepare_response
+    SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
+    SessionManager3_sign --> SessionManager3_sign: submit_next_signature
+    SessionManager3_sign --> SessionManager: retrieve_response
+```
+
+##### Reader perspective
+
+From the reader's perspective, the flow is simpler:
+
+```mermaid
+stateDiagram
+    Device --> SessionManager: establish_session
+    SessionManager --> SessionManager_response: handle_response
+    SessionManager_response --> SessionManager: new_request
+```
+
 There are several examples:
 
 - full flow of the interaction:
