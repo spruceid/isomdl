@@ -23,7 +23,9 @@ cat test/stringified-mdl.txt | cargo run -- get-namespaces -
 Here are some examples of how to use the library. You can see more in [examples](examples) folder and read about in the
 dedicated [README](examples/README.md).
 
-### Simulated device and reader interaction
+### Eamples
+
+#### Simulated device and reader interaction
 
 This example demonstrates a simulated device and reader interaction.  
 The reader requests the `age_over_21` element, and the device responds with that value.
@@ -63,7 +65,22 @@ sequenceDiagram
 4. **Reader Processing mDL data:**
     - The reader processes the response and prints the value of the `age_over_21` element.
 
-#### Device perspective
+##### Device perspective
+
+There are several states through which the device goes during the interaction:
+
+```mermaid
+stateDiagram
+    User --> SessionManagerInit: initialise
+    SessionManagerInit --> SessionManagerEngaged: qr_engagement
+    SessionManagerEngaged --> SessionManager: process_session_establishment
+    SessionManager --> SessionManager_request: handle_request
+    SessionManager_request --> SessionManager3_response: prepare_response
+    SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
+    SessionManager3_sign --> SessionManager3_sign: submit_next_signature
+    SessionManager3_sign --> SessionManager3_respond: retrieve_response
+    SessionManager3_respond --> SessionManager: handle_request
+```
 
 The reader is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
 device perspective.
@@ -190,7 +207,16 @@ fn create_signing_key() -> Result<p256::ecdsa::SigningKey> {
 }
 ```
 
-#### Reader perspective
+##### Reader perspective
+
+From the reader's perspective, the flow is simpler:
+
+```mermaid
+stateDiagram
+    Device --> SessionManager: establish_session
+    SessionManager --> SessionManager_response: handle_response
+    SessionManager_response --> SessionManager: new_request
+```
 
 Now the device is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
 reader perspective. The code is
