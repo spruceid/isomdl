@@ -7,7 +7,7 @@
 //!
 //! # Examples
 //!
-//! # Simulated Device` and `Reader` interaction
+//! ## Simulated Device` and `Reader` interaction
 //!
 //! Here are examples of how to use the library. You can see more in [examples](examples) folder and read about in the dedicated [README](examples/README.md).
 //! Here are examples of how to use the library.
@@ -49,7 +49,7 @@
 //! **4. Reader Processing mDL data:**
 //!     - The reader processes the response and prints the value of the `age_over_21` element.
 //!
-//! ## Device perspective
+//! ### Device perspective
 //!
 //! There are several states through which the device goes during the interaction:
 //! ```plaintext
@@ -188,7 +188,7 @@
 //! }
 //! ```
 //!
-//! ## Reader perspective
+//! ### Reader perspective
 //!
 //! Now the device is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
 //! reader perspective. The code is considerably shorter.
