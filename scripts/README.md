@@ -6,7 +6,7 @@ Useful to include code in code blocks from `markdown` (`.md`) files, like `READM
 This helps to keep the `README.md` file updated with the code in the source files without manually copy-pasting.  
 For example, if you have this:
 
-```
+```markdown
 <!-- INCLUDE-RUST: path-relative-to-md-file -->
 
     ```rust
@@ -27,7 +27,7 @@ sync-md-includes.sh README.md
 
 Similar to the above just for `rustdoc`s. If you have this:
 
-```
+```rust
 //! <!-- INCLUDE-RUST: path-to-file-relative-to-rs-file -->
 //! ```
 //! ```
