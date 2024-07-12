@@ -28,10 +28,14 @@ pub struct Document {
     pub errors: Option<Errors>,
 }
 
+/// Errors mapped by namespace and element identifier.
 pub type Errors = NonEmptyMap<String, NonEmptyMap<String, DocumentErrorCode>>;
+/// A list of document errors.
 pub type DocumentErrors = NonEmptyVec<DocumentError>;
+/// A map of document type to document error for them.
 pub type DocumentError = BTreeMap<String, DocumentErrorCode>;
 
+/// Document specific errors.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "i128", into = "i128")]
 pub enum DocumentErrorCode {

@@ -84,7 +84,7 @@ fn parse_mdl(encoded: &str) -> Result<NonEmptyMap<DocType, Document>> {
     Ok(docs)
 }
 
-/// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
+/// Creates a QR code containing [DeviceEngagement] data, which includes its public key.
 fn initialise_session(docs: Documents, uuid: Uuid) -> Result<SessionData> {
     let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
         peripheral_server_mode: None,

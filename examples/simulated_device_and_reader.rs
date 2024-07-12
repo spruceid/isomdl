@@ -40,7 +40,7 @@ pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
     Ok(())
 }
 
-/// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
+/// Creates a QR code containing [DeviceEngagement] data, which includes its public key.
 fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
     // Parse the mDL
     let docs = parse_mdl()?;

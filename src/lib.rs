@@ -2,12 +2,12 @@
 //!
 //! It is intended
 //! to be used
-//! in creating apps for `Devices` and `Readers` that can interact with each other to exchange `mDL`
+//! in creating apps for **Devices** and **Readers** that can interact with each other to exchange **mDL**
 //! data.
 //!
 //! # Examples
 //!
-//! ## Simulated Device` and `Reader` interaction
+//! ## Simulated **Device** and **Reader** interaction
 //!
 //! Here are examples of how to use the library. You can see more in [examples](examples) folder and read about in the dedicated [README](examples/README.md).
 //! Here are examples of how to use the library.
@@ -30,10 +30,10 @@
 //! ```
 //!
 //! 1. **Device initialization and engagement:**
-//!     - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
+//!     - The device creates a QR code containing `DeviceEngagement` data, which includes its public key.
 //!     - Internally:
-//!         - The device initializes with the `mDL` data, private key, and public key.
-//! 2. **Reader processing `QR code` and requesting needed fields:**
+//!         - The device initializes with the mDL data, private key, and public key.
+//! 2. **Reader processing QR and requesting needed fields:**
 //!     - The reader processes the QR code and creates a request for the `age_over_21` element.
 //!     - Internally:
 //!         - Generates its private and public keys.
@@ -122,7 +122,7 @@
 //!     Ok(docs)
 //! }
 //!
-//! /// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
+//! /// Creates a QR code containing [DeviceEngagement] data, which includes its public key.
 //! fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
 //!     // Parse the mDL
 //!     let docs = parse_mdl()?;
@@ -195,7 +195,7 @@
 //! From the reader's perspective, the flow is simpler.
 //! Now the device is simulated in `common` module (you can find the code in `examples`),
 //! and we focus on the code from the
-//! reader's perspective. The code is considerably shorter.
+//! reader perspective. The code is considerably shorter.
 //!
 //! ```mermaid
 //! stateDiagram

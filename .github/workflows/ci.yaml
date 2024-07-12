@@ -65,7 +65,7 @@ jobs:
               echo -e "${Red}failed: test_sync_md_includes${NC}"
               exit 1
             fi
-            echo "${Green}ok${NC}"
+            echo -e "${Green}ok${NC}"
           }
           test_sync_md_includes
           
@@ -91,7 +91,7 @@ jobs:
               echo -e "${Red}failed: test_sync_rustdoc_includes${NC}"
               exit 1
             fi
-            echo "${Green}ok${NC}"
+            echo -e "${Green}ok${NC}"
           }
           test_sync_rustdoc_includes
 

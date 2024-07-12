@@ -27,7 +27,7 @@ pub fn parse_mdl() -> Result<NonEmptyMap<DocType, Document>> {
     Ok(docs)
 }
 
-/// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
+/// Creates a QR code containing [DeviceEngagement] data, which includes its public key.
 #[allow(dead_code)]
 pub fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
     // Parse the mDL

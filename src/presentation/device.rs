@@ -1,3 +1,19 @@
+//! This module is responsible for the device's interaction with the reader.
+//!
+//! It handles this through **State pattern**.
+//!
+//! There are several states and transitions during the interaction:
+//!
+//! ```mermaid
+//! User: initialise
+//! SessionManagerInit --> SessionManagerEngaged: qr_engagement
+//! SessionManagerEngaged --> SessionManager: process_session_establishment
+//! SessionManager --> SessionManager_request: handle_request
+//! SessionManager_request --> SessionManager3_response: prepare_response
+//! SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
+//! SessionManager3_sign --> SessionManager3_sign: submit_next_signature
+//! SessionManager3_sign --> SessionManager: retrieve_response
+//! ```
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -26,6 +42,12 @@ use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
 
+/// Initialisation state.
+///
+/// It receives the documents and stores the ephemeral generated device key,
+/// and the device engagement.  
+/// This is the first state that starts the interaction.
+/// You enter this state by calling [SessionManagerInit::initialise].
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
@@ -33,6 +55,10 @@ pub struct SessionManagerInit {
     device_engagement: Tag24<DeviceEngagement>,
 }
 
+/// Engaged state.
+///
+/// Transition to this state is [SessionManagerInit::qr_engagement].
+/// That creates the `QR code` that the reader will use to establish the session.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
     documents: Documents,
@@ -41,6 +67,10 @@ pub struct SessionManagerEngaged {
     handover: Handover,
 }
 
+/// The state where handling requests from the reader and responding to them happens.
+///
+/// This can consist of several request-response cycles.  
+/// Transition to this state is [SessionManagerEngaged::process_session_establishment].
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManager {
     documents: Documents,
@@ -52,32 +82,45 @@ pub struct SessionManager {
     state: State,
 }
 
+/// The internal state of the [SessionManager].
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub enum State {
+    /// This is the default one where the device is waiting for a request from the reader.
     #[default]
     AwaitingRequest,
+    /// The device is signing the response. The response could be a document or an error.
     Signing(PreparedDeviceResponse),
+    /// The device is ready to respond to the reader with a signed response.
     ReadyToRespond(Vec<u8>),
 }
 
+/// Various errors that can occur during the interaction with the reader.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Unable to generate ephemeral key.
     #[error("unable to generate ephemeral key: {0}")]
     EKeyGeneration(session::Error),
+    /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
     Tag24CborEncoding(tag24::Error),
+    /// Unable to generate shared secret.
     #[error("unable to generate shared secret: {0}")]
     SharedSecretGeneration(anyhow::Error),
+    /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
     CborEncoding(serde_cbor::Error),
+    /// Session manager was used incorrectly.
     #[error("session manager was used incorrectly")]
     ApiMisuse,
+    /// Could not parse age attestation claim.
     #[error("could not parse age attestation claim")]
     ParsingError(#[from] ParseIntError),
+    /// `age_over` element identifier is malformed.
     #[error("age_over element identifier is malformed")]
     PrefixError,
 }
 
+/// The documents the device owns.
 pub type Documents = NonEmptyMap<DocType, Document>;
 type DocType = String;
 
@@ -90,6 +133,15 @@ pub struct Document {
     pub namespaces: Namespaces,
 }
 
+/// Stores the prepared response.
+///
+/// After the device parses the request from the reader,
+/// If there were errors,
+/// it will prepare a list of [DocumentErrors].  
+/// If there are documents to be signed,
+/// it will keep a list of [PreparedDocument]
+/// which needs to be signed with [SessionManager::get_next_signature_payload] and [SessionManager::submit_next_signature].
+/// After those are signed, they are kept in a list of [DeviceResponseDoc]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedDeviceResponse {
     prepared_documents: Vec<PreparedDocument>,
@@ -108,15 +160,23 @@ struct PreparedDocument {
     errors: Option<NamespaceErrors>,
 }
 
+/// Elements in a namespace.
 type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
 type Namespace = String;
 type ElementIdentifier = String;
 
+/// A list of the requested items by the reader.
 pub type RequestedItems = Vec<ItemsRequest>;
+/// The lis of items that are permitted to be shared grouped by document type and namespace.
 pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdentifier>>>;
 
 impl SessionManagerInit {
     /// Initialise the SessionManager.
+    ///
+    /// This is the first transition in the flow interaction.  
+    /// Internally, it generates the ephemeral key and creates the device engagement.
+    ///
+    /// It transition to [SessionManagerInit] state.
     pub fn initialise(
         documents: Documents,
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
@@ -150,7 +210,9 @@ impl SessionManagerInit {
         super::calculate_ble_ident(&self.device_engagement.as_ref().security.1)
     }
 
-    /// Begin device engagement using QR code.
+    /// Begins the device engagement using **QR code**.
+    ///
+    /// The response contains the device's public key and engagement data.
     pub fn qr_engagement(self) -> anyhow::Result<(SessionManagerEngaged, String)> {
         let qr_code_uri = self.device_engagement.to_qr_code_uri()?;
         let sm = SessionManagerEngaged {
@@ -164,6 +226,14 @@ impl SessionManagerInit {
 }
 
 impl SessionManagerEngaged {
+    /// It transitions to [SessionManager] state
+    /// by processing the [SessionEstablishment] received from the reader.
+    ///     
+    /// Internally, it generates the session keys based on the calculated shared secret
+    /// (using **Diffie–Hellman key exchange**).
+    ///
+    /// Along with transitioning to [SessionManagerEngaged] state,
+    /// it returns the requested items by the reader.
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
@@ -235,6 +305,21 @@ impl SessionManager {
             .collect())
     }
 
+    /// When the device is ready to respond, it prepares the response specifying the permitted items.
+    ///  
+    /// It changes the internal state to [State::Signing],
+    /// and you need
+    /// to call [SessionManager::get_next_signature_payload] and then [SessionManager::submit_next_signature]
+    /// to sign the documents.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// session_manager.prepare_response(&requested_items, permitted_items);
+    /// let (_, payload)) = session_manager.get_next_signature_payload()?;
+    /// let signature = sign(&payload);
+    /// session_manager.submit_next_signature(signature);
+    /// ```
     pub fn prepare_response(&mut self, requests: &RequestedItems, permitted: PermittedItems) {
         let prepared_response = DeviceSession::prepare_response(self, requests, permitted);
         self.state = State::Signing(prepared_response);
@@ -267,13 +352,30 @@ impl SessionManager {
         Ok(request)
     }
 
-    /// Handle a request from the reader.
+    /// Handle a new request from the reader.
+    ///
+    /// The request is expected to be a [CBOR](https://cbor.io)
+    /// encoded [SessionData] and encrypted.
+    /// It will parse and validate it.
+    ///
+    /// It returns the requested items by the reader.
     pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
         let session_data: SessionData = serde_cbor::from_slice(request)?;
         self.handle_decoded_request(session_data)
     }
 
-    /// Get next payload for signing.
+    /// When there are documents to be signed, it will return then next one for signing.
+    ///
+    /// After signed, you need to call [SessionManager::submit_next_signature].
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// while let Some((_, payload)) = session_manager.get_next_signature_payload()? {
+    ///     let signature = sign(&payload);
+    ///     session_manager.submit_next_signature(signature);
+    /// }
+    /// ```
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         match &self.state {
             State::Signing(p) => p.get_next_signature_payload(),
@@ -281,7 +383,20 @@ impl SessionManager {
         }
     }
 
-    /// Submit the externally signed signature.
+    /// Submit the externally signed signature for object
+    /// returned by [SessionManager::get_next_signature_payload].
+    ///
+    /// After all documents are signed, you can call [SessionManager::retrieve_response]
+    /// to get the response that can then be sent to the reader.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// while let Some((_, payload)) = session_manager.get_next_signature_payload()? {
+    ///     let signature = sign(&payload);
+    ///     session_manager.submit_next_signature(signature);
+    /// }
+    /// ```
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) -> anyhow::Result<()> {
         if matches!(self.state, State::Signing(_)) {
             match std::mem::take(&mut self.state) {
@@ -319,12 +434,19 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Identifies that the response is ready.
+    /// Identifies if the response is ready.
+    ///  
+    /// The internal state is [State::ReadyToRespond] in this returns `true`.
     pub fn response_ready(&self) -> bool {
         matches!(self.state, State::ReadyToRespond(_))
     }
 
-    /// Retrieve the completed response.
+    /// Retrieves the prepared response.
+    ///
+    /// Will return [Some] after all documents have been signed.
+    /// In that case, it will return the response
+    /// and change the internal state to [State::AwaitingRequest]
+    /// where it can accept new a request from the reader.
     pub fn retrieve_response(&mut self) -> Option<Vec<u8>> {
         if self.response_ready() {
             // Replace state with AwaitingRequest.
@@ -352,17 +474,20 @@ impl PreparedDeviceResponse {
 
     /// Identifies that the response ready to be finalized.
     ///
-    /// If false, then there are still items that need to be authorized.
+    /// If `false`, then there are still items that need to be authorized.
     pub fn is_complete(&self) -> bool {
         self.prepared_documents.is_empty()
     }
 
+    /// When there are documents to be signed, it will return then next one for signing.
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         self.prepared_documents
             .last()
             .map(|doc| (doc.id, doc.prepared_cose_sign1.signature_payload()))
     }
 
+    /// Submit the externally signed signature for object
+    /// returned by [PreparedDeviceResponse::get_next_signature_payload].
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) {
         let signed_doc = match self.prepared_documents.pop() {
             Some(doc) => doc.finalize(signature),
@@ -376,6 +501,7 @@ impl PreparedDeviceResponse {
         self.signed_documents.push(signed_doc);
     }
 
+    /// Will finalize and prepare the device response.
     pub fn finalize_response(self) -> DeviceResponse {
         if !self.is_complete() {
             //tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
@@ -417,11 +543,17 @@ impl PreparedDocument {
     }
 }
 
+/// Keeps the device session data.
+///
+/// One implementation is [SessionManager].
 pub trait DeviceSession {
     type ST: SessionTranscript;
 
+    /// Get the device documents.
     fn documents(&self) -> &Documents;
     fn session_transcript(&self) -> Self::ST;
+
+    /// Prepare the response based on the requested items and permitted ones.
     fn prepare_response(
         &self,
         requests: &RequestedItems,
@@ -711,10 +843,22 @@ pub fn nearest_age_attestation(
     Ok(None)
 }
 
+/// Will parse the corresponding age as a number from the `age_over_*` element identifier.
+///
+/// # Example
+///
+/// ```
+/// use isomdl::presentation::device::parse_age_from_element_identifier;
+///
+/// let element = "age_over_21".to_string();
+/// let age = parse_age_from_element_identifier(element).unwrap();
+/// assert_eq!(age, 21);
+/// ```
 pub fn parse_age_from_element_identifier(element_identifier: String) -> Result<u8, Error> {
     Ok(AgeOver::try_from(element_identifier)?.0)
 }
 
+/// Holds the age part from the `age_over_*` element identifier.
 pub struct AgeOver(u8);
 
 impl TryFrom<String> for AgeOver {

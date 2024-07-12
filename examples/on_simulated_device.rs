@@ -49,7 +49,7 @@ fn parse_mdl() -> Result<NonEmptyMap<DocType, Document>> {
     Ok(docs)
 }
 
-/// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
+/// Creates a QR code containing [DeviceEngagement] data, which includes its public key.
 fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
     // Parse the mDL
     let docs = parse_mdl()?;
