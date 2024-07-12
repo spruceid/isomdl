@@ -60,8 +60,7 @@ jobs:
             echo '```' >> "$tmp/test.md"
             sh scripts/sync-md-includes.sh "$tmp/test.md"
             count=$(awk -v text="$marker" 'BEGIN {count=0} {count += gsub(text, "")} END {print count}' "$tmp/test.md")
-            if [ "$count" -ne 1 ]; then              
-            else
+            if [ "$count" -ne 1 ]; then
               echo -e "${Red}failed: test_sync_md_includes${NC}"
               exit 1
             fi
