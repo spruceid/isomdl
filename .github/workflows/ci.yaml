@@ -58,7 +58,7 @@ jobs:
             echo '<!-- INCLUDE-RUST: '"$tmp"'/test.rs -->' > "$tmp/test.md"
             echo '```rust' >> "$tmp/test.md"
             echo '```' >> "$tmp/test.md"
-            sh scripts/sync-md-includes.sh "$tmp/test.md"
+            ./scripts/sync-md-includes.sh "$tmp/test.md"
             count=$(awk -v text="$marker" 'BEGIN {count=0} {count += gsub(text, "")} END {print count}' "$tmp/test.md")
             if [ "$count" -ne 1 ]; then
               echo -e "${Red}failed: test_sync_md_includes${NC}"
@@ -87,7 +87,7 @@ jobs:
             echo '  // <!-- INCLUDE-RUST: '"$tmp"'/test.rs -->' >> "$tmp/test2.rs"
             echo '  // ```ignore' >> "$tmp/test2.rs"
             echo '  // ```' >> "$tmp/test2.rs"
-            sh scripts/sync-rustdoc-includes.sh "$tmp"
+            ./scripts/sync-rustdoc-includes.sh "$tmp"
             count=$(awk -v text="$marker" 'BEGIN {count=0} {count += gsub(text, "")} END {print count}' "$tmp/test2.rs")
             if [ "$count" -ne 4 ]; then
               echo -e "${Red}failed: test_sync_rustdoc_includes${NC}"
