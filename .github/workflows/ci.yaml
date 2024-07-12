@@ -49,36 +49,49 @@ jobs:
       - name: Run scripts tests
         run: |
           test_sync_md_includes() {
-          local tmp="/tmp/test-md-includes"
-          rm -rf "$tmp"
-          local marker="test-42-42-42"
-          mkdir "$tmp"
-          echo "$marker" > "$tmp/test.rs"
-          echo "<!-- INCLUDE-RUST: $tmp/test.rs -->" > "$tmp/test.md"
+            echo "test sync_md_includes ..."
+            local tmp="/tmp/test-md-includes"
+            rm -rf "$tmp"
+            local marker="test-42-42-42"
+            mkdir "$tmp"
+            echo "$marker" > "$tmp/test.rs"
+            echo "<!-- INCLUDE-RUST: $tmp/test.rs -->" > "$tmp/test.md"
             echo '```rust' >> "$tmp/test.md"
             echo '```' >> "$tmp/test.md"
-            ./scripts/sync-md-includes.sh "$tmp/test.md"
-            if ! grep -q "$marker" "$tmp/test.md"; then
-              echo -e "${Red}test failed: test_sync_md_includes${NC}"
+            sh scripts/sync-md-includes.sh "$tmp/test.md"
+            count=$(awk -v text="$marker" 'BEGIN {count=0} {count += gsub(text, "")} END {print count}' "$tmp/test.md")
+            if [ "$count" -ne 1 ]; then              
+            else
+              echo -e "${Red}failed: test_sync_md_includes${NC}"
               exit 1
             fi
+            echo "${Green}ok${NC}"
           }
           test_sync_md_includes
           
           test_sync_rustdoc_includes() {
-          local tmp="/tmp/test-md-includes"
-          rm -rf "$tmp"
-          local marker="test-42-42-42"
-          mkdir "$tmp"
-          echo "$marker" > "$tmp/test.rs"
-          echo "//! <!-- INCLUDE-RUST: $tmp/test.rs -->" > "$tmp/test2.rs"
-            echo '/! ```' >> "$tmp/test2.rs"
+            echo "test  sync_rustdoc_includes ..."
+            local tmp="/tmp/test-rustdoc-includes"
+            rm -rf "$tmp"
+            local marker="test-42-42-42"
+            mkdir "$tmp"
+            echo "$marker" > "$tmp/test.rs"
+            echo "//! <!-- INCLUDE-RUST: $tmp/test.rs -->" > "$tmp/test2.rs"
             echo '//! ```' >> "$tmp/test2.rs"
-            ./scripts/sync-rustdoc-includes.sh "$tmp"
-            if ! grep -q "$marker" "$tmp/test2.rs"; then
-              echo -e "${Red}test failed: test_sync_rustdoc_includes${NC}"
+            echo '//! ```' >> "$tmp/test2.rs"
+            echo "//! <!-- INCLUDE-RUST: $tmp/test.rs -->" >> "$tmp/test2.rs"
+            echo '//! ```ignore' >> "$tmp/test2.rs"
+            echo '//! ```' >> "$tmp/test2.rs"
+            echo "  // <!-- INCLUDE-RUST: $tmp/test.rs -->" >> "$tmp/test2.rs"
+            echo '  // ```' >> "$tmp/test2.rs"
+            echo '  // ```' >> "$tmp/test2.rs"
+            sh scripts/sync-rustdoc-includes.sh "$tmp"
+            count=$(awk -v text="$marker" 'BEGIN {count=0} {count += gsub(text, "")} END {print count}' "$tmp/test2.rs")
+            if [ "$count" -ne 3 ]; then
+              echo -e "${Red}failed: test_sync_rustdoc_includes${NC}"
               exit 1
             fi
+            echo "${Green}ok${NC}"
           }
           test_sync_rustdoc_includes
 

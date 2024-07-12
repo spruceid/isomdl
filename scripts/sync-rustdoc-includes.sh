@@ -24,30 +24,43 @@ process_include_blocks() {
       cd "$parent_dir" || exit
 
       temp_file=$(mktemp)
-      changed=0
       while IFS= read -r line || [ -n "$line" ]; do
-          if [[ $inside_include_block -eq 0 && "$line" == *"//! <!-- INCLUDE-RUST: "* ]]; then
+          if [[ $inside_include_block -eq 0 && "$line" == *"<!-- INCLUDE-RUST: "* ]]; then
               start_marker="$line"
-              include_file=$(echo "$line" | sed -n 's/\/\/! .*<!-- INCLUDE-RUST: \(.*\) -->.*/\1/p')
+              include_file=$(echo "$line" | sed -n 's/.*<!-- INCLUDE-RUST: \(.*\) -->.*/\1/p')
               echo "Processing '$file' include block for: '$include_file'"
               include_content=$(<"$include_file")
-              include_content=$(echo "$include_content" | sed 's/^/\/\/! /')
               echo "$start_marker" >> "$temp_file"
               inside_include_block=1
-              changed=1
-          elif [[ $inside_include_block -eq 1 && $inside_code_block -eq 1 && "$line" == '//! ```' ]]; then
+          elif [[ $inside_include_block -eq 1 && $inside_code_block -eq 1 && ("$line" == '//! ```' || "$line" == *'// ```') ]]; then
               echo "$line" >> "$temp_file"
               inside_include_block=0
               inside_code_block=0
-          elif [[ $inside_include_block -eq 1 && "$line" == '//! ```'* ]]; then
+          elif [[ $inside_include_block -eq 1 && ("$line" == '//! ```'* || "$line" == *'// ```'*) ]]; then
               echo "$line" >> "$temp_file"
+              case "$line" in
+                '//! ```'*)
+                  prefix='//! '
+                  ;;
+                *'/// ```'*)
+                  prefix='/// '
+                  ;;
+              esac
+              if [[ -n "$prefix" ]]; then
+                escaped_prefix=$(echo "$prefix" | sed 's/[&/\]/\\&/g')
+                include_content=$(echo "$include_content" | sed "s/^/$escaped_prefix/")
+              fi
               echo "$include_content" >> "$temp_file"
               inside_code_block=1
           elif [[ $inside_include_block -eq 0 || $inside_code_block -eq 0 ]]; then
               echo "$line" >> "$temp_file"
           fi
       done < "$file"
-      if [[ $changed -eq 1 ]]; then
+      # strip trailing spaces from lines starting with '//! '
+      temp_file2=$(mktemp)
+      sed -E 's/^(\/\/!?)[[:space:]]+$/\1/' "$temp_file" > "$temp_file2"
+      mv "$temp_file2" "$temp_file"
+      if ! cmp -s "$file" "$temp_file"; then
           mv "$temp_file" "$file"
       else
           rm "$temp_file"

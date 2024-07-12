@@ -41,5 +41,13 @@ TEMP_FILE=$(mktemp)
 # Call the function to process the include blocks
 process_include_blocks "$IN_FILE" "$TEMP_FILE"
 
-# Replace the original README file with the updated content
-mv "$TEMP_FILE" "$IN_FILE"
+# Replace the original README file with the updated content, if content changed
+# strip trailing spaces from lines starting with '//! '
+temp_file2=$(mktemp)
+sed -E 's/^(\/\/!?)[[:space:]]+$/\1/' "$TEMP_FILE" > "$temp_file2"
+mv "$temp_file2" "$TEMP_FILE"
+if ! cmp -s "$IN_FILE" "$TEMP_FILE"; then
+    mv "$TEMP_FILE" "$IN_FILE"
+else
+    rm "$TEMP_FILE"
+fi

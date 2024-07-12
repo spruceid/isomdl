@@ -2,7 +2,8 @@
 
 [ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) `mDL` implementation in Rust.
 
-It is intended to be used in creating apps for devices and readers that can interact with each other to exchange `mDL` data.
+It is intended to be used in creating apps for devices and readers that can interact with each other to exchange `mDL`
+data.
 
 ## CLI tool
 
@@ -65,7 +66,8 @@ sequenceDiagram
 4. **Reader Processing mDL data:**
     - The reader processes the response and prints the value of the `age_over_21` element.
 
-You can see the full example in [simulated_device_and_reader](examples/simulated_device_and_reader.rs) or a version that uses `State pattern`, `Arc` and `Mutex` [simulated_device_and_reader](examples/simulated_device_and_reader_state.rs).
+You can see the full example in [simulated_device_and_reader](examples/simulated_device_and_reader.rs) or a version that
+uses `State pattern`, `Arc` and `Mutex` [simulated_device_and_reader](examples/simulated_device_and_reader_state.rs).
 
 ##### Device perspective
 
