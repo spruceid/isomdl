@@ -1,9 +1,9 @@
 # isomdl
 
-[ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) `mDL` implementation in Rust.
+[ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) **mDL** implementation in Rust.
 
-It is intended to be used in creating apps for devices and readers that can interact with each other to exchange `mDL`
-data.
+It is intended to be used in creating apps for **Devices** and **Readers** that can interact with each other to
+exchange **mDL**
 
 ## CLI tool
 
@@ -47,11 +47,11 @@ sequenceDiagram
 ### The flow of the interaction
 
 1. **Device initialization and engagement:**
-    - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
+    - The device creates a **QR code** containing `DeviceEngagement` data, which includes its public key.
     - Internally:
-        - The device initializes with the `mDL` data, private key, and public key.
+        - The device initializes with the **mDL** data, private key, and public key.
 2. **Reader processing QR code and requesting needed fields:**
-    - The reader processes the `QR code` and creates a request for the `age_over_21` element.
+    - The reader processes the **QR code** and creates a request for the `age_over_21` element.
     - Internally:
         - Generates its private and public keys.
         - Initiates a key exchange, and generates the session keys.
@@ -67,9 +67,9 @@ sequenceDiagram
     - The reader processes the response and prints the value of the `age_over_21` element.
 
 You can see the full example in [simulated_device_and_reader](examples/simulated_device_and_reader.rs) or a version that
-uses `State pattern`, `Arc` and `Mutex` [simulated_device_and_reader](examples/simulated_device_and_reader_state.rs).
+uses **State pattern**, `Arc` and `Mutex` [simulated_device_and_reader](examples/simulated_device_and_reader_state.rs).
 
-##### Device perspective
+#### Device perspective
 
 There are several states through which the device goes during the interaction:
 
