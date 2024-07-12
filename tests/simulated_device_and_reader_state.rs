@@ -1,4 +1,4 @@
-include!("../examples/simulated_device_and_reader_basic.rs");
+include!("../examples/simulated_device_and_reader_state.rs");
 
 #[test]
 fn simulated_device_and_reader_interaction() {

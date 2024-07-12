@@ -19,15 +19,11 @@ fn main() -> Result<()> {
 }
 
 pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
-    let mdl_encoded = include_str!("../examples/data/stringified-mdl.txt");
     let key: p256::ecdsa::SigningKey =
         p256::SecretKey::from_sec1_pem(include_str!("../examples/data/sec1.pem"))?.into();
 
-    // Parse the mDL
-    let docs = parse_mdl(mdl_encoded)?;
-
     // Device initialization and engagement
-    let (engaged_state, qr_code_uri) = initialise_session(docs, Uuid::new_v4())?;
+    let (engaged_state, qr_code_uri) = initialise_session()?;
 
     // Reader processing QR and requesting needed fields
     let (mut reader_session_manager, request) = establish_reader_session(qr_code_uri)?;
@@ -44,18 +40,16 @@ pub fn run_simulated_device_and_reader_interaction() -> Result<()> {
     Ok(())
 }
 
-/// Parse the mDL encoded string into a [Documents] object.
-fn parse_mdl(encoded: &str) -> Result<NonEmptyMap<DocType, Document>> {
-    let mdl = Document::parse(encoded.to_string()).context("could not parse mDL")?;
-    let docs = Documents::new(DOC_TYPE.to_string(), mdl);
-    Ok(docs)
-}
-
 /// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
-fn initialise_session(docs: Documents, uuid: Uuid) -> Result<(SessionManagerEngaged, String)> {
+fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
+    // Parse the mDL
+    let docs = parse_mdl()?;
+
     let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
         peripheral_server_mode: None,
-        central_client_mode: Some(CentralClientMode { uuid }),
+        central_client_mode: Some(CentralClientMode {
+            uuid: Uuid::new_v4(),
+        }),
     }));
 
     let session = device::SessionManagerInit::initialise(docs, Some(drms), None)
@@ -66,6 +60,13 @@ fn initialise_session(docs: Documents, uuid: Uuid) -> Result<(SessionManagerEnga
         .context("could not generate qr engagement")
 }
 
+/// Parse the mDL encoded string into a [Documents] object.
+fn parse_mdl() -> Result<NonEmptyMap<DocType, Document>> {
+    let mdl_encoded = include_str!("../examples/data/stringified-mdl.txt");
+    let mdl = Document::parse(mdl_encoded.to_string()).context("could not parse mDL")?;
+    let docs = Documents::new(DOC_TYPE.to_string(), mdl);
+    Ok(docs)
+}
 /// Establishes the reader session from the given QR code and create request for needed elements.
 fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u8>)> {
     let requested_elements = Namespaces::new(
