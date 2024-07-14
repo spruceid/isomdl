@@ -72,5 +72,6 @@ process_include_blocks() {
 }
 
 START_PATH=$1
+CURRENT_DIR="$(pwd)"
 process_include_blocks "$START_PATH"
-
+cd "$CURRENT_DIR"

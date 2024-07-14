@@ -1,6 +1,6 @@
 Some useful scripts.
 
-# sync-md-includes.sh
+# update-md-includes.sh
 
 Useful to include code in code blocks from `markdown` (`.md`) files, like `README.md.`  
 This helps to keep the `README.md` file updated with the code in the source files without manually copy-pasting.  
@@ -20,10 +20,10 @@ It will keep the `INCLUDE-RUST` marker in the file, so you can run the script ag
 You need to specify the path to the `md` file as input.
 
 ```bash
-sync-md-includes.sh README.md
+update-md-includes.sh README.md
 ```
 
-# sync-rustdoc-includes.sh
+# update-rustdoc-includes.sh
 
 Similar to the above just for `rustdoc`s. If you have this:
 
@@ -40,5 +40,5 @@ It will keep the `INCLUDE-RUST` marker in the file, so you can run the script ag
 You need to specify the start directory as input, it will run on all `.rs` files recursively.
 
 ```bash
-sync-rustdoc-includes.sh .
+update-rustdoc-includes.sh .
 ```

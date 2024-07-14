@@ -71,6 +71,8 @@
 //! <!-- INCLUDE-RUST: ../examples/on_simulated_device.rs -->
 //!
 //! ```ignore
+//! mod common;
+//!
 //! use anyhow::{anyhow, Context, Result};
 //! use signature::{SignatureEncoding, Signer};
 //! use uuid::Uuid;
@@ -84,8 +86,6 @@
 //! use isomdl::presentation::{device, Stringify};
 //!
 //! use crate::common::{establish_reader_session, reader_handle_device_response};
-//!
-//! mod common;
 //!
 //! const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 //! const NAMESPACE: &str = "org.iso.18013.5.1";
@@ -116,7 +116,7 @@
 //!
 //! /// Parse the mDL encoded string into a [Documents] object.
 //! fn parse_mdl() -> Result<NonEmptyMap<DocType, Document>> {
-//!     let mdl_encoded = include_str!("../examples/data/stringified-mdl.txt");
+//!     let mdl_encoded = include_str!("data/stringified-mdl.txt");
 //!     let mdl = Document::parse(mdl_encoded.to_string()).context("could not parse mDL")?;
 //!     let docs = Documents::new(DOC_TYPE.to_string(), mdl);
 //!     Ok(docs)
@@ -186,7 +186,7 @@
 //! }
 //!
 //! fn create_signing_key() -> Result<p256::ecdsa::SigningKey> {
-//!     Ok(p256::SecretKey::from_sec1_pem(include_str!("../examples/data/sec1.pem"))?.into())
+//!     Ok(p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))?.into())
 //! }
 //! ```
 //!
@@ -210,14 +210,14 @@
 //! <!-- INCLUDE-RUST: ../examples/on_simulated_reader.rs -->
 //!
 //! ```ignore
+//! mod common;
+//!
 //! use anyhow::{Context, Result};
 //!
 //! use isomdl::definitions::device_request::{DataElements, Namespaces};
 //! use isomdl::presentation::reader;
 //!
 //! use crate::common::{create_response, create_signing_key, handle_request, initialise_session};
-//!
-//! mod common;
 //!
 //! const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 //! const NAMESPACE: &str = "org.iso.18013.5.1";

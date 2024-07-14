@@ -1,11 +1,11 @@
+mod common;
+
 use anyhow::{Context, Result};
 
 use isomdl::definitions::device_request::{DataElements, Namespaces};
 use isomdl::presentation::reader;
 
 use crate::common::{create_response, create_signing_key, handle_request, initialise_session};
-
-mod common;
 
 const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 const NAMESPACE: &str = "org.iso.18013.5.1";
