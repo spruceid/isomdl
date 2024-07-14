@@ -9,11 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
-  
-  Green: "\e[0;32m"
-  Yellow: "\e[0;33m"
-  Red: "\033[0;31m"
-  NC: "\e[0m" # No Color
 
 jobs:
   build:
@@ -31,71 +26,11 @@ jobs:
           cd macros
           cargo test
 
-      - name: Run examples
-        run: |
-          ignore_marker='#[spruce_example(ignore)]'
-          echo -e "${Green}Running examples...${NC}"
-          for example in examples/*.rs
-          do
-            if grep -Fq "$ignore_marker" "$example"; then
-              echo -e "example $example ... ${Yellow}ignored${NC}"
-            else
-              echo -e "example $example ..."
-              cargo run --example "$(basename "${example%.rs}")" --target x86_64-unknown-linux-gnu -- $args
-              echo -e "${Green}ok${NC}"
-            fi
-          done
-
       - name: Run scripts tests
-        run: |
-          test_sync_md_includes() {
-            echo "test sync_md_includes ..."
-            local tmp="/tmp/test-md-includes"
-            rm -rf "$tmp"
-            local marker="test-42-42-42"
-            mkdir "$tmp"
-            echo "$marker" > "$tmp/test.rs"
-            echo '<!-- INCLUDE-RUST: '"$tmp"'/test.rs -->' > "$tmp/test.md"
-            echo '```rust' >> "$tmp/test.md"
-            echo '```' >> "$tmp/test.md"
-            ./scripts/sync-md-includes.sh "$tmp/test.md"
-            count=$(awk -v text="$marker" 'BEGIN {count=0} {count += gsub(text, "")} END {print count}' "$tmp/test.md")
-            if [ "$count" -ne 1 ]; then
-              echo -e "${Red}failed: test_sync_md_includes${NC}"
-              exit 1
-            fi
-              echo "${Green}ok${NC}"
-          }
-          test_sync_md_includes
-          
-          test_sync_rustdoc_includes() {
-            echo "test  sync_rustdoc_includes ..."
-            local tmp="/tmp/test-rustdoc-includes"
-            rm -rf "$tmp"
-            local marker="test-42-42-42"
-            mkdir "$tmp"
-            echo "$marker" > "$tmp/test.rs"
-            echo '//! <!-- INCLUDE-RUST: '"$tmp"'/test.rs -->' > "$tmp/test2.rs"
-            echo '//! ```' >> "$tmp/test2.rs"
-            echo '//! ```' >> "$tmp/test2.rs"
-            echo '//! <!-- INCLUDE-RUST: '"$tmp"'/test.rs -->' >> "$tmp/test2.rs"
-            echo '//! ```ignore' >> "$tmp/test2.rs"
-            echo '//! ```' >> "$tmp/test2.rs"
-            echo '  // <!-- INCLUDE-RUST: '"$tmp"'/test.rs -->' >> "$tmp/test2.rs"
-            echo '  // ```' >> "$tmp/test2.rs"
-            echo '  // ```' >> "$tmp/test2.rs"
-            echo '  // <!-- INCLUDE-RUST: '"$tmp"'/test.rs -->' >> "$tmp/test2.rs"
-            echo '  // ```ignore' >> "$tmp/test2.rs"
-            echo '  // ```' >> "$tmp/test2.rs"
-            ./scripts/sync-rustdoc-includes.sh "$tmp"
-            count=$(awk -v text="$marker" 'BEGIN {count=0} {count += gsub(text, "")} END {print count}' "$tmp/test2.rs")
-            if [ "$count" -ne 4 ]; then
-              echo -e "${Red}failed: test_sync_rustdoc_includes${NC}"
-              exit 1
-            fi
-            echo "${Green}ok${NC}"
-          }
-          test_sync_rustdoc_includes
+        run: ./scripts/test.sh
+
+      - name: Run examples
+        run: ./examples/run.sh
 
       - name: Clippy
         run: |
