@@ -15,12 +15,16 @@ find "$SCRIPT_DIR" -type f -name "*.rs" | while read -r file; do
   filename=$(basename "$file")
   basename="${filename%.*}"
 
+  parent_dir=$(dirname "$file")
+  # Set the current directory to the parent directory of the file
+  cd "$parent_dir" || exit
+
   if grep -Fq "$ignore_marker" "$file"; then
     echo -e "example $basename ... ${Yellow}ignored${NC}"
+    # Return to the original directory to continue the loop
+    cd - > /dev/null
+    continue
   else
-    parent_dir=$(dirname "$file")
-    # Set the current directory to the parent directory of the file
-    cd "$parent_dir" || exit
     echo -e "example $basename ..."
     cargo run --example "$basename" $1 -- $args
     echo -e "${Green}ok${NC}"
