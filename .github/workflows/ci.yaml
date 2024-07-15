@@ -33,9 +33,7 @@ jobs:
         run: ./examples/run.sh
 
       - name: Clippy
-        run: |
-          cargo clippy --all-targets
+        run: cargo clippy --all-targets
 
       - name: Fmt
-        run: |
-          cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
