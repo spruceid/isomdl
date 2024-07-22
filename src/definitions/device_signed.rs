@@ -1,8 +1,9 @@
+use crate::cose::mac0::CoseMac0;
+use crate::cose::sign1::CoseSign1;
 use crate::definitions::{
     helpers::{NonEmptyMap, Tag24},
     session::SessionTranscript,
 };
-use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
 use serde_cbor::{Error as CborError, Value as CborValue};
 use std::collections::BTreeMap;
@@ -25,7 +26,7 @@ pub enum DeviceAuth {
     #[serde(rename_all = "camelCase")]
     Signature { device_signature: CoseSign1 },
     #[serde(rename_all = "camelCase")]
-    Mac { device_mac: CborValue },
+    Mac { device_mac: CoseMac0 },
 }
 
 pub type DeviceAuthenticationBytes<S> = Tag24<DeviceAuthentication<S>>;

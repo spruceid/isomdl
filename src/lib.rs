@@ -1,5 +1,4 @@
-pub use cose_rs;
-
+pub mod cose;
 pub mod definitions;
 pub mod issuance;
 pub mod presentation;

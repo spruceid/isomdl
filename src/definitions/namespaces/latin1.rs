@@ -94,6 +94,7 @@ mod test {
 
     #[test]
     fn upper_latin() {
+        #[allow(clippy::invisible_characters)]
         let upper_latin_chars = vec![
             ' ', '¡', '¢', '£', '¤', '¥', '¦', '§', '¨', '©', 'ª', '«', '¬', '­', '®', '¯', '°',
             '±', '²', '³', '´', 'µ', '¶', '·', '¸', '¹', 'º', '»', '¼', '½', '¾', '¿', 'À', 'Á',

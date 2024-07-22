@@ -1,3 +1,16 @@
+use std::collections::BTreeMap;
+use std::num::ParseIntError;
+
+use coset::{CoseSign1Builder, Header, RegisteredLabelWithPrivate};
+use p256::FieldBytes;
+use serde::{Deserialize, Serialize};
+use serde_cbor::Value as CborValue;
+use uuid::Uuid;
+
+use session::SessionTranscript180135;
+
+use crate::cose::sign1::CoseSign1;
+use crate::cose::Cose;
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -17,14 +30,6 @@ use crate::{
     },
     issuance::Mdoc,
 };
-use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
-use p256::FieldBytes;
-use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
-use session::SessionTranscript180135;
-use std::collections::BTreeMap;
-use std::num::ParseIntError;
-use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
@@ -104,7 +109,7 @@ struct PreparedDocument {
     doc_type: String,
     issuer_signed: IssuerSigned,
     device_namespaces: DeviceNamespacesBytes,
-    prepared_cose_sign1: PreparedCoseSign1,
+    prepared_cose_sign1: CoseSign1,
     errors: Option<NamespaceErrors>,
 }
 
@@ -273,7 +278,7 @@ impl SessionManager {
         self.handle_decoded_request(session_data)
     }
 
-    /// Get next payload for signing.
+    /// Get the next payload for signing.
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         match &self.state {
             State::Signing(p) => p.get_next_signature_payload(),
@@ -396,16 +401,17 @@ impl PreparedDocument {
         let Self {
             issuer_signed,
             device_namespaces,
-            prepared_cose_sign1,
+            mut prepared_cose_sign1,
             errors,
             doc_type,
             ..
         } = self;
-        let cose_sign1 = prepared_cose_sign1.finalize(signature);
+        prepared_cose_sign1.set_signature(signature);
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,
+            // todo: support for CoseMac0
             device_auth: DeviceAuth::Signature {
-                device_signature: cose_sign1,
+                device_signature: prepared_cose_sign1,
             },
         };
         DeviceResponseDoc {
@@ -542,22 +548,15 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let prepared_cose_sign1 = match CoseSign1::builder()
-                .detached()
-                .payload(device_auth_bytes)
-                .signature_algorithm(signature_algorithm)
-                .prepare()
-            {
-                Ok(prepared) => prepared,
-                Err(_e) => {
-                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                        .into_iter()
-                        .collect();
-                    document_errors.push(error);
-                    continue;
-                }
+            let protected = Header {
+                alg: Some(RegisteredLabelWithPrivate::Assigned(signature_algorithm)),
+                ..Header::default()
             };
-
+            // todo: support for CoseMac0
+            let builder = CoseSign1Builder::new()
+                .protected(protected)
+                .payload(device_auth_bytes);
+            let prepared_cose_sign1 = CoseSign1::new(builder.build());
             let prepared_document = PreparedDocument {
                 id: document.id,
                 doc_type,
@@ -566,6 +565,7 @@ pub trait DeviceSession {
                     issuer_auth: document.issuer_auth.clone(),
                 },
                 device_namespaces,
+                // todo: support for CoseMac0
                 prepared_cose_sign1,
                 errors: errors.try_into().ok(),
             };
@@ -731,11 +731,18 @@ impl TryFrom<String> for AgeOver {
 
 #[cfg(test)]
 mod test {
+    use coset::{iana, CborSerializable, CoseSign1Builder};
+    use ecdsa::Signature;
+    use hex::FromHex;
+    use p256::ecdsa::{SigningKey, VerifyingKey};
+    use p256::{NistP256, SecretKey};
+    use serde_json::json;
+    use signature::{Signer, Verifier};
+
     use crate::definitions::helpers::ByteStr;
+    use crate::definitions::mso::DigestId;
 
     use super::*;
-    use crate::definitions::mso::DigestId;
-    use serde_json::json;
 
     #[test]
     fn filter_permitted() {
@@ -848,5 +855,78 @@ mod test {
         let x = wib.as_bytes();
 
         println!("{:?}", x);
+    }
+
+    // static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
+    static COSE_KEY: &str = include_str!("../../test/definitions/cose/sign1/secret_key");
+
+    fn sign(payload: &[u8]) -> Vec<u8> {
+        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let signer: SigningKey = SecretKey::from_slice(&key).unwrap().into();
+
+        let sig: Signature<NistP256> = signer.try_sign(payload).unwrap();
+        sig.to_vec()
+    }
+
+    fn verify(sig: &[u8], payload: &[u8]) -> coset::Result<(), String> {
+        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let signer: SigningKey = SecretKey::from_slice(&key).unwrap().into();
+        let verifier: VerifyingKey = (&signer).into();
+        let signature: Signature<NistP256> =
+            Signature::from_slice(sig).map_err(|err| err.to_string())?;
+        verifier
+            .verify(payload, &signature)
+            .map_err(|err| err.to_string())
+    }
+
+    #[test]
+    fn test_coset() {
+        // Inputs.
+        let pt = b"This is the content";
+        let aad = b"this is additional data";
+
+        // Build a `CoseSign1` object.
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(iana::Algorithm::ES256)
+            .key_id(b"11".to_vec())
+            .build();
+        let sign1 = CoseSign1Builder::new()
+            .protected(protected)
+            .payload(pt.to_vec())
+            .create_signature(aad, sign) // closure to do sign operation
+            .build();
+
+        // Serialize to bytes.
+        let sign1_data = sign1.to_vec().unwrap();
+        println!(
+            "'{}' + '{}' => {}",
+            String::from_utf8_lossy(pt),
+            String::from_utf8_lossy(aad),
+            hex::encode(&sign1_data)
+        );
+
+        // At the receiving end, deserialize the bytes back to a `CoseSign1` object.
+        let mut sign1 = coset::CoseSign1::from_slice(&sign1_data).unwrap();
+
+        // At this point, real code would validate the protected headers.
+
+        // Check the signature, which needs to have the same `aad` provided, by
+        // providing a closure that can do the verify operation.
+        let result = sign1.verify_signature(aad, verify);
+        println!("Signature verified: {:?}.", result);
+        assert!(result.is_ok());
+
+        // Changing an unprotected header leaves the signature valid.
+        sign1.unprotected.content_type = Some(coset::ContentType::Text("text/plain".to_owned()));
+        assert!(sign1.verify_signature(aad, verify).is_ok());
+
+        // Providing a different `aad` means the signature won't validate.
+        assert!(sign1.verify_signature(b"not aad", verify).is_err());
+
+        // Changing a protected header invalidates the signature.
+        sign1.protected.original_data = None;
+        sign1.protected.header.content_type =
+            Some(coset::ContentType::Text("text/plain".to_owned()));
+        assert!(sign1.verify_signature(aad, verify).is_err());
     }
 }

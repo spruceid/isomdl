@@ -1,5 +1,5 @@
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
-use cose_rs::algorithm::Algorithm;
+use coset::iana;
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -64,28 +64,28 @@ pub enum Error {
 }
 
 impl CoseKey {
-    pub fn signature_algorithm(&self) -> Option<Algorithm> {
+    pub fn signature_algorithm(&self) -> Option<iana::Algorithm> {
         match self {
             CoseKey::EC2 {
                 crv: EC2Curve::P256,
                 ..
-            } => Some(Algorithm::ES256),
+            } => Some(iana::Algorithm::ES256),
             CoseKey::EC2 {
                 crv: EC2Curve::P384,
                 ..
-            } => Some(Algorithm::ES384),
+            } => Some(iana::Algorithm::ES384),
             CoseKey::EC2 {
                 crv: EC2Curve::P521,
                 ..
-            } => Some(Algorithm::ES512),
+            } => Some(iana::Algorithm::ES512),
             CoseKey::OKP {
                 crv: OKPCurve::Ed448,
                 ..
-            } => Some(Algorithm::EdDSA),
+            } => Some(iana::Algorithm::EdDSA),
             CoseKey::OKP {
                 crv: OKPCurve::Ed25519,
                 ..
-            } => Some(Algorithm::EdDSA),
+            } => Some(iana::Algorithm::EdDSA),
             _ => None,
         }
     }
