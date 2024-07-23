@@ -37,7 +37,7 @@ base64 = "0.13"
 pem-rfc7468 = "0.7.0"
 x509-cert = { version = "0.1.1", features = ["pem"] }
 coset = { version = "0.3.7", features = ["std"] }
-cbc-mac = "0.1.0"
+ciborium = "0.2.2"
 
 ssi-jwk = { version = "0.1" }
 isomdl-macros = { version = "0.1.0", path = "macros" }

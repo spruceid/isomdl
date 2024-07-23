@@ -1,6 +1,6 @@
 use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
-use serde_cbor::Value as CborValue;
+use ciborium::Value as CborValue;
 use std::{fs::File, io::Read};
 use x509_cert::{
     certificate::Certificate,

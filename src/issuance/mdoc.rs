@@ -2,8 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;
-use coset::cbor::Value;
-use coset::{iana, CborSerializable, Header, Label, RegisteredLabelWithPrivate};
+use coset::{iana, Header, Label, RegisteredLabelWithPrivate};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -193,14 +192,13 @@ impl PreparedMdoc {
             mut prepared_sig,
         } = self;
 
-        prepared_sig.0.signature = signature;
+        prepared_sig.set_signature(signature);
         let mut issuer_auth = prepared_sig;
-        let val = Value::from_slice(&serde_cbor::to_vec(&x5chain.into_cbor()).unwrap()).unwrap();
         issuer_auth
             .0
             .unprotected
             .rest
-            .push((Label::Int(X5CHAIN_HEADER_LABEL as i64), val));
+            .push((Label::Int(X5CHAIN_HEADER_LABEL as i64), x5chain.into_cbor()));
 
         Mdoc {
             doc_type,
