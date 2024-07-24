@@ -2,13 +2,22 @@
 //!
 //! It handles this through **State pattern**.
 //!
-//! There are several states and transitions during the interaction:
+//! From the reader's perspective, the flow is simpler:
 //!
-//! ```mermaid
-//! stateDiagram
-//! Device --> SessionManager: establish_session
-//! SessionManager --> SessionManager_response: handle_response
-//! SessionManager_response --> SessionManager: new_request
+//! ```text
+#![doc = include_str!("../../docs/on_simulated_reader.txt")]
+//! ```
+//!
+//! ### Example
+//!
+//! You can see the full example in `on_simulated_reader.rs` in `examples` directory. The code is considerably shorter.  
+//! Now the device is simulated in `common`
+//! module (you can find the complete code in `examples` directory),
+//! here we focus on the code from the
+//! reader's perspective.
+//!
+//! ```ignore
+#![doc = include_str!("../../examples/on_simulated_reader.rs")]
 //! ```
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,

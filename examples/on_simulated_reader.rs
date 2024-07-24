@@ -1,3 +1,12 @@
+/// Example from the Reader's perspective.
+///
+/// The flow from reader's perspective:
+///
+/// ```text
+#[doc = include_str!("../docs/on_simulated_reader.txt")]
+/// ```
+///
+/// The device is simulated in `common` module, here we focus on the code from the reader's perspective.
 mod common;
 
 use anyhow::{Context, Result};

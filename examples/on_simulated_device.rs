@@ -1,3 +1,13 @@
+/// Example from the device perspective.
+///
+/// There are several states through which the device goes during the interaction:
+///
+/// ```text
+#[doc = include_str!("../docs/on_simulated_device.txt")]
+/// ```
+///
+/// The reader is simulated in `common` module, here we focus on the code from the
+/// device perspective.
 mod common;
 
 use anyhow::{anyhow, Context, Result};

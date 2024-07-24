@@ -1,3 +1,36 @@
+/// **Device** and **Reader** interaction
+///
+/// This example demonstrates a simulated device and reader interaction.
+/// The reader requests the `age_over_21` element, and the device responds with that value.
+/// The flow is something like this:
+///
+/// ```text
+#[doc = include_str!("../docs/simulated_device_and_reader.txt")]
+/// ```
+///
+/// ## The flow of the interaction
+///
+/// 1. **Device initialization and engagement:**
+///     - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
+///     - Internally:
+///         - The device initializes with the `mDL` data, private key, and public key.
+/// 2. **Reader processing `QR code` and requesting needed fields:**
+///     - The reader processes the QR code and creates a request for the `age_over_21` element.
+///     - Internally:
+///         - Generates its private and public keys.
+///         - Initiates a key exchange, and generates the session keys.
+///         - The request is encrypted with the reader's session key.
+/// 3. **Device accepting request and responding:**
+///     - The device receives the request and creates a response with the `age_over_21` element.
+///     - Internally:
+///         - Initiates the key exchange, and generates the session keys.
+///         - Decrypts the request with the reader's session key.
+///         - Parse and validate it creating error response if needed.
+///         - The response is encrypted with the device's session key.
+/// 4. **Reader Processing mDL data:**
+///     - The reader processes the response and prints the value of the `age_over_21` element.
+///
+/// It uses **State pattern**, `Arc` and `Mutex`.
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};

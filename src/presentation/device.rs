@@ -2,17 +2,21 @@
 //!
 //! It handles this through **State pattern**.
 //!
-//! There are several states and transitions during the interaction:
+//! There are several states through which the device goes during the interaction:
 //!
-//! ```mermaid
-//! User: initialise
-//! SessionManagerInit --> SessionManagerEngaged: qr_engagement
-//! SessionManagerEngaged --> SessionManager: process_session_establishment
-//! SessionManager --> SessionManager_request: handle_request
-//! SessionManager_request --> SessionManager3_response: prepare_response
-//! SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
-//! SessionManager3_sign --> SessionManager3_sign: submit_next_signature
-//! SessionManager3_sign --> SessionManager: retrieve_response
+//! ```text
+#![doc = include_str!("../../docs/on_simulated_device.txt")]
+//! ```
+//!
+//! # Example
+//!
+//! You can see the full example in `on_simulated_device.rs` in `examples` directory.  
+//! The reader is simulated in `common`
+//! module (you can find the complete code in `examples` directory), here we focus on the code from the
+//! device perspective.
+//!
+//! ```ignore
+#![doc = include_str!("../../examples/on_simulated_device.rs")]
 //! ```
 use crate::definitions::IssuerSignedItem;
 use crate::{
@@ -139,7 +143,7 @@ pub struct Document {
 /// If there were errors,
 /// it will prepare a list of [DocumentErrors].  
 /// If there are documents to be signed,
-/// it will keep a list of [PreparedDocument]
+/// it will keep a list of prepared documents
 /// which needs to be signed with [SessionManager::get_next_signature_payload] and [SessionManager::submit_next_signature].
 /// After those are signed, they are kept in a list of [DeviceResponseDoc]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,7 +318,7 @@ impl SessionManager {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```text
     /// session_manager.prepare_response(&requested_items, permitted_items);
     /// let (_, payload)) = session_manager.get_next_signature_payload()?;
     /// let signature = sign(&payload);

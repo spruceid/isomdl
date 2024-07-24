@@ -21,14 +21,12 @@ cat test/stringified-mdl.txt | cargo run -- get-namespaces -
 
 ## Library
 
-Here are some examples of how to use the library. You can see more in [examples](examples) folder and read about in the
+You can see more examples on how to use the library in [examples](examples) directory and read about in the
 dedicated [README](examples/README.md).
 
-### Eamples
+### **Device** and **Reader** interaction
 
-#### Simulated device and reader interaction
-
-This example demonstrates a simulated device and reader interaction.  
+This flow demonstrates a simulated device and reader interaction.  
 The reader requests the `age_over_21` element, and the device responds with that value.
 
 ```mermaid
@@ -44,7 +42,7 @@ sequenceDiagram
     Note over Device, Reader: Session finished
 ```
 
-### The flow of the interaction
+#### The flow of the interaction
 
 1. **Device initialization and engagement:**
     - The device creates a **QR code** containing `DeviceEngagement` data, which includes its public key.
@@ -66,8 +64,11 @@ sequenceDiagram
 4. **Reader Processing mDL data:**
     - The reader processes the response and prints the value of the `age_over_21` element.
 
-You can see the full example in [simulated_device_and_reader](examples/simulated_device_and_reader.rs) or a version that
-uses **State pattern**, `Arc` and `Mutex` [simulated_device_and_reader](examples/simulated_device_and_reader_state.rs).
+##### Examples
+
+You can see the example in [simulated_device_and_reader](examples/simulated_device_and_reader.rs) or a version that
+uses **State pattern**, `Arc`
+and `Mutex` in [simulated_device_and_reader_state](examples/simulated_device_and_reader_state.rs).
 
 #### Device perspective
 
@@ -108,12 +109,14 @@ stateDiagram
     ReadyToRespond --> Reader: handle_response
 ```
 
+##### Examples
+
+You can see the full example in [on_simulated_device](examples/on_simulated_device.rs).  
 The reader is simulated in [common](examples/common.rs) module (you can find the code in [examples](examples)),
 and we focus on the code from the
 device perspective.
-You can see the full example in [on_simulated_device](examples/on_simulated_device.rs).
 
-##### Reader perspective
+#### Reader perspective
 
 From the reader's perspective, the flow is simpler:
 
@@ -134,7 +137,9 @@ stateDiagram
     Reader --> Device: new_request
 ```
 
+##### Examples
+
+You can see the full example in [on_simulated_reader](examples/on_simulated_reader.rs).
+The code is considerably shorter.  
 Now the reader is simulated in [common](examples/common.rs) module (you can find the code in [examples](examples)),
 and we focus on the code from the reader's perspective.
-The code is considerably shorter.
-You can see the full example in [on_simulated_reader](examples/on_simulated_reader.rs).
