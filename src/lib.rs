@@ -54,7 +54,7 @@
 //!
 //! ### Example
 //!
-//! You can see the full example in `on_simulated_device.rs` in `examples` directory.  
+//! You can see the full example in `on_simulated_device.rs` in `examples` directory.
 //! The reader is simulated in `common`
 //! module (you can find the complete code in `examples` directory), here we focus on the code from the
 //! device perspective.
@@ -73,7 +73,7 @@
 //!
 //! ### Example
 //!
-//! You can see the full example in `on_simulated_reader.rs` in `examples` directory. The code is considerably shorter.  
+//! You can see the full example in `on_simulated_reader.rs` in `examples` directory. The code is considerably shorter.
 //! Now the device is simulated in `common`
 //! module (you can find the complete code in `examples` directory),
 //! here we focus on the code from the
