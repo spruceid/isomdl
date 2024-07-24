@@ -10,7 +10,7 @@
 //!
 //! # Example
 //!
-//! You can see the full example in `on_simulated_device.rs` in `examples` directory.  
+//! You can see the full example in `on_simulated_device.rs` in `examples` directory.
 //! The reader is simulated in `common`
 //! module (you can find the complete code in `examples` directory), here we focus on the code from the
 //! device perspective.
@@ -49,7 +49,7 @@ use uuid::Uuid;
 /// Initialisation state.
 ///
 /// It receives the documents and stores the ephemeral generated device key,
-/// and the device engagement.  
+/// and the device engagement.
 /// This is the first state that starts the interaction.
 /// You enter this state by calling [SessionManagerInit::initialise].
 #[derive(Serialize, Deserialize)]
@@ -73,7 +73,7 @@ pub struct SessionManagerEngaged {
 
 /// The state where handling requests from the reader and responding to them happens.
 ///
-/// This can consist of several request-response cycles.  
+/// This can consist of several request-response cycles.
 /// Transition to this state is [SessionManagerEngaged::process_session_establishment].
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManager {
@@ -141,7 +141,7 @@ pub struct Document {
 ///
 /// After the device parses the request from the reader,
 /// If there were errors,
-/// it will prepare a list of [DocumentErrors].  
+/// it will prepare a list of [DocumentErrors].
 /// If there are documents to be signed,
 /// it will keep a list of prepared documents
 /// which needs to be signed with [SessionManager::get_next_signature_payload] and [SessionManager::submit_next_signature].
@@ -177,7 +177,7 @@ pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdent
 impl SessionManagerInit {
     /// Initialise the SessionManager.
     ///
-    /// This is the first transition in the flow interaction.  
+    /// This is the first transition in the flow interaction.
     /// Internally, it generates the ephemeral key and creates the device engagement.
     ///
     /// It transition to [SessionManagerInit] state.
@@ -232,7 +232,7 @@ impl SessionManagerInit {
 impl SessionManagerEngaged {
     /// It transitions to [SessionManager] state
     /// by processing the [SessionEstablishment] received from the reader.
-    ///     
+    ///
     /// Internally, it generates the session keys based on the calculated shared secret
     /// (using **Diffie–Hellman key exchange**).
     ///
@@ -310,7 +310,7 @@ impl SessionManager {
     }
 
     /// When the device is ready to respond, it prepares the response specifying the permitted items.
-    ///  
+    ///
     /// It changes the internal state to [State::Signing],
     /// and you need
     /// to call [SessionManager::get_next_signature_payload] and then [SessionManager::submit_next_signature]
@@ -338,7 +338,7 @@ impl SessionManager {
             data.as_ref(),
             &mut self.reader_message_counter,
         )
-        .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
         let request = match self.parse_request(&decrypted_request) {
             Ok(r) => r,
             Err(e) => {
@@ -415,11 +415,11 @@ impl SessionManager {
                             &response_bytes,
                             &mut self.device_message_counter,
                         )
-                        .unwrap_or_else(|_e| {
-                            //tracing::warn!("unable to encrypt response: {}", e);
-                            status = Some(session::Status::SessionEncryptionError);
-                            Default::default()
-                        });
+                            .unwrap_or_else(|_e| {
+                                //tracing::warn!("unable to encrypt response: {}", e);
+                                status = Some(session::Status::SessionEncryptionError);
+                                Default::default()
+                            });
                         let data = if status.is_some() {
                             None
                         } else {
@@ -439,7 +439,7 @@ impl SessionManager {
     }
 
     /// Identifies if the response is ready.
-    ///  
+    ///
     /// The internal state is [State::ReadyToRespond] in this returns `true`.
     pub fn response_ready(&self) -> bool {
         matches!(self.state, State::ReadyToRespond(_))
@@ -909,7 +909,7 @@ mod test {
                 }
             }
         ]))
-        .unwrap();
+            .unwrap();
         let permitted = serde_json::from_value(json!({
             "doc_type_1": {
                 "namespace_1": [
@@ -926,7 +926,7 @@ mod test {
                 ],
             }
         }))
-        .unwrap();
+            .unwrap();
         let expected: PermittedItems = serde_json::from_value(json!({
             "doc_type_1": {
                 "namespace_1": [
@@ -934,7 +934,7 @@ mod test {
                 ],
             }
         }))
-        .unwrap();
+            .unwrap();
 
         let filtered = super::filter_permitted(&requested, permitted);
 

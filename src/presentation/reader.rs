@@ -10,7 +10,7 @@
 //!
 //! ### Example
 //!
-//! You can see the full example in `on_simulated_reader.rs` in `examples` directory. The code is considerably shorter.  
+//! You can see the full example in `on_simulated_reader.rs` in `examples` directory. The code is considerably shorter.
 //! Now the device is simulated in `common`
 //! module (you can find the complete code in `examples` directory),
 //! here we focus on the code from the
@@ -215,7 +215,7 @@ impl SessionManager {
             &device_request_bytes,
             &mut self.reader_message_counter,
         )
-        .map_err(|e| anyhow!("unable to encrypt request: {}", e))
+            .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
     /// Handles a response from the device.
@@ -238,7 +238,7 @@ impl SessionManager {
             encrypted_response.as_ref(),
             &mut self.device_message_counter,
         )
-        .map_err(|_e| Error::DecryptionError)?;
+            .map_err(|_e| Error::DecryptionError)?;
         let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
         let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
         let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
