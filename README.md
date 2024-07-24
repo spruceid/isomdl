@@ -1,9 +1,9 @@
 # isomdl
 
-[ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) **mDL** implementation in Rust.
+[ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) `mDL` implementation in Rust.
 
-It is intended to be used in creating apps for **Devices** and **Readers** that can interact with each other to
-exchange **mDL**
+It is intended to be used in creating apps for devices and readers that can interact with each other to exchange `mDL`
+data.
 
 ## CLI tool
 
@@ -47,11 +47,11 @@ sequenceDiagram
 ### The flow of the interaction
 
 1. **Device initialization and engagement:**
-    - The device creates a **QR code** containing `DeviceEngagement` data, which includes its public key.
+    - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
     - Internally:
-        - The device initializes with the **mDL** data, private key, and public key.
+        - The device initializes with the `mDL` data, private key, and public key.
 2. **Reader processing QR code and requesting needed fields:**
-    - The reader processes the **QR code** and creates a request for the `age_over_21` element.
+    - The reader processes the `QR code` and creates a request for the `age_over_21` element.
     - Internally:
         - Generates its private and public keys.
         - Initiates a key exchange, and generates the session keys.
@@ -67,148 +67,51 @@ sequenceDiagram
     - The reader processes the response and prints the value of the `age_over_21` element.
 
 You can see the full example in [simulated_device_and_reader](examples/simulated_device_and_reader.rs) or a version that
-uses **State pattern**, `Arc` and `Mutex` [simulated_device_and_reader](examples/simulated_device_and_reader_state.rs).
+uses `State pattern`, `Arc` and `Mutex` [simulated_device_and_reader](examples/simulated_device_and_reader_state.rs).
 
-#### Device perspective
+##### Device perspective
 
 There are several states through which the device goes during the interaction:
 
 ```mermaid
 stateDiagram
-    User --> SessionManagerInit: initialise
-    SessionManagerInit --> SessionManagerEngaged: qr_engagement
-    SessionManagerEngaged --> SessionManager_AwaitingRequest: process_session_establishment
-    SessionManager_AwaitingRequest --> SessionManager_Signing: prepare_response
-    SessionManager_Signing --> SessionManager_Signing: get_next_signature_payload
-    SessionManager_Signing --> SessionManager_ReadyToRespond: submit_next_signature
-    SessionManager_ReadyToRespond --> SessionManager_AwaitingRequest: retrieve_response
-    SessionManager_AwaitingRequest --> SessionManager_Signing: handle_request
-```
-
-The reader is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
-device perspective. You can see the full example in [on_simulated_device](examples/on_simulated_device.rs).
-
-<!-- INCLUDE-RUST: examples/on_simulated_device.rs -->
-
-```rust
-mod common;
-
-use anyhow::{anyhow, Context, Result};
-use signature::{SignatureEncoding, Signer};
-use uuid::Uuid;
-
-use isomdl::definitions;
-use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
-use isomdl::definitions::device_request::DocType;
-use isomdl::definitions::helpers::NonEmptyMap;
-use isomdl::definitions::{BleOptions, DeviceRetrievalMethod};
-use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
-use isomdl::presentation::{device, Stringify};
-
-use crate::common::{establish_reader_session, reader_handle_device_response};
-
-const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
-const NAMESPACE: &str = "org.iso.18013.5.1";
-const AGE_OVER_21_ELEMENT: &str = "age_over_21";
-
-fn main() -> Result<()> {
-    // Device initialization and engagement
-    let (engaged_state, qr_code_uri) = initialise_session()?;
-
-    // Reader processing QR and requesting needed fields
-    let (mut reader_session_manager, request) = establish_reader_session(qr_code_uri)?;
-
-    // Device accepting request
-    let (device_session_manager, requested_items) = handle_request(engaged_state, request)?;
-
-    // Prepare response with required elements
-    let response = create_response(
-        device_session_manager,
-        requested_items,
-        &create_signing_key()?,
-    )?;
-
-    // Reader Processing mDL data
-    reader_handle_device_response(&mut reader_session_manager, response)?;
-
-    Ok(())
-}
-
-/// Parse the mDL encoded string into a [Documents] object.
-fn parse_mdl() -> Result<NonEmptyMap<DocType, Document>> {
-    let mdl_encoded = include_str!("data/stringified-mdl.txt");
-    let mdl = Document::parse(mdl_encoded.to_string()).context("could not parse mDL")?;
-    let docs = Documents::new(DOC_TYPE.to_string(), mdl);
-    Ok(docs)
-}
-
-/// Creates a QR code containing [DeviceEngagement] data, which includes its public key.
-fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
-    // Parse the mDL
-    let docs = parse_mdl()?;
-
-    let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
-        peripheral_server_mode: None,
-        central_client_mode: Some(CentralClientMode {
-            uuid: Uuid::new_v4(),
-        }),
-    }));
-
-    let session = device::SessionManagerInit::initialise(docs, Some(drms), None)
-        .context("failed to initialize device")?;
-
-    session
-        .qr_engagement()
-        .context("could not generate qr engagement")
-}
-
-/// The Device handles the request from the reader and advances the state.
-fn handle_request(
-    state: SessionManagerEngaged,
-    request: Vec<u8>,
-) -> Result<(device::SessionManager, RequestedItems)> {
-    let (session_manager, items_requests) = {
-        let session_establishment: definitions::SessionEstablishment =
-            serde_cbor::from_slice(&request).context("could not deserialize request")?;
-        state
-            .process_session_establishment(session_establishment)
-            .context("could not process process session establishment")?
-    };
-    if session_manager.get_next_signature_payload().is_some() {
-        anyhow::bail!("there were errors processing request");
+    state Device {
+        [*] --> SessionManagerInit: initialise
+        SessionManagerInit --> SessionManagerEngaged: qr_engagement
+        SessionManagerEngaged --> SessionManager: process_session_establishment
     }
-    Ok((session_manager, items_requests))
-}
 
-/// Prepare response with required elements.
-fn create_response(
-    mut session_manager: device::SessionManager,
-    requested_items: RequestedItems,
-    key: &p256::ecdsa::SigningKey,
-) -> Result<Vec<u8>> {
-    let permitted_items = [(
-        DOC_TYPE.to_string(),
-        [(NAMESPACE.to_string(), vec![AGE_OVER_21_ELEMENT.to_string()])]
-            .into_iter()
-            .collect(),
-    )]
-    .into_iter()
-    .collect();
-    session_manager.prepare_response(&requested_items, permitted_items);
-    let (_, sign_payload) = session_manager.get_next_signature_payload().unwrap();
-    let signature: p256::ecdsa::Signature = key.sign(sign_payload);
-    session_manager
-        .submit_next_signature(signature.to_der().to_vec())
-        .context("failed to submit signature")?;
-    session_manager
-        .retrieve_response()
-        .ok_or(anyhow!("cannot prepare response"))
-}
+    state SessionManagerInit {
+        [*] --> [*]
+    }
 
-fn create_signing_key() -> Result<p256::ecdsa::SigningKey> {
-    Ok(p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))?.into())
-}
+    state SessionManagerEngaged {
+        [*] --> [*]
+    }
+
+    state Reader {
+        [*] --> [*]
+    }
+
+    state SessionManager {
+        [*] --> AwaitingRequest
+        AwaitingRequest --> Signing: prepare_response
+        Signing --> Signing: get_next_signature_payload
+        Signing --> ReadyToRespond: submit_next_signature
+        ReadyToRespond --> AwaitingRequest: retrieve_response
+        AwaitingRequest --> Signing: handle_request
+    }
+
+    User --> Device
+    SessionManagerInit --> Reader: qr_engagement
+    Reader --> SessionManagerEngaged: establish_session
+    ReadyToRespond --> Reader: handle_response
 ```
+
+The reader is simulated in [common](examples/common.rs) module (you can find the code in [examples](examples)),
+and we focus on the code from the
+device perspective.
+You can see the full example in [on_simulated_device](examples/on_simulated_device.rs).
 
 ##### Reader perspective
 
@@ -216,73 +119,22 @@ From the reader's perspective, the flow is simpler:
 
 ```mermaid
 stateDiagram
-    Device --> SessionManager: establish_session
-    SessionManager --> SessionManager_response: handle_response
-    SessionManager_response --> SessionManager: new_request
+    state Device {
+        [*] --> [*]
+    }
+
+    state Reader {
+        SessionManager --> SessionManager: handle_response
+    }
+
+    User --> Device
+    Device --> Reader: qr_engagement
+    Reader --> Device: establish_session
+    Device --> Reader
+    Reader --> Device: new_request
 ```
 
-Now the device is simulated in `common` module (you can find the code in `examples`), and we focus on the code from the
-reader perspective. The code is
-considerably shorter. You can see the full example in [on_simulated_reader](examples/on_simulated_reader.rs).
-
-<!-- INCLUDE-RUST: examples/on_simulated_reader.rs -->
-
-```rust
-mod common;
-
-use anyhow::{Context, Result};
-
-use isomdl::definitions::device_request::{DataElements, Namespaces};
-use isomdl::presentation::reader;
-
-use crate::common::{create_response, create_signing_key, handle_request, initialise_session};
-
-const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
-const NAMESPACE: &str = "org.iso.18013.5.1";
-const AGE_OVER_21_ELEMENT: &str = "age_over_21";
-
-fn main() -> Result<()> {
-    // Device initialization and engagement
-    let (engaged_state, qr_code_uri) = initialise_session()?;
-
-    // Reader processing QR and requesting needed fields
-    let (mut reader_session_manager, request) = establish_reader_session(qr_code_uri)?;
-
-    // Device accepting request
-    let (device_session_manager, requested_items) = handle_request(engaged_state, request)?;
-
-    // Prepare response with required elements
-    let response = create_response(
-        device_session_manager,
-        requested_items,
-        &create_signing_key()?,
-    )?;
-
-    // Reader Processing mDL data
-    reader_handle_device_response(&mut reader_session_manager, response)?;
-
-    Ok(())
-}
-
-/// Establishes the reader session from the given QR code and create request for needed elements.
-fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u8>)> {
-    let requested_elements = Namespaces::new(
-        NAMESPACE.into(),
-        DataElements::new(AGE_OVER_21_ELEMENT.to_string(), false),
-    );
-    let (reader_sm, session_request, _ble_ident) =
-        reader::SessionManager::establish_session(qr, requested_elements)
-            .context("failed to establish reader session")?;
-    Ok((reader_sm, session_request))
-}
-
-/// Reader Processing mDL data.
-fn reader_handle_device_response(
-    reader_sm: &mut reader::SessionManager,
-    response: Vec<u8>,
-) -> Result<()> {
-    let res = reader_sm.handle_response(&response)?;
-    println!("{:?}", res);
-    Ok(())
-}
-```
+Now the reader is simulated in [common](examples/common.rs) module (you can find the code in [examples](examples)),
+and we focus on the code from the reader's perspective.
+The code is considerably shorter.
+You can see the full example in [on_simulated_reader](examples/on_simulated_reader.rs).

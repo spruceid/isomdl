@@ -22,23 +22,3 @@ You need to specify the path to the `md` file as input.
 ```bash
 update-md-includes.sh README.md
 ```
-
-# update-rustdoc-includes.sh
-
-Similar to the above just for `rustdoc`s. If you have this:
-
-```rust
-//! <!-- INCLUDE-RUST: path-to-file-relative-to-rs-file -->
-//! ```
-//! ```
-```
-
-It will include the content of the file in the code block below
-the `INCLUDE-RUST`.  
-It will keep the `INCLUDE-RUST` marker in the file, so you can run the script again to update the content.
-
-You need to specify the start directory as input, it will run on all `.rs` files recursively.
-
-```bash
-update-rustdoc-includes.sh .
-```

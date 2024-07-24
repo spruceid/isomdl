@@ -48,13 +48,37 @@ There are several states through which the device goes during the interaction:
 
 ```mermaid
 stateDiagram
-    User --> SessionManagerInit: initialise
-    SessionManagerInit --> SessionManagerEngaged: qr_engagement
-    SessionManagerEngaged --> SessionManager: process_session_establishment
-    SessionManager --> SessionManager3_response: prepare_response
-    SessionManager3_response --> SessionManager3_sign: get_next_signature_payload
-    SessionManager3_sign --> SessionManager3_sign: submit_next_signature
-    SessionManager3_sign --> SessionManager: retrieve_response
+    state Device {
+        [*] --> SessionManagerInit: initialise
+        SessionManagerInit --> SessionManagerEngaged: qr_engagement
+        SessionManagerEngaged --> SessionManager: process_session_establishment
+    }
+
+    state SessionManagerInit {
+        [*] --> [*]
+    }
+
+    state SessionManagerEngaged {
+        [*] --> [*]
+    }
+
+    state Reader {
+        [*] --> [*]
+    }
+
+    state SessionManager {
+        [*] --> AwaitingRequest
+        AwaitingRequest --> Signing: prepare_response
+        Signing --> Signing: get_next_signature_payload
+        Signing --> ReadyToRespond: submit_next_signature
+        ReadyToRespond --> AwaitingRequest: retrieve_response
+        AwaitingRequest --> Signing: handle_request
+    }
+
+    User --> Device
+    SessionManagerInit --> Reader: qr_engagement
+    Reader --> SessionManagerEngaged: establish_session
+    ReadyToRespond --> Reader: handle_response
 ```
 
 ##### Reader perspective
@@ -63,16 +87,26 @@ From the reader's perspective, the flow is simpler:
 
 ```mermaid
 stateDiagram
-    Device --> SessionManager: establish_session
-    SessionManager --> SessionManager_response: handle_response
-    SessionManager_response --> SessionManager: new_request
+    state Device {
+        [*] --> [*]
+    }
+
+    state Reader {
+        SessionManager --> SessionManager: handle_response
+    }
+
+    User --> Device
+    Device --> Reader: qr_engagement
+    Reader --> Device: establish_session
+    Device --> Reader
+    Reader --> Device: new_request
 ```
 
 There are several examples:
 
 - full flow of the interaction:
-    - in a basic structure [simulated_device_and_reader_basic](simulated_device_and_reader_basic.rs)
+    - in a basic structure [simulated_device_and_reader](simulated_device_and_reader.rs)
     - more organized structure using `State` pattern, `Arc`
-      and `Mutex` [simulated_device_and_reader_structured](simulated_device_and_reader_structured.rs)
+      and `Mutex` [simulated_device_and_reader_state](simulated_device_and_reader_state.rs)
 - on the device perspective [on_simulated_device](on_simulated_device.rs)
 - on the reader perspective [on_simulated_reader](on_simulated_reader.rs)
