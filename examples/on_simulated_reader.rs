@@ -12,6 +12,10 @@ const NAMESPACE: &str = "org.iso.18013.5.1";
 const AGE_OVER_21_ELEMENT: &str = "age_over_21";
 
 fn main() -> Result<()> {
+    run_on_simulated_reader()
+}
+
+pub fn run_on_simulated_reader() -> Result<()> {
     // Device initialization and engagement
     let (engaged_state, qr_code_uri) = initialise_session()?;
 
@@ -33,7 +37,6 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
 /// Establishes the reader session from the given QR code and create request for needed elements.
 fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u8>)> {
     let requested_elements = Namespaces::new(
