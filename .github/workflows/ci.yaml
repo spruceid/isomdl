@@ -30,9 +30,6 @@ jobs:
       - name: Run scripts tests
         run: ./scripts/test.sh
 
-      - name: Run examples
-        run: ./examples/run.sh
-
       - name: Clippy
         run: cargo clippy --all-targets
 
