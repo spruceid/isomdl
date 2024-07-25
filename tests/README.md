@@ -1,10 +1,10 @@
-# isomdl examples
+# isomdl integration tests
 
-Collection of examples of how you can use the library.
+Collection of integration tests that can be used as examples too of how you can use the library.
 
 # Simulated device and reader interaction
 
-This example demonstrates a simulated device and reader interaction.  
+This test demonstrates a simulated device and reader interaction.  
 The reader requests the `age_over_21` element, and the device responds with that value.
 
 ```mermaid
@@ -102,7 +102,7 @@ stateDiagram
     Reader --> Device: new_request
 ```
 
-There are several examples:
+There are several tests:
 
 - full flow of the interaction:
     - in a basic structure [simulated_device_and_reader](simulated_device_and_reader.rs)

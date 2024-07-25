@@ -17,7 +17,7 @@
 //! reader's perspective.
 //!
 //! ```ignore
-#![doc = include_str!("../../examples/on_simulated_reader.rs")]
+#![doc = include_str!("../../tests/on_simulated_reader.rs")]
 //! ```
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
@@ -215,7 +215,7 @@ impl SessionManager {
             &device_request_bytes,
             &mut self.reader_message_counter,
         )
-            .map_err(|e| anyhow!("unable to encrypt request: {}", e))
+        .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
     /// Handles a response from the device.
@@ -238,7 +238,7 @@ impl SessionManager {
             encrypted_response.as_ref(),
             &mut self.device_message_counter,
         )
-            .map_err(|_e| Error::DecryptionError)?;
+        .map_err(|_e| Error::DecryptionError)?;
         let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
         let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
         let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();

@@ -21,8 +21,8 @@ cat test/stringified-mdl.txt | cargo run -- get-namespaces -
 
 ## Library
 
-You can see more examples on how to use the library in [examples](examples) directory and read about in the
-dedicated [README](examples/README.md).
+You can see more examples on how to use the library in [tests](tests) directory and read about in the
+dedicated [README](tests/README.md).
 
 ### **Device** and **Reader** interaction
 
@@ -66,9 +66,9 @@ sequenceDiagram
 
 ##### Examples
 
-You can see the example in [simulated_device_and_reader](examples/simulated_device_and_reader.rs) or a version that
+You can see the example in [simulated_device_and_reader](tests/simulated_device_and_reader.rs) or a version that
 uses **State pattern**, `Arc`
-and `Mutex` in [simulated_device_and_reader_state](examples/simulated_device_and_reader_state.rs).
+and `Mutex` in [simulated_device_and_reader_state](tests/simulated_device_and_reader_state.rs).
 
 #### Device perspective
 
@@ -111,8 +111,8 @@ stateDiagram
 
 ##### Examples
 
-You can see the full example in [on_simulated_device](examples/on_simulated_device.rs).  
-The reader is simulated in [common](examples/common.rs) module (you can find the code in [examples](examples)),
+You can see the full example in [on_simulated_device](tests/on_simulated_device.rs).  
+The reader is simulated in [common](tests/common.rs) module (you can find the code in [tests](tests)),
 and we focus on the code from the
 device perspective.
 
@@ -139,7 +139,7 @@ stateDiagram
 
 ##### Examples
 
-You can see the full example in [on_simulated_reader](examples/on_simulated_reader.rs).
+You can see the full example in [on_simulated_reader](tests/on_simulated_reader.rs).
 The code is considerably shorter.  
-Now the reader is simulated in [common](examples/common.rs) module (you can find the code in [examples](examples)),
+Now the reader is simulated in [common](tests/common.rs) module (you can find the code in [tests](tests)),
 and we focus on the code from the reader's perspective.
