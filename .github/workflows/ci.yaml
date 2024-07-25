@@ -35,3 +35,10 @@ jobs:
 
       - name: Fmt
         run: cargo fmt --all -- --check
+
+      - name: Doc
+        run: |
+          cargo doc --workspace --all-features
+          cd macros
+          cargo doc --workspace --all-features
+          cd ..
