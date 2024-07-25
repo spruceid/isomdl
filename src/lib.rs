@@ -182,7 +182,7 @@
 //! #### Example
 //!
 //! ```ignore
-#![doc = include_str!("../examples/on_simulated_device.rs")]
+#![doc = include_str!("../tests/on_simulated_device.rs")]
 //! ```
 //!
 //! ### Reader perspective
@@ -230,7 +230,7 @@
 //! #### Example
 //!
 //! ```ignore
-#![doc = include_str!("../examples/on_simulated_reader.rs")]
+#![doc = include_str!("../tests/on_simulated_reader.rs")]
 //! ```
 pub use cose_rs;
 
