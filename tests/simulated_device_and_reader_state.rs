@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use signature::{SignatureEncoding, Signer};
+use signature::Signer;
 use uuid::Uuid;
 
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
@@ -181,7 +181,7 @@ fn sign_pending_and_retrieve_response(
             }
             let signature: p256::ecdsa::Signature = session_manager.key.sign(payload);
             guard
-                .submit_next_signature(signature.to_der().to_vec())
+                .submit_next_signature(signature.to_vec())
                 .context("failed to submit signature")?;
             signed += 1;
         } else {

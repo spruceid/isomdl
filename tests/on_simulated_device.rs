@@ -1,7 +1,7 @@
 mod common;
 
 use anyhow::{anyhow, Context, Result};
-use signature::{SignatureEncoding, Signer};
+use signature::Signer;
 use uuid::Uuid;
 
 use isomdl::definitions;
@@ -108,7 +108,7 @@ fn create_response(
     let (_, sign_payload) = session_manager.get_next_signature_payload().unwrap();
     let signature: p256::ecdsa::Signature = key.sign(sign_payload);
     session_manager
-        .submit_next_signature(signature.to_der().to_vec())
+        .submit_next_signature(signature.to_vec())
         .context("failed to submit signature")?;
     session_manager
         .retrieve_response()
