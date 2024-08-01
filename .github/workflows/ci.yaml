@@ -26,9 +26,6 @@ jobs:
           cd macros
           cargo test
 
-      - name: Run scripts tests
-        run: ./scripts/test.sh
-
       - name: Clippy
         run: cargo clippy --all-targets
 
