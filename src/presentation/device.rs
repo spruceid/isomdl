@@ -338,7 +338,7 @@ impl SessionManager {
             data.as_ref(),
             &mut self.reader_message_counter,
         )
-        .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
         let request = match self.parse_request(&decrypted_request) {
             Ok(r) => r,
             Err(e) => {
@@ -415,11 +415,11 @@ impl SessionManager {
                             &response_bytes,
                             &mut self.device_message_counter,
                         )
-                        .unwrap_or_else(|_e| {
-                            //tracing::warn!("unable to encrypt response: {}", e);
-                            status = Some(session::Status::SessionEncryptionError);
-                            Default::default()
-                        });
+                            .unwrap_or_else(|_e| {
+                                //tracing::warn!("unable to encrypt response: {}", e);
+                                status = Some(session::Status::SessionEncryptionError);
+                                Default::default()
+                            });
                         let data = if status.is_some() {
                             None
                         } else {
@@ -909,7 +909,7 @@ mod test {
                 }
             }
         ]))
-        .unwrap();
+            .unwrap();
         let permitted = serde_json::from_value(json!({
             "doc_type_1": {
                 "namespace_1": [
@@ -926,7 +926,7 @@ mod test {
                 ],
             }
         }))
-        .unwrap();
+            .unwrap();
         let expected: PermittedItems = serde_json::from_value(json!({
             "doc_type_1": {
                 "namespace_1": [
@@ -934,7 +934,7 @@ mod test {
                 ],
             }
         }))
-        .unwrap();
+            .unwrap();
 
         let filtered = super::filter_permitted(&requested, permitted);
 
