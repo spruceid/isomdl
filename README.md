@@ -1,6 +1,6 @@
 # isomdl
 
-[ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) **mDL** implementation in Rust.
+[ISO/IEC DIS 18013-5](https://www.iso.org/standard/69084.html) `mDL` implementation in Rust.
 
 It is intended to be used in creating apps for **Devices** and **Readers** that can interact with each other to
 exchange **mDL**
