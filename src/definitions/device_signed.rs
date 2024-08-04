@@ -29,6 +29,15 @@ pub enum DeviceAuth {
     Mac { device_mac: CoseMac0 },
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DeviceAuthType {
+    #[serde(rename_all = "camelCase")]
+    Sign1,
+    #[serde(rename_all = "camelCase")]
+    Mac0,
+}
+
 pub type DeviceAuthenticationBytes<S> = Tag24<DeviceAuthentication<S>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 
-use coset::CoseSign1Builder;
+use coset::{CoseMac0Builder, CoseSign1Builder};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 use session::SessionTranscript180135;
 
+use crate::cose::mac0::PreparedCoseMac0;
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -54,6 +56,7 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     state: State,
+    device_auth_type: DeviceAuthType,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -100,6 +103,22 @@ pub struct PreparedDeviceResponse {
     signed_documents: Vec<DeviceResponseDoc>,
     document_errors: Option<DocumentErrors>,
     status: Status,
+    device_auth_type: DeviceAuthType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum PreparedCose {
+    Sign1(PreparedCoseSign1),
+    Mac0(PreparedCoseMac0),
+}
+
+impl PreparedCose {
+    fn signature_payload(&self) -> &[u8] {
+        match self {
+            PreparedCose::Sign1(inner) => inner.signature_payload(),
+            PreparedCose::Mac0(inner) => inner.signature_payload(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +127,7 @@ struct PreparedDocument {
     doc_type: String,
     issuer_signed: IssuerSigned,
     device_namespaces: DeviceNamespacesBytes,
-    prepared_cose_sign1: PreparedCoseSign1,
+    prepared_cose: PreparedCose,
     errors: Option<NamespaceErrors>,
 }
 
@@ -195,6 +214,7 @@ impl SessionManagerEngaged {
             sk_reader,
             reader_message_counter: 0,
             state: State::AwaitingRequest,
+            device_auth_type: DeviceAuthType::Sign1,
         };
 
         let requested_data = sm.handle_decoded_request(SessionData {
@@ -210,12 +230,12 @@ impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
         let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
             // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
-            PreparedDeviceResponse::empty(Status::CborDecodingError)
+            PreparedDeviceResponse::empty(Status::CborDecodingError, self.device_auth_type)
         })?;
 
         serde_cbor::value::from_value(request).map_err(|_| {
             // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
-            PreparedDeviceResponse::empty(Status::CborValidationError)
+            PreparedDeviceResponse::empty(Status::CborValidationError, self.device_auth_type)
         })
     }
 
@@ -229,7 +249,10 @@ impl SessionManager {
             //     request.version,
             //     DeviceRequest::VERSION
             // );
-            return Err(PreparedDeviceResponse::empty(Status::GeneralError));
+            return Err(PreparedDeviceResponse::empty(
+                Status::GeneralError,
+                self.device_auth_type,
+            ));
         }
         Ok(request
             .doc_requests
@@ -290,7 +313,6 @@ impl SessionManager {
         if matches!(self.state, State::Signing(_)) {
             match std::mem::take(&mut self.state) {
                 State::Signing(mut p) => {
-                    // todo: support for CoseMac0
                     p.submit_next_signature(signature);
                     if p.is_complete() {
                         let response = p.finalize_response();
@@ -332,7 +354,7 @@ impl SessionManager {
     /// Retrieve the completed response.
     pub fn retrieve_response(&mut self) -> Option<Vec<u8>> {
         if self.response_ready() {
-            // Replace state with AwaitingRequest.
+            // Replace the state with AwaitingRequest.
             let state = std::mem::take(&mut self.state);
             match state {
                 State::ReadyToRespond(r) => Some(r),
@@ -346,12 +368,13 @@ impl SessionManager {
 }
 
 impl PreparedDeviceResponse {
-    fn empty(status: Status) -> Self {
+    fn empty(status: Status, device_auth_type: DeviceAuthType) -> Self {
         PreparedDeviceResponse {
             status,
             prepared_documents: Vec::new(),
             document_errors: None,
             signed_documents: Vec::new(),
+            device_auth_type,
         }
     }
 
@@ -365,16 +388,15 @@ impl PreparedDeviceResponse {
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         self.prepared_documents
             .last()
-            .map(|doc| (doc.id, doc.prepared_cose_sign1.signature_payload()))
+            .map(|doc| (doc.id, doc.prepared_cose.signature_payload()))
     }
 
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) {
         let signed_doc = match self.prepared_documents.pop() {
-            // todo: support for CoseMac0
             Some(doc) => doc.finalize(signature),
             None => {
                 //tracing::error!(
-                //    "received a signature for finalising when there are no more prepared docs"
+                //    "received a signature for finalizing when there are no more prepared docs"
                 //);
                 return;
             }
@@ -385,7 +407,8 @@ impl PreparedDeviceResponse {
     pub fn finalize_response(self) -> DeviceResponse {
         if !self.is_complete() {
             //tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
-            return PreparedDeviceResponse::empty(Status::GeneralError).finalize_response();
+            return PreparedDeviceResponse::empty(Status::GeneralError, self.device_auth_type)
+                .finalize_response();
         }
 
         DeviceResponse {
@@ -402,19 +425,23 @@ impl PreparedDocument {
         let Self {
             issuer_signed,
             device_namespaces,
-            prepared_cose_sign1,
+            prepared_cose,
             errors,
             doc_type,
             ..
         } = self;
-        // todo: support for CoseMac0
-        let cose_sign1 = prepared_cose_sign1.finalize(signature);
+        let device_auth = match prepared_cose {
+            PreparedCose::Sign1(inner) => DeviceAuth::Signature {
+                device_signature: inner.finalize(signature),
+            },
+            PreparedCose::Mac0(inner) => DeviceAuth::Mac {
+                device_mac: inner.finalize(signature),
+            },
+        };
+
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,
-            // todo: support for CoseMac0
-            device_auth: DeviceAuth::Signature {
-                device_signature: cose_sign1,
-            },
+            device_auth,
         };
         DeviceResponseDoc {
             doc_type,
@@ -430,6 +457,7 @@ pub trait DeviceSession {
 
     fn documents(&self) -> &Documents;
     fn session_transcript(&self) -> Self::ST;
+    fn device_auth_type(&self) -> DeviceAuthType;
     fn prepare_response(
         &self,
         requests: &RequestedItems,
@@ -553,19 +581,49 @@ pub trait DeviceSession {
             let header = coset::HeaderBuilder::new()
                 .algorithm(signature_algorithm)
                 .build();
-            // todo: support for CoseMac0
-            let cose1_builder = CoseSign1Builder::new().protected(header);
-            let prepared_cose_sign1 =
-                match PreparedCoseSign1::new(cose1_builder, Some(device_auth_bytes), None, true) {
-                    Ok(prepared) => prepared,
-                    Err(_e) => {
-                        let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                            .into_iter()
-                            .collect();
-                        document_errors.push(error);
-                        continue;
-                    }
-                };
+
+            let prepared_cose = match self.device_auth_type() {
+                DeviceAuthType::Sign1 => {
+                    let cose_sign1_builder = CoseSign1Builder::new().protected(header);
+                    let prepared_cose_sign1 = match PreparedCoseSign1::new(
+                        cose_sign1_builder,
+                        Some(device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Sign1(prepared_cose_sign1)
+                }
+                DeviceAuthType::Mac0 => {
+                    let cose_mac0_builder = CoseMac0Builder::new().protected(header);
+                    let prepared_cose_mac0 = match PreparedCoseMac0::new(
+                        cose_mac0_builder,
+                        Some(device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Mac0(prepared_cose_mac0)
+                }
+            };
 
             let prepared_document = PreparedDocument {
                 id: document.id,
@@ -575,7 +633,7 @@ pub trait DeviceSession {
                     issuer_auth: document.issuer_auth.clone(),
                 },
                 device_namespaces,
-                prepared_cose_sign1,
+                prepared_cose,
                 errors: errors.try_into().ok(),
             };
             prepared_documents.push(prepared_document);
@@ -585,6 +643,7 @@ pub trait DeviceSession {
             document_errors: document_errors.try_into().ok(),
             status: Status::OK,
             signed_documents: Vec::new(),
+            device_auth_type: self.device_auth_type(),
         }
     }
 }
@@ -598,6 +657,10 @@ impl DeviceSession for SessionManager {
 
     fn session_transcript(&self) -> SessionTranscript180135 {
         self.session_transcript.clone()
+    }
+
+    fn device_auth_type(&self) -> DeviceAuthType {
+        self.device_auth_type
     }
 }
 
