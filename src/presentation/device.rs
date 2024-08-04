@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 
-use coset::{CoseSign1Builder, Header, RegisteredLabelWithPrivate};
+use coset::CoseSign1Builder;
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
@@ -9,8 +9,7 @@ use uuid::Uuid;
 
 use session::SessionTranscript180135;
 
-use crate::cose::sign1::CoseSign1;
-use crate::cose::Cose;
+use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -109,7 +108,7 @@ struct PreparedDocument {
     doc_type: String,
     issuer_signed: IssuerSigned,
     device_namespaces: DeviceNamespacesBytes,
-    prepared_cose_sign1: CoseSign1,
+    prepared_cose_sign1: PreparedCoseSign1,
     errors: Option<NamespaceErrors>,
 }
 
@@ -291,6 +290,7 @@ impl SessionManager {
         if matches!(self.state, State::Signing(_)) {
             match std::mem::take(&mut self.state) {
                 State::Signing(mut p) => {
+                    // todo: support for CoseMac0
                     p.submit_next_signature(signature);
                     if p.is_complete() {
                         let response = p.finalize_response();
@@ -370,6 +370,7 @@ impl PreparedDeviceResponse {
 
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) {
         let signed_doc = match self.prepared_documents.pop() {
+            // todo: support for CoseMac0
             Some(doc) => doc.finalize(signature),
             None => {
                 //tracing::error!(
@@ -401,17 +402,18 @@ impl PreparedDocument {
         let Self {
             issuer_signed,
             device_namespaces,
-            mut prepared_cose_sign1,
+            prepared_cose_sign1,
             errors,
             doc_type,
             ..
         } = self;
-        prepared_cose_sign1.set_signature(signature);
+        // todo: support for CoseMac0
+        let cose_sign1 = prepared_cose_sign1.finalize(signature);
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,
             // todo: support for CoseMac0
             device_auth: DeviceAuth::Signature {
-                device_signature: prepared_cose_sign1,
+                device_signature: cose_sign1,
             },
         };
         DeviceResponseDoc {
@@ -548,15 +550,23 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let protected = Header {
-                alg: Some(RegisteredLabelWithPrivate::Assigned(signature_algorithm)),
-                ..Header::default()
-            };
+            let header = coset::HeaderBuilder::new()
+                .algorithm(signature_algorithm)
+                .build();
             // todo: support for CoseMac0
-            let builder = CoseSign1Builder::new()
-                .protected(protected)
-                .payload(device_auth_bytes);
-            let prepared_cose_sign1 = CoseSign1::new(builder.build());
+            let cose1_builder = CoseSign1Builder::new().protected(header);
+            let prepared_cose_sign1 =
+                match PreparedCoseSign1::new(cose1_builder, Some(device_auth_bytes), None, true) {
+                    Ok(prepared) => prepared,
+                    Err(_e) => {
+                        let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
+                            .into_iter()
+                            .collect();
+                        document_errors.push(error);
+                        continue;
+                    }
+                };
+
             let prepared_document = PreparedDocument {
                 id: document.id,
                 doc_type,
@@ -565,7 +575,6 @@ pub trait DeviceSession {
                     issuer_auth: document.issuer_auth.clone(),
                 },
                 device_namespaces,
-                // todo: support for CoseMac0
                 prepared_cose_sign1,
                 errors: errors.try_into().ok(),
             };

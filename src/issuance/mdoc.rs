@@ -2,15 +2,15 @@ use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;
-use coset::{iana, Header, Label, RegisteredLabelWithPrivate};
+use coset::{iana, Label};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 
-use crate::cose::sign1::CoseSign1;
-use crate::cose::{Cose, SignatureAlgorithm};
+use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::cose::SignatureAlgorithm;
 use crate::{
     definitions::{
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
@@ -38,7 +38,7 @@ pub struct PreparedMdoc {
     doc_type: String,
     mso: Mso,
     namespaces: IssuerNamespaces,
-    prepared_sig: CoseSign1,
+    prepared_sig: PreparedCoseSign1,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -85,14 +85,13 @@ impl Mdoc {
 
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
-        let protected = Header {
-            alg: Some(RegisteredLabelWithPrivate::Assigned(signature_algorithm)),
-            ..Header::default()
-        };
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(signature_algorithm)
+            .build();
         let builder = coset::CoseSign1Builder::new()
             .protected(protected)
             .payload(mso_bytes);
-        let prepared_sig = CoseSign1::new(builder.build());
+        let prepared_sig = PreparedCoseSign1::new(builder, None, None, true)?;
 
         let preparation_mdoc = PreparedMdoc {
             doc_type,
@@ -189,13 +188,12 @@ impl PreparedMdoc {
             doc_type,
             namespaces,
             mso,
-            mut prepared_sig,
+            prepared_sig,
         } = self;
 
-        prepared_sig.set_signature(signature);
-        let mut issuer_auth = prepared_sig;
+        let mut issuer_auth = prepared_sig.finalize(signature);
         issuer_auth
-            .0
+            .inner
             .unprotected
             .rest
             .push((Label::Int(X5CHAIN_HEADER_LABEL as i64), x5chain.into_cbor()));

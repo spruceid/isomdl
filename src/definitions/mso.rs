@@ -51,7 +51,7 @@ mod test {
             serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
         let mso_bytes = signed
             .issuer_auth
-            .0
+            .inner
             .payload
             .as_ref()
             .expect("expected a COSE_Sign1 with attached payload, found detached payload");

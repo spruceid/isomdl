@@ -1,33 +1,283 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-
+use ::hmac::Hmac;
 use coset::cbor::Value;
-use coset::{mac_structure_data, AsCborValue, MacContext};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use coset::cwt::ClaimsSet;
+use coset::{
+    iana, mac_structure_data, AsCborValue, CborSerializable, CoseError, MacContext,
+    RegisteredLabelWithPrivate,
+};
+use digest::{Mac, MacError};
+use serde::ser::{SerializeMap, SerializeSeq};
+use serde::{ser, Deserialize, Deserializer, Serialize};
+use serde_cbor::tags::Tagged;
+use sha2::Sha256;
 
-use crate::cose::Cose;
+use crate::cose::SignatureAlgorithm;
 
-#[derive(Clone, Debug, Default)]
-pub struct CoseMac0(pub(crate) coset::CoseMac0, Arc<Mutex<Option<i64>>>);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreparedCoseMac0 {
+    tagged: bool,
+    cose_mac0: CoseMac0,
+    tag_payload: Vec<u8>,
+}
 
-impl CoseMac0 {
-    pub fn new(cose_mac0: coset::CoseMac0) -> Self {
-        Self(cose_mac0, Arc::new(Mutex::new(None)))
+#[derive(Clone, Debug)]
+pub struct CoseMac0 {
+    tagged: bool,
+    pub inner: coset::CoseMac0,
+}
+
+/// Errors that can occur when building, signing or verifying a COSE_Mac0.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("the COSE_Mac0 has an attached payload but an detached payload was provided")]
+    DoublePayload,
+    #[error("the COSE_Mac0 has a detached payload which was not provided")]
+    NoPayload,
+    #[error("tag did not match the structure expected by the verifier: {0}")]
+    MalformedTag(MacError),
+    #[error("tag is already present")]
+    AlreadyTagged,
+    #[error("error occurred when tagging COSE_Mac0: {0}")]
+    Tagging(MacError),
+    #[error("unable to set ClaimsSet: {0}")]
+    UnableToDeserializeIntoClaimsSet(CoseError),
+}
+
+/// Result with error type: [`Error`].
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// Result for verification of a COSE_Mac0.
+#[derive(Debug)]
+pub enum VerificationResult {
+    Success,
+    Failure(String),
+    Error(Error),
+}
+
+impl VerificationResult {
+    /// Result of verification.
+    ///
+    /// False implies the signature is inauthentic or the verification algorithm encountered an
+    /// error.
+    pub fn success(&self) -> bool {
+        matches!(self, VerificationResult::Success)
+    }
+
+    /// Translate to a std::result::Result.
+    ///
+    /// Converts failure reasons and errors into a String.
+    pub fn to_result(self) -> Result<(), String> {
+        match self {
+            VerificationResult::Success => Ok(()),
+            VerificationResult::Failure(reason) => Err(reason),
+            VerificationResult::Error(e) => Err(format!("{}", e)),
+        }
+    }
+
+    /// Retrieve the error if the verification algorithm encountered an error.
+    pub fn to_error(self) -> Option<Error> {
+        match self {
+            VerificationResult::Error(e) => Some(e),
+            _ => None,
+        }
     }
 }
 
-impl Serialize for CoseMac0 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // todo: map_err
-        self.0
+impl PreparedCoseMac0 {
+    pub fn new(
+        builder: coset::CoseMac0Builder,
+        detached_payload: Option<Vec<u8>>,
+        aad: Option<Vec<u8>>,
+        tagged: bool,
+    ) -> Result<Self> {
+        let cose_mac0 = builder.build();
+
+        // Check if the signature is already present.
+        match (&cose_mac0.tag, detached_payload.as_ref()) {
+            (v, Some(_)) if !v.is_empty() => return Err(Error::AlreadyTagged),
+            _ => {}
+        }
+
+        // Check if the payload is present and if it is attached or detached.
+        // Needs to be exclusively attached or detached.
+        let payload = match (cose_mac0.payload.as_ref(), detached_payload) {
+            (Some(_), Some(_)) => return Err(Error::DoublePayload),
+            (None, None) => return Err(Error::NoPayload),
+            (Some(payload), None) => Some(payload.clone()),
+            (None, Some(payload)) => Some(payload),
+        };
+        let payload = payload
+            // Payload is mandatory
+            .as_ref()
+            .expect("payload missing");
+        // Create the signature payload ot be used later on signing.
+        let tag_payload = mac_structure_data(
+            MacContext::CoseMac0,
+            cose_mac0.protected.clone(),
+            aad.unwrap_or_default().as_ref(),
+            payload,
+        );
+
+        Ok(Self {
+            tagged,
+            cose_mac0: CoseMac0 {
+                tagged,
+                inner: cose_mac0,
+            },
+            tag_payload,
+        })
+    }
+
+    pub fn signature_payload(&self) -> &[u8] {
+        &self.tag_payload
+    }
+
+    pub fn finalize(self, tag: Vec<u8>) -> CoseMac0 {
+        let mut cose_mac0 = self.cose_mac0;
+        cose_mac0.inner.tag = tag;
+        cose_mac0
+    }
+}
+
+impl CoseMac0 {
+    /// Verify that the tag of a `COSE_Mac0` is authentic.
+    pub fn verify(
+        &self,
+        verifier: &Hmac<Sha256>,
+        detached_payload: Option<Vec<u8>>,
+        external_aad: Option<Vec<u8>>,
+    ) -> VerificationResult {
+        if let Some(RegisteredLabelWithPrivate::Assigned(alg)) =
+            self.inner.protected.header.alg.as_ref()
+        {
+            if verifier.algorithm() != *alg {
+                return VerificationResult::Failure(
+                    "algorithm in protected headers did not match verifier's algorithm".into(),
+                );
+            }
+        }
+
+        let payload = match (self.inner.payload.as_ref(), detached_payload.as_ref()) {
+            (None, None) => return VerificationResult::Error(Error::NoPayload),
+            (Some(attached), None) => attached,
+            (None, Some(detached)) => detached,
+            _ => return VerificationResult::Error(Error::DoublePayload),
+        };
+
+        let tag = &self.inner.tag;
+
+        // Create the signature payload ot be used later on signing.
+        let tag_payload = mac_structure_data(
+            MacContext::CoseMac0,
+            self.inner.protected.clone(),
+            external_aad.unwrap_or_default().as_ref(),
+            payload,
+        );
+
+        let mut mac = verifier.clone();
+        mac.reset();
+        mac.update(&tag_payload);
+        match mac.verify_slice(tag) {
+            Ok(()) => VerificationResult::Success,
+            Err(e) => VerificationResult::Failure(format!("tag is not authentic: {}", e)),
+        }
+    }
+
+    pub fn claims_set(&self) -> Result<Option<ClaimsSet>> {
+        match self.inner.payload.as_ref() {
+            None => Ok(None),
+            Some(payload) => ClaimsSet::from_slice(payload).map_or_else(
+                |e| Err(Error::UnableToDeserializeIntoClaimsSet(e)),
+                |c| Ok(Some(c)),
+            ),
+        }
+    }
+
+    pub fn tagged(&self) -> bool {
+        self.tagged
+    }
+
+    pub fn set_tagged(&mut self) {
+        self.tagged = true;
+    }
+}
+
+impl ser::Serialize for CoseMac0 {
+    #[inline]
+    fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let value = self
+            .inner
             .clone()
             .to_cbor_value()
-            .unwrap()
-            .serialize(serializer)
+            .map_err(ser::Error::custom)?; // Convert the inner CoseMac0 object to a tagged CBOR vector
+        if self.tagged {
+            return Tagged::new(Some(iana::CborTag::CoseMac0 as u64), value).serialize(serializer);
+        }
+        match value {
+            Value::Bytes(x) => serializer.serialize_bytes(&x),
+            Value::Bool(x) => serializer.serialize_bool(x),
+            Value::Text(x) => serializer.serialize_str(x.as_str()),
+            Value::Null => serializer.serialize_unit(),
+
+            Value::Tag(tag, ref v) => Tagged::new(Some(tag), v).serialize(serializer),
+
+            Value::Float(x) => {
+                let y = x as f32;
+                if (y as f64).to_bits() == x.to_bits() {
+                    serializer.serialize_f32(y)
+                } else {
+                    serializer.serialize_f64(x)
+                }
+            }
+
+            #[allow(clippy::unnecessary_fallible_conversions)]
+            Value::Integer(x) => {
+                if let Ok(x) = u8::try_from(x) {
+                    serializer.serialize_u8(x)
+                } else if let Ok(x) = i8::try_from(x) {
+                    serializer.serialize_i8(x)
+                } else if let Ok(x) = u16::try_from(x) {
+                    serializer.serialize_u16(x)
+                } else if let Ok(x) = i16::try_from(x) {
+                    serializer.serialize_i16(x)
+                } else if let Ok(x) = u32::try_from(x) {
+                    serializer.serialize_u32(x)
+                } else if let Ok(x) = i32::try_from(x) {
+                    serializer.serialize_i32(x)
+                } else if let Ok(x) = u64::try_from(x) {
+                    serializer.serialize_u64(x)
+                } else if let Ok(x) = i64::try_from(x) {
+                    serializer.serialize_i64(x)
+                } else if let Ok(x) = u128::try_from(x) {
+                    serializer.serialize_u128(x)
+                } else if let Ok(x) = i128::try_from(x) {
+                    serializer.serialize_i128(x)
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Value::Array(x) => {
+                let mut map = serializer.serialize_seq(Some(x.len()))?;
+
+                for v in x {
+                    map.serialize_element(&v)?;
+                }
+
+                map.end()
+            }
+
+            Value::Map(x) => {
+                let mut map = serializer.serialize_map(Some(x.len()))?;
+
+                for (k, v) in x {
+                    map.serialize_entry(&k, &v)?;
+                }
+
+                map.end()
+            }
+            _ => unimplemented!(),
+        }
     }
 }
 
@@ -38,49 +288,11 @@ impl<'de> Deserialize<'de> for CoseMac0 {
     {
         // Deserialize the input to a CBOR Value
         let value = Value::deserialize(deserializer)?;
-
         // Convert the CBOR Value to CoseMac0
-        let inner = coset::CoseMac0::from_cbor_value(value).map_err(serde::de::Error::custom)?;
-
-        Ok(CoseMac0(inner, Arc::new(Mutex::new(None))))
-    }
-}
-
-static mut SIGNATURE_PAYLOAD: OnceLock<HashMap<i64, Vec<u8>>> = OnceLock::new();
-static ATOMIC_CTR: AtomicI64 = AtomicI64::new(0);
-
-impl Cose for CoseMac0 {
-    fn signature_payload(&self) -> &[u8] {
-        // We need to return a reference to a value that is build in-place,
-        // so we need to keep it somewhere. We use a global map for this.
-        let payload = mac_structure_data(
-            MacContext::CoseMac0,
-            self.0.protected.clone(),
-            &[],
-            self.0.payload.as_ref().expect("payload missing"), // safe: documented
-        );
-        let mut guard = self.1.lock().unwrap();
-        let id = guard.get_or_insert(ATOMIC_CTR.fetch_add(1, Ordering::SeqCst));
-        unsafe {
-            let map = SIGNATURE_PAYLOAD.get_or_init(HashMap::new);
-            SIGNATURE_PAYLOAD.get_mut().unwrap().insert(*id, payload);
-            map.get(id).unwrap()
-        }
-    }
-
-    fn set_signature(&mut self, signature: Vec<u8>) {
-        self.0.tag = signature;
-    }
-}
-
-impl Drop for CoseMac0 {
-    fn drop(&mut self) {
-        // Remove the signature payload from the global map
-        if let Some(id) = self.1.lock().unwrap().take() {
-            unsafe {
-                SIGNATURE_PAYLOAD.get_mut().unwrap().remove(&id);
-            }
-        }
+        Ok(CoseMac0 {
+            tagged: false,
+            inner: coset::CoseMac0::from_cbor_value(value).map_err(serde::de::Error::custom)?,
+        })
     }
 }
 
@@ -97,5 +309,181 @@ mod hmac {
         fn algorithm(&self) -> iana::Algorithm {
             iana::Algorithm::HMAC_256_256
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cose::mac0::{CoseMac0, PreparedCoseMac0};
+    use coset::cwt::{ClaimsSet, Timestamp};
+    use coset::{iana, CborSerializable, Header};
+    use digest::Mac;
+    use hex::FromHex;
+    use hmac::Hmac;
+    use sha2::Sha256;
+
+    static COSE_MAC0: &str = include_str!("../../test/definitions/cose/mac0/serialized.cbor");
+    static COSE_KEY: &str = include_str!("../../test/definitions/cose/mac0/secret_key");
+
+    const RFC8392_KEY: &str = "6c1382765aec5358f117733d281c1c7bdc39884d04a45a1e6c67c858bc206c19";
+    const RFC8392_COSE_MAC0: &str = "d18443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b715820a377dfe17a3c3c3bdb363c426f85d3c1a1f11007765965017602f207700071b0";
+
+    #[test]
+    fn roundtrip() {
+        let bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
+        let mut parsed: CoseMac0 =
+            serde_cbor::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
+        parsed.set_tagged();
+        let roundtripped =
+            serde_cbor::to_vec(&parsed).expect("failed to serialize COSE_MAC0 to bytes");
+        assert_eq!(
+            bytes, roundtripped,
+            "original bytes and roundtripped bytes do not match"
+        );
+    }
+
+    #[test]
+    fn signing() {
+        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(iana::Algorithm::HMAC_256_256)
+            .build();
+        let unprotected = coset::HeaderBuilder::new().key_id(b"11".to_vec()).build();
+        let builder = coset::CoseMac0Builder::new()
+            .protected(protected)
+            .unprotected(unprotected)
+            .payload(b"This is the content.".to_vec());
+        let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
+        let signature_payload = prepared.signature_payload();
+        let signature = sign(signature_payload, &signer).unwrap();
+        let cose_mac0 = prepared.finalize(signature);
+        let serialized =
+            serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
+
+        let expected = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
+        assert_eq!(
+            expected, serialized,
+            "expected COSE_MAC0 and signed data do not match"
+        );
+    }
+
+    fn sign(signature_payload: &[u8], s: &Hmac<Sha256>) -> anyhow::Result<Vec<u8>> {
+        let mut mac = s.clone();
+        mac.reset();
+        mac.update(signature_payload);
+        Ok(mac.finalize().into_bytes().to_vec())
+    }
+
+    #[test]
+    fn verifying() {
+        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let verifier =
+            Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC verifier");
+
+        let cose_mac0_bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
+        let cose_mac0: CoseMac0 =
+            serde_cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
+
+        cose_mac0
+            .verify(&verifier, None, None)
+            .to_result()
+            .expect("COSE_MAC0 could not be verified")
+    }
+
+    #[test]
+    fn remote_signed() {
+        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(iana::Algorithm::HMAC_256_256)
+            .build();
+        let unprotected = coset::HeaderBuilder::new().key_id(b"11".to_vec()).build();
+        let builder = coset::CoseMac0Builder::new()
+            .protected(protected)
+            .unprotected(unprotected)
+            .payload(b"This is the content.".to_vec());
+        let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
+        let signature_payload = prepared.signature_payload();
+        let signature = sign(signature_payload, &signer).unwrap();
+        let cose_mac0 = prepared.finalize(signature);
+
+        let serialized =
+            serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
+
+        let expected = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
+        assert_eq!(
+            expected, serialized,
+            "expected COSE_MAC0 and signed data do not match"
+        );
+
+        let verifier =
+            Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC verifier");
+        cose_mac0
+            .verify(&verifier, None, None)
+            .to_result()
+            .expect("COSE_MAC0 could not be verified")
+    }
+
+    fn rfc8392_example_inputs() -> (Header, Header, ClaimsSet) {
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(iana::Algorithm::ES256)
+            .build();
+
+        let unprotected = coset::HeaderBuilder::new()
+            .key_id(
+                hex::decode("4173796d6d65747269634543445341323536").expect("error decoding key id"),
+            )
+            .build();
+
+        let claims_set = ClaimsSet {
+            issuer: Some("coap://as.example.com".to_string()),
+            subject: Some("erikw".to_string()),
+            audience: Some("coap://light.example.com".to_string()),
+            expiration_time: Some(Timestamp::WholeSeconds(1444064944)),
+            not_before: Some(Timestamp::WholeSeconds(1443944944)),
+            issued_at: Some(Timestamp::WholeSeconds(1443944944)),
+            cwt_id: Some(hex::decode("0b71").unwrap()),
+            rest: vec![],
+        };
+
+        (protected, unprotected, claims_set)
+    }
+
+    #[test]
+    fn signing_cwt() {
+        // Using key from RFC8392 example
+        let key = hex::decode(RFC8392_KEY).unwrap();
+        let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
+        let (protected, unprotected, claims_set) = rfc8392_example_inputs();
+        let builder = coset::CoseMac0Builder::new()
+            .protected(protected)
+            .unprotected(unprotected)
+            .payload(claims_set.to_vec().expect("failed to set claims set"));
+        let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
+        let signature_payload = prepared.signature_payload();
+        let signature = sign(signature_payload, &signer).expect("failed to sign CWT");
+        let cose_mac0 = prepared.finalize(signature);
+        let serialized =
+            serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
+        let expected = hex::decode(RFC8392_COSE_MAC0).unwrap();
+
+        assert_eq!(
+            expected, serialized,
+            "expected COSE_MAC0 and signed CWT do not match"
+        );
+    }
+
+    #[test]
+    fn deserializing_signed_cwt() {
+        let cose_mac0_bytes = hex::decode(RFC8392_COSE_MAC0).unwrap();
+        let cose_mac0: CoseMac0 =
+            serde_cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
+        let parsed_claims_set = cose_mac0
+            .claims_set()
+            .expect("failed to parse claims set from payload")
+            .expect("retrieved empty claims set");
+        let (_, _, expected_claims_set) = rfc8392_example_inputs();
+        assert_eq!(parsed_claims_set, expected_claims_set);
     }
 }
