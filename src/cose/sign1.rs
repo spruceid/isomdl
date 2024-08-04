@@ -11,6 +11,50 @@ use signature::Verifier;
 
 use crate::cose::SignatureAlgorithm;
 
+/// Prepared `COSE_Sign1` for remote signing.
+///
+/// To produce a `COSE_Sign1` do the following:
+///
+/// 1. Set the signature algorithm with [coset::HeaderBuilder::algorithm].
+/// 2. Produce a signature remotely, according to the chosen signature algorithm,
+///    using the [PreparedCoseSign1::signature_payload] as the payload.
+/// 3. Generate the `COSE_Sign1` by passing the produced signature into
+///    [PreparedCoseSign1::finalize].
+///
+/// Example:
+/// ```
+/// use coset::iana;
+/// use hex::FromHex;
+/// use p256::ecdsa::{Signature, SigningKey};
+/// use p256::SecretKey;///
+/// use signature::{SignatureEncoding, Signer, SignerMut};
+/// use isomdl::cose::sign1::{Error, PreparedCoseSign1};
+/// use isomdl::cose::SignatureAlgorithm;
+///
+/// let key = Vec::<u8>::from_hex("57c92077664146e876760c9520d054aa93c3afb04e306705db6090308507b4d3").unwrap();
+/// let signer: SigningKey = SecretKey::from_slice(&key).unwrap().into();
+/// let protected = coset::HeaderBuilder::new()
+///     .algorithm(iana::Algorithm::ES256)
+///     .build();
+/// let unprotected = coset::HeaderBuilder::new().key_id(b"11".to_vec()).build();
+/// let builder = coset::CoseSign1Builder::new()
+///     .protected(protected)
+///     .unprotected(unprotected)
+///     .payload(b"This is the content.".to_vec());
+/// let prepared = PreparedCoseSign1::new(builder, None, None, true).unwrap();
+/// let signature_payload = prepared.signature_payload();
+/// let signature = sign::<SigningKey, Signature>(signature_payload, &signer).unwrap();
+/// let cose_sign1 = prepared.finalize(signature);
+///
+/// fn sign<S, Sig>(signature_payload: &[u8], s: &S) -> anyhow::Result<Vec<u8>>
+/// where
+///     S: Signer<Sig> + SignatureAlgorithm,
+///     Sig: SignatureEncoding,
+/// {
+///     Ok(s.try_sign(signature_payload)
+///         .map_err(Error::Signing)?
+///         .to_vec())
+/// }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedCoseSign1 {
     tagged: bool,
@@ -18,6 +62,7 @@ pub struct PreparedCoseSign1 {
     signature_payload: Vec<u8>,
 }
 
+/// COSE_Sign1 implementation.
 #[derive(Clone, Debug)]
 pub struct CoseSign1 {
     tagged: bool,
@@ -126,10 +171,12 @@ impl PreparedCoseSign1 {
         })
     }
 
+    /// Returns the signature payload that needs to be used to sign.
     pub fn signature_payload(&self) -> &[u8] {
         &self.signature_payload
     }
 
+    /// Finalize the COSE_Sign1 by adding the signature.
     pub fn finalize(self, signature: Vec<u8>) -> CoseSign1 {
         let mut cose_sign1 = self.cose_sign1;
         cose_sign1.inner.signature = signature;
@@ -189,6 +236,7 @@ impl CoseSign1 {
         }
     }
 
+    /// Retrieve the CWT claims set.
     pub fn claims_set(&self) -> Result<Option<ClaimsSet>> {
         match self.inner.payload.as_ref() {
             None => Ok(None),
@@ -199,15 +247,19 @@ impl CoseSign1 {
         }
     }
 
+    /// If we are serialized as tagged.
     pub fn tagged(&self) -> bool {
         self.tagged
     }
 
+    /// Set serialization to tagged.
     pub fn set_tagged(&mut self) {
         self.tagged = true;
     }
 }
 
+/// Serialize [CoseSign1] by serializing the [Value].
+/// If marked as tagged, then serialize as [Value::Tag]
 impl ser::Serialize for CoseSign1 {
     #[inline]
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -287,6 +339,7 @@ impl ser::Serialize for CoseSign1 {
     }
 }
 
+/// Deserialize [CoseSign1] by first deserializing the [Value] and then using [coset::CoseSign1::from_cbor_value].
 impl<'de> Deserialize<'de> for CoseSign1 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -308,6 +361,8 @@ mod p256 {
 
     use crate::cose::SignatureAlgorithm;
 
+    /// Implement [`SignatureAlgorithm`].
+
     impl SignatureAlgorithm for SigningKey {
         fn algorithm(&self) -> iana::Algorithm {
             iana::Algorithm::ES256
@@ -326,6 +381,8 @@ mod p384 {
     use p384::ecdsa::{SigningKey, VerifyingKey};
 
     use crate::cose::SignatureAlgorithm;
+
+    /// Implement [`SignatureAlgorithm`].
 
     impl SignatureAlgorithm for SigningKey {
         fn algorithm(&self) -> iana::Algorithm {

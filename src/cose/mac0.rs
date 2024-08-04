@@ -1,3 +1,4 @@
+use crate::cose::SignatureAlgorithm;
 use ::hmac::Hmac;
 use coset::cbor::Value;
 use coset::cwt::ClaimsSet;
@@ -11,8 +12,44 @@ use serde::{ser, Deserialize, Deserializer, Serialize};
 use serde_cbor::tags::Tagged;
 use sha2::Sha256;
 
-use crate::cose::SignatureAlgorithm;
-
+/// Prepared `COSE_Mac0` for remote signing.
+///
+/// To produce a `COSE_Mac0` do the following:
+///
+/// 1. Set the signature algorithm with [coset::HeaderBuilder::algorithm].
+/// 2. Produce a signature remotely, according to the chosen signature algorithm,
+///    using the [PreparedCoseMac0::signature_payload] as the payload.
+/// 3. Generate the `COSE_Mac0` by passing the produced signature into
+///    [PreparedCoseMac0::finalize].
+///
+/// Example:
+/// ```
+/// use coset::iana;
+/// use digest::Mac;
+/// use hex::FromHex;use hmac::Hmac;
+/// use sha2::Sha256;
+/// use isomdl::cose::mac0::PreparedCoseMac0;
+///
+/// let key = Vec::<u8>::from_hex("a361316953796d6d6574726963613305622d318f187418681869187318201869187318201874186818651820186b18651879").unwrap();
+/// let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
+/// let protected = coset::HeaderBuilder::new()
+///     .algorithm(iana::Algorithm::HMAC_256_256)
+///     .build();
+/// let unprotected = coset::HeaderBuilder::new().key_id(b"11".to_vec()).build();
+/// let builder = coset::CoseMac0Builder::new()
+///     .protected(protected)
+///     .unprotected(unprotected)
+///     .payload(b"This is the content.".to_vec());
+/// let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
+/// let signature_payload = prepared.signature_payload();
+/// let signature = tag(signature_payload, &signer).unwrap();
+/// let cose_mac0 = prepared.finalize(signature);
+/// fn tag(signature_payload: &[u8], s: &Hmac<Sha256>) -> anyhow::Result<Vec<u8>> {
+///     let mut mac = s.clone();
+///     mac.reset();
+///     mac.update(signature_payload);
+///     Ok(mac.finalize().into_bytes().to_vec())
+///  }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedCoseMac0 {
     tagged: bool,
@@ -128,10 +165,12 @@ impl PreparedCoseMac0 {
         })
     }
 
+    /// Returns the signature payload that needs to be used to tag it.
     pub fn signature_payload(&self) -> &[u8] {
         &self.tag_payload
     }
 
+    /// Finalize the COSE_Mac0 by adding the tag.
     pub fn finalize(self, tag: Vec<u8>) -> CoseMac0 {
         let mut cose_mac0 = self.cose_mac0;
         cose_mac0.inner.tag = tag;
@@ -183,6 +222,7 @@ impl CoseMac0 {
         }
     }
 
+    /// Retrieve the CWT claims set.
     pub fn claims_set(&self) -> Result<Option<ClaimsSet>> {
         match self.inner.payload.as_ref() {
             None => Ok(None),
@@ -193,15 +233,19 @@ impl CoseMac0 {
         }
     }
 
+    /// If we are serialized as tagged.
     pub fn tagged(&self) -> bool {
         self.tagged
     }
 
+    /// Set serialization to tagged.
     pub fn set_tagged(&mut self) {
         self.tagged = true;
     }
 }
 
+/// Serialize [CoseMac0] by serializing the [Value].
+/// If marked as tagged, then serialize as [Value::Tag]
 impl ser::Serialize for CoseMac0 {
     #[inline]
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -281,6 +325,7 @@ impl ser::Serialize for CoseMac0 {
     }
 }
 
+/// Deserialize [CoseMac0] by first deserializing the [Value] and then using [coset::CoseMac0::from_cbor_value].
 impl<'de> Deserialize<'de> for CoseMac0 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -343,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn signing() {
+    fn tagging() {
         let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
         let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
         let protected = coset::HeaderBuilder::new()
@@ -356,7 +401,7 @@ mod tests {
             .payload(b"This is the content.".to_vec());
         let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
         let signature_payload = prepared.signature_payload();
-        let signature = sign(signature_payload, &signer).unwrap();
+        let signature = tag(signature_payload, &signer).unwrap();
         let cose_mac0 = prepared.finalize(signature);
         let serialized =
             serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
@@ -368,7 +413,7 @@ mod tests {
         );
     }
 
-    fn sign(signature_payload: &[u8], s: &Hmac<Sha256>) -> anyhow::Result<Vec<u8>> {
+    fn tag(signature_payload: &[u8], s: &Hmac<Sha256>) -> anyhow::Result<Vec<u8>> {
         let mut mac = s.clone();
         mac.reset();
         mac.update(signature_payload);
@@ -392,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_signed() {
+    fn remote_tagging() {
         let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
         let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
         let protected = coset::HeaderBuilder::new()
@@ -405,7 +450,7 @@ mod tests {
             .payload(b"This is the content.".to_vec());
         let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
         let signature_payload = prepared.signature_payload();
-        let signature = sign(signature_payload, &signer).unwrap();
+        let signature = tag(signature_payload, &signer).unwrap();
         let cose_mac0 = prepared.finalize(signature);
 
         let serialized =
@@ -451,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn signing_cwt() {
+    fn tagging_cwt() {
         // Using key from RFC8392 example
         let key = hex::decode(RFC8392_KEY).unwrap();
         let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
@@ -462,7 +507,7 @@ mod tests {
             .payload(claims_set.to_vec().expect("failed to set claims set"));
         let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
         let signature_payload = prepared.signature_payload();
-        let signature = sign(signature_payload, &signer).expect("failed to sign CWT");
+        let signature = tag(signature_payload, &signer).expect("failed to sign CWT");
         let cose_mac0 = prepared.finalize(signature);
         let serialized =
             serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
@@ -475,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn deserializing_signed_cwt() {
+    fn deserializing_tdeserializing_signed_cwtagged_cwt() {
         let cose_mac0_bytes = hex::decode(RFC8392_COSE_MAC0).unwrap();
         let cose_mac0: CoseMac0 =
             serde_cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
