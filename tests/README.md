@@ -26,7 +26,7 @@ sequenceDiagram
     - The device creates a QR code containing `DeviceEngagement` data, which includes its public key.
     - Internally:
         - The device initializes with the mDL data, private key, and public key.
-2. **Reader processing QR and requesting needed fields:**
+2. **Reader processing `QR code` and requesting the necessary fields:**
     - The reader processes the QR code and creates a request for the `age_over_21` element.
     - Internally:
         - Generates its private and public keys.
@@ -108,5 +108,3 @@ There are several tests:
     - in a basic structure [simulated_device_and_reader](simulated_device_and_reader.rs)
     - more organized structure using `State` pattern, `Arc`
       and `Mutex` [simulated_device_and_reader_state](simulated_device_and_reader_state.rs)
-- on the device perspective [on_simulated_device](on_simulated_device.rs)
-- on the reader perspective [on_simulated_reader](on_simulated_reader.rs)

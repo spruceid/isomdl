@@ -1,4 +1,4 @@
-//! [ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) `mDL` implementation in Rust.
+//! [ISO/IEC DIS 18013-5](https://www.iso.org/standard/69084.html) `mDL` implementation in Rust.
 //!
 //! It is intended
 //! to be used
@@ -65,7 +65,7 @@
 //!     - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
 //!     - Internally:
 //!         - The device initializes with the `mDL` data, private key, and public key.
-//! 2. **Reader processing `QR code` and requesting needed fields:**
+//! 2. **Reader processing `QR code` and requesting the necessary fields:**
 //!     - The reader processes the QR code and creates a request for the `age_over_21` element.
 //!     - Internally:
 //!         - Generates its private and public keys.
@@ -175,16 +175,6 @@
 //!                                                  +---------------+
 //! ```
 //!
-//! The reader is simulated in `common`
-//! module (you can find the complete code in `examples` directory), here we focus on the code from the
-//! device perspective.
-//!
-//! #### Example
-//!
-//! ```ignore
-#![doc = include_str!("../tests/on_simulated_device.rs")]
-//! ```
-//!
 //! ### Reader perspective
 //!
 //! From the reader's perspective, the flow is simpler:
@@ -221,16 +211,25 @@
 //! +-------------------------------------------+
 //! ```
 //!
-//! Now the device is simulated in `common`
-//! module (you can find the complete code in `examples` directory),
-//! here we focus on the code from the
-//! reader's perspective.
-//! The code is considerably shorter.
 //!
-//! #### Example
+//! The reader is simulated in `common`
+//! module (you can find the complete code in `examples` directory), here we focus on the code from the
+//! device perspective.
+//!
+//! ## Example
+//!
+//! Basic example.
 //!
 //! ```ignore
-#![doc = include_str!("../tests/on_simulated_reader.rs")]
+#![doc = include_str!("../tests/simulated_device_and_reader.rs")]
+//! ```
+//!
+//! ## Example
+//!
+//! An example that uses `State` pattern, `Arc` and `Mutex`.
+//!
+//! ```ignore
+#![doc = include_str!("../tests/simulated_device_and_reader_state.rs")]
 //! ```
 pub use cose_rs;
 

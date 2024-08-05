@@ -5,15 +5,14 @@ use signature::Signer;
 use uuid::Uuid;
 
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
-use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
-use isomdl::definitions::helpers::NonEmptyMap;
+use isomdl::definitions::device_request::{DataElements, Namespaces};
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
-use isomdl::presentation::device::{Document, Documents, RequestedItems};
-use isomdl::presentation::{device, reader, Stringify};
+use isomdl::presentation::device::{Documents, RequestedItems};
+use isomdl::presentation::{device, reader};
 
-const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
-const NAMESPACE: &str = "org.iso.18013.5.1";
-const AGE_OVER_21_ELEMENT: &str = "age_over_21";
+use crate::common::{Device, AGE_OVER_21_ELEMENT, DOC_TYPE, NAMESPACE};
+
+mod common;
 
 struct SessionData {
     state: Arc<SessionManagerEngaged>,
@@ -32,16 +31,13 @@ struct SessionManager {
 
 struct SessionManagerEngaged(device::SessionManagerEngaged);
 
-fn main() {}
-
 #[test]
 pub fn simulated_device_and_reader_interaction() -> Result<()> {
-    let mdl_encoded = include_str!("data/stringified-mdl.txt");
     let key: Arc<p256::ecdsa::SigningKey> =
         Arc::new(p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))?.into());
 
     // Parse the mDL
-    let docs = parse_mdl(mdl_encoded)?;
+    let docs = Device::parse_mdl()?;
 
     // Device initialization and engagement
     let session_data = initialise_session(docs, Uuid::new_v4())?;
@@ -73,13 +69,6 @@ pub fn simulated_device_and_reader_interaction() -> Result<()> {
 /// Check if there were any errors and sign them if needed, returning the response error.
 fn get_errors(session_manager: Arc<SessionManager>) -> Result<Option<Vec<u8>>> {
     sign_pending_and_retrieve_response(session_manager, None)
-}
-
-/// Parse the mDL encoded string into a [Documents] object.
-fn parse_mdl(encoded: &str) -> Result<NonEmptyMap<DocType, Document>> {
-    let mdl = Document::parse(encoded.to_string()).context("could not parse mDL")?;
-    let docs = Documents::new(DOC_TYPE.to_string(), mdl);
-    Ok(docs)
 }
 
 /// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
