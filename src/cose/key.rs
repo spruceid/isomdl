@@ -160,14 +160,12 @@ impl<'de> Deserialize<'de> for CoseKey {
 impl TryFrom<CoseKey> for EncodedPoint {
     type Error = Error;
     fn try_from(value: CoseKey) -> Result<EncodedPoint, Self::Error> {
-        let x = get_coord(&value, Element::X)?
-            .as_bytes()
-            .ok_or(Error::EC2MissingX)?;
+        let x = get_x(&value)?.as_bytes().ok_or(Error::EC2MissingX)?;
         match value.0.kty {
             KeyType::Assigned(kty) => match kty {
                 iana::KeyType::EC2 => {
                     let x_generic_array = GenericArray::from_slice(x.as_ref());
-                    match get_coord(&value, Element::Y)? {
+                    match get_y(&value)? {
                         Value::Bytes(y) => {
                             let y_generic_array = GenericArray::from_slice(y.as_ref());
                             Ok(EncodedPoint::from_affine_coordinates(
@@ -210,13 +208,13 @@ impl From<CoseKey> for CborValue {
     /// If X or Y is missing.
     fn from(key: CoseKey) -> CborValue {
         let mut map = BTreeMap::new();
-        let x = get_coord(&key, Element::X)
+        let x = get_x(&key)
             .unwrap()
             .as_bytes()
             .ok_or(Error::EC2MissingX)
             .unwrap()
             .clone();
-        let y = get_coord(&key, Element::Y)
+        let y = get_y(&key)
             .unwrap()
             .as_bytes()
             .ok_or(Error::EC2MissingY)
@@ -368,26 +366,24 @@ fn into_curve(str: String) -> Result<EllipticCurve, Error> {
     })
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-enum Element {
-    X,
-    Y,
-}
-
-fn get_coord(key: &CoseKey, element: Element) -> Result<&Value, Error> {
+fn get_x(key: &CoseKey) -> Result<&Value, Error> {
     for (key, value) in &key.0.params {
-        match element {
-            Element::X => match key {
-                Label::Int(p) if *p == iana::Ec2KeyParameter::X as i64 => return Ok(value),
-                _ => continue,
-            },
-            Element::Y => match key {
-                Label::Int(p) if *p == iana::Ec2KeyParameter::Y as i64 => return Ok(value),
-                _ => continue,
-            },
+        match key {
+            Label::Int(p) if *p == iana::Ec2KeyParameter::X as i64 => return Ok(value),
+            _ => continue,
         }
     }
     Err(Error::EC2MissingX)
+}
+
+fn get_y(key: &CoseKey) -> Result<&Value, Error> {
+    for (key, value) in &key.0.params {
+        match key {
+            Label::Int(p) if *p == iana::Ec2KeyParameter::Y as i64 => return Ok(value),
+            _ => continue,
+        }
+    }
+    Err(Error::EC2MissingY)
 }
 
 fn get_crv(key: &CoseKey) -> Result<EllipticCurve, Error> {
