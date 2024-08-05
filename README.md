@@ -67,9 +67,6 @@ sequenceDiagram
 4. **Reader Processing mDL data:**
     - The reader processes the response and prints the value of the `age_over_21` element.
 
-You can see the full example in [simulated_device_and_reader](tests/simulated_device_and_reader.rs) or a version that
-uses `State pattern`, `Arc` and `Mutex` [simulated_device_and_reader](tests/simulated_device_and_reader_state.rs).
-
 ##### Device perspective
 
 There are several states through which the device goes during the interaction:
@@ -129,3 +126,8 @@ stateDiagram
     Device --> Reader
     Reader --> Device: new_request
 ```
+
+### Example
+
+You can see the full example in [simulated_device_and_reader](tests/simulated_device_and_reader.rs) and a version that
+uses `State` pattern, `Arc` and `Mutex` [simulated_device_and_reader](tests/simulated_device_and_reader_state.rs).

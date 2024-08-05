@@ -1,29 +1,71 @@
-//! [ISO/IEC DIS 18013-5](https://mobiledl-e5018.web.app/ISO_18013-5_E_draft.pdf) **mDL** implementation in Rust.
+//! [ISO/IEC DIS 18013-5](https://www.iso.org/standard/69084.html) `mDL` implementation in Rust.
 //!
-//! The library is intended to be used
-//! in creating apps for **Devices** and **Readers**
-//! that can interact with each other to exchange **mDL** data.
+//! It is intended
+//! to be used
+//! in creating apps for `Devices` and `Readers` that can interact with each other to exchange `mDL`
+//! data.
 //!
-//! You can see examples on how to use the library in `examples`
-//! directory and read about in the dedicated `README.md`.
+//! ## Simulated `Device` and `Reader` interaction
 //!
-//! # **Device** and **Reader** interaction
+//! Here are examples of how to use the library. You can see more in [examples](../examples) folder and read about in the dedicated [README](../examples/README.md).
 //!
-//! This flow demonstrates a simulated device and reader interaction.
+//! This example demonstrates a simulated device and reader interaction.
 //! The reader requests the `age_over_21` element, and the device responds with that value.
 //! The flow is something like this:
 //!
 //! ```text
-#![doc = include_str!("../docs/simulated_device_and_reader.txt")]
+//!    +---------------------+                                          +----------------------+
+//!    |                     |                                          |                      |
+//!    |                     |                                          |                      |
+//!    |   Device            |                                          |   Reader             |
+//!    |                     |                                          |                      |
+//!    |                     |                                          |                      |
+//!    +---------+-----------+                                          +----------+-----------+
+//!              |                                                                 |
+//!          Initialize session                                                    |
+//!              |                                                                 |
+//!              |                                                                 |
+//! Create QR code engagement                                                      |
+//!              |                                                                 |
+//!              +-------------+                                                   |
+//!              |             |                                                   |
+//!              |             |                                                   |
+//!              <-------------+                                                   |
+//!              |                                                                 |
+//!              |                        Send QR code                             |
+//!              +----------------------------------------------------------------->
+//!              |                                                                 |
+//!              |                                                                 | Establish session
+//!              |                                                                 +-----------+
+//!              |                                                                 |           |
+//!              |                                                                 |           |
+//!              |                                                                 +-----------+
+//!              |                  Request age_over_21                            |
+//!              <-----------------------------------------------------------------+
+//!              |                                                                 |
+//!              |                                                                 |
+//!              |                                                                 |
+//!              |                 Send age_over_21                                |
+//!              +----------------------------------------------------------------->
+//!              |                                                                 |
+//!              |                                                                 |
+//!              |                                                                 | Process age_over_21
+//!              |                                                                 +-----------+
+//!              |                                                                 |           |
+//!              |                                                                 |           |
+//!              |                                                                 +-----------+
+//!              |                                                                 |
+//!              |                                                                 |
+//!              |                                                                 |
+//!              |                    Session finished                             |
+//!              |                                                                 |
 //! ```
-//!
-//! ## The flow of the interaction
 //!
 //! 1. **Device initialization and engagement:**
 //!     - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
 //!     - Internally:
 //!         - The device initializes with the `mDL` data, private key, and public key.
-//! 2. **Reader processing `QR code` and requesting needed fields:**
+//! 2. **Reader processing `QR code` and requesting the necessary fields:**
 //!     - The reader processes the QR code and creates a request for the `age_over_21` element.
 //!     - Internally:
 //!         - Generates its private and public keys.
@@ -39,30 +81,150 @@
 //! 4. **Reader Processing mDL data:**
 //!     - The reader processes the response and prints the value of the `age_over_21` element.
 //!
-//! ## Device perspective
+//! ### Device perspective
 //!
 //! There are several states through which the device goes during the interaction:
 //!
 //! ```text
-#![doc = include_str!("../docs/on_simulated_device.txt")]
+//!
+//!                                                  +---------+
+//!                                                  |         |
+//!                                                  |         |
+//!                                                  | User    |
+//!                                                  |         |
+//!                                                  |         |
+//!                                                  +---+-----+
+//!                                                      |
+//!                                                      |
+//! +----------------------------------------------------v--------------------------------------------------------------+
+//! |                                              Device                                                               |
+//! |                                                                                                                   |
+//! |                                         +-------------------+                                                     |
+//! |                                         |                   |                                                     |
+//! |                                         |SessionManagerInit |                                                     |
+//! |                                         |                   |                                                     |
+//! |       +---------------------------------+                   +-------------+                                       |
+//! |       |                                 |                   |             |                                       |
+//! |       |                                 |                   |             |                                       |
+//! |       |                                 +-------------------+             |                                       |
+//! |       |                                                                   |                                       |
+//! |       |                                                              qr_engagement                                |
+//! |       |                                                                   |                                       |
+//! |       |                                                                   |                                       |
+//! |   qr_engagement                                                           |                                       |
+//! |       |                                                                   |                                       |
+//! |       |                                                        +----------v------------+                          |
+//! |       |                                                        |                       |                          |
+//! |       |                                                        | SessionManagerEngaged <-------------+            |
+//! |       |                                             +----------+                       |             |            |
+//! |       |                                             |          |                       |             |            |
+//! |       |                                             |          +-----------------------+             |            |
+//! |       |                                             |                                                |            |
+//! |       |                                             |                                                |            |
+//! |       |                                             |                                                |            |
+//! |       |                                             |                                                |            |
+//! |       |                                             |                                                |            |
+//! |       |                                             |                                                |            |
+//! |       |                                             |                                                |            |
+//! |       |                               process_session_establishment                                  |            |
+//! |       |                                             |                                                |            |
+//! |       |      +--------------------------------------v----------------------------------+             |            |
+//! |       |      |                                 SessionManager                          |             |            |
+//! |       |      |                                                                         |             |            |
+//! |       |      |                             +--------------------+                      |             |            |
+//! |       |      |                             |                    |                      |             |            |
+//! |       |      |     +-----------------------+ AwaitingRequest    <----------------+     |             |            |
+//! |       |      |     |                       |                    |                |     |             |            |
+//! |       |      |     |           +-----------+                    |                |     |             |            |
+//! |       |      |prepare_response |           +--------------------+                |     |             |            |
+//! |       |      |     |           |                                                 |     |             |            |
+//! |       |      |     |           |                                                 |     |       establish_session  |
+//! |       |      |     |           |                                                 |     |             |            |
+//! |       |      |     |         handle_request                                      |     |             |            |
+//! |       |      |     |           |                                                 |     |             |            |
+//! |       |      |     |           |                                                 |     |             |            |
+//! |       |      |  +--v-----------v--------+                           retrieve_response  |             |            |
+//! |       |      |  |                       +---------                               |     |             |            |
+//! |       |      |  |   Signing             |   get_next_signature_payload           |     |             |            |
+//! |       |      |  |                       <---------                               |     |             |            |
+//! |       |      |  +---------+-------------+                                        |     |             |            |
+//! |       |      |            |                                                      |     |             |            |
+//! |       |      |            |                                                      |     |             |            |
+//! |       |      |            |                                                      |     |             |            |
+//! |       |      |      submit_next_signature                                        |     |             |            |
+//! |       |      |            |                                                      |     |             |            |
+//! |       |      |            |                 +----------------------+             |     |             |            |
+//! |       |      |            |                 |                      |             |     |             |            |
+//! |       |      |            |                 |   ReadyToRespond     |             |     |             |            |
+//! |       |      |            +----------------->                      +-------------+     |             |            |
+//! |       |      |                              |                      |                   |             |            |
+//! |       |      |                              +----------+-----------+                   |             |            |
+//! |       |      |                                         |                               |             |            |
+//! |       |      +-----------------------------------------+-------------------------------+             |            |
+//! |       |                                          handle_response                                     |            |
+//! +-------+------------------------------------------------+---------------------------------------------+------------+
+//!         |                                                |                                             |
+//!         |                                        +-------v-------+                                     |
+//!         |                                        |  Reader       |                                     |
+//!         |                                        |               |                                     |
+//!         |                                        |               |                                     |
+//!         +---------------------------------------->               +-------------------------------------+
+//!                                                  |               |
+//!                                                  |               |
+//!                                                  |               |
+//!                                                  +---------------+
 //! ```
 //!
-//! ## Reader's perspective
+//! ### Reader perspective
 //!
 //! From the reader's perspective, the flow is simpler:
 //!
 //! ```text
-#![doc = include_str!("../docs/on_simulated_reader.txt")]
+//!             +--------+
+//!             |        |
+//!             |  User  |
+//!             |        |
+//!             +---+----+
+//!                 |
+//!                 |
+//!             +---v-----+
+//!             |         |
+//!             | Device  |
+//!   +---------+         |<----------------+
+//!   |         |         |                 |
+//!   |         |         |                 |
+//!   |         +--+--^---+                 |
+//!   |              |  |                   |
+//!   |              |  | establish_session |
+//!   |qr_engagement |  |                   |
+//!   |              |  |                   | new_request
+//!   |              |  |                   |
+//! +-v--------------v--+-------------------+---+
+//! |                  Reader                   |
+//! |                                           |
+//! | +--------------------+   handle_response  |
+//! | |                    +---------------+    |
+//! | | SessionManager     |               |    |
+//! | |                    |<--------------+    |
+//! | +--------------------+                    |
+//! |                                           |
+//! +-------------------------------------------+
 //! ```
 //!
-//! # Example
 //!
-//! A basic example.
+//! The reader is simulated in `common`
+//! module (you can find the complete code in `examples` directory), here we focus on the code from the
+//! device perspective.
+//!
+//! ## Example
+//!
+//! Basic example.
 //!
 //! ```ignore
 #![doc = include_str!("../tests/simulated_device_and_reader.rs")]
 //! ```
-//! # Example
+//!
+//! ## Example
 //!
 //! An example that uses `State` pattern, `Arc` and `Mutex`.
 //!
