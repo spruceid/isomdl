@@ -135,16 +135,12 @@ impl PreparedCoseMac0 {
 
         // Check if the payload is present and if it is attached or detached.
         // Needs to be exclusively attached or detached.
-        let payload = match (cose_mac0.payload.as_ref(), detached_payload) {
+        let payload = match (cose_mac0.payload.as_ref(), detached_payload.as_ref()) {
             (Some(_), Some(_)) => return Err(Error::DoublePayload),
             (None, None) => return Err(Error::NoPayload),
-            (Some(payload), None) => Some(payload.clone()),
-            (None, Some(payload)) => Some(payload),
+            (Some(payload), None) => payload,
+            (None, Some(payload)) => payload,
         };
-        let payload = payload
-            // Payload is mandatory
-            .as_ref()
-            .expect("payload missing");
         // Create the signature payload ot be used later on signing.
         let tag_payload = mac_structure_data(
             MacContext::CoseMac0,
