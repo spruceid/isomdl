@@ -1,7 +1,7 @@
 use aes::cipher::consts::U8;
 use aes::cipher::generic_array::GenericArray;
 use ciborium::Value;
-use coset::iana::Algorithm;
+use coset::iana::{Algorithm, EllipticCurve, EnumI64};
 use coset::{iana, AsCborValue, KeyType, Label};
 use p256::EncodedPoint;
 use serde::ser;
@@ -9,6 +9,9 @@ use serde::ser::{SerializeMap, SerializeSeq};
 use serde::Deserialize;
 use serde::Deserializer;
 use serde_cbor::tags::Tagged;
+use serde_cbor::Value as CborValue;
+use ssi_jwk::JWK;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoseKey(coset::CoseKey);
@@ -21,9 +24,11 @@ pub enum Error {
     #[error("COSE_Key of kty 'EC2' missing y coordinate")]
     EC2MissingY,
     #[error("Expected to parse a CBOR bool or bstr for y-coordinate, received: '{0:?}'")]
-    InvalidTypeY(Value),
+    InvalidTypeY(serde_cbor::Value),
+    #[error("Expected to parse a CBOR bool for y-coordinate, received: '{0:?}'")]
+    InvalidTypeYSign(Value),
     #[error("Expected to parse a CBOR map, received: '{0:?}'")]
-    NotAMap(Value),
+    NotAMap(serde_cbor::Value),
     #[error("Unable to discern the elliptic curve")]
     UnknownCurve,
     #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves")]
@@ -46,26 +51,15 @@ impl CoseKey {
     pub fn signature_algorithm(&self) -> Option<Algorithm> {
         match self.0.kty {
             KeyType::Assigned(kty) => match kty {
-                iana::KeyType::EC2 => match self.0.params[1].0 {
-                    Label::Int(crv) if crv == iana::EllipticCurve::Ed448 as i64 => {
-                        Some(Algorithm::EdDSA)
-                    }
-                    Label::Int(crv) if crv == iana::EllipticCurve::Ed25519 as i64 => {
-                        Some(Algorithm::EdDSA)
-                    }
+                iana::KeyType::EC2 => match get_crv(self).unwrap() {
+                    EllipticCurve::Ed448 => Some(Algorithm::EdDSA),
+                    EllipticCurve::Ed25519 => Some(Algorithm::EdDSA),
                     _ => None,
                 },
-                iana::KeyType::OKP => match self.0.params[1].0 {
-                    Label::Int(crv) if crv == iana::EllipticCurve::P_256 as i64 => {
-                        Some(Algorithm::ES256)
-                    }
-                    Label::Int(crv) if crv == iana::EllipticCurve::P_384 as i64 => {
-                        Some(Algorithm::ES384)
-                    }
-                    Label::Int(crv) if crv == iana::EllipticCurve::P_521 as i64 => {
-                        Some(Algorithm::ES512)
-                    }
-                    Label::Text(_) => None,
+                iana::KeyType::OKP => match get_crv(self).unwrap() {
+                    EllipticCurve::P_256 => Some(Algorithm::ES256),
+                    EllipticCurve::P_384 => Some(Algorithm::ES384),
+                    EllipticCurve::P_521 => Some(Algorithm::ES512),
                     _ => None,
                 },
                 _ => None,
@@ -166,19 +160,33 @@ impl<'de> Deserialize<'de> for CoseKey {
 impl TryFrom<CoseKey> for EncodedPoint {
     type Error = Error;
     fn try_from(value: CoseKey) -> Result<EncodedPoint, Self::Error> {
-        let x = value.0.params[1].1.as_bytes().ok_or(Error::EC2MissingX)?;
-        let y = value.0.params[2].1.as_bytes().ok_or(Error::EC2MissingY)?;
+        let x = get_x(&value)?.as_bytes().ok_or(Error::EC2MissingX)?;
         match value.0.kty {
             KeyType::Assigned(kty) => match kty {
                 iana::KeyType::EC2 => {
-                    // todo: EC2Y::SignBit(y)
                     let x_generic_array = GenericArray::from_slice(x.as_ref());
-                    let y_generic_array = GenericArray::from_slice(y.as_ref());
-                    Ok(EncodedPoint::from_affine_coordinates(
-                        x_generic_array,
-                        y_generic_array,
-                        false,
-                    ))
+                    match get_y(&value)? {
+                        Value::Bytes(y) => {
+                            let y_generic_array = GenericArray::from_slice(y.as_ref());
+                            Ok(EncodedPoint::from_affine_coordinates(
+                                x_generic_array,
+                                y_generic_array,
+                                false,
+                            ))
+                        }
+                        Value::Bool(y) => {
+                            let mut bytes = x.clone();
+                            if *y {
+                                bytes.insert(0, 3)
+                            } else {
+                                bytes.insert(0, 2)
+                            }
+                            let encoded = EncodedPoint::from_bytes(bytes)
+                                .map_err(|_e| Error::InvalidCoseKey)?;
+                            Ok(encoded)
+                        }
+                        _ => Err(Error::InvalidTypeYSign(value.0.params[2].1.clone()))?,
+                    }
                 }
                 iana::KeyType::OKP => {
                     let x_generic_array: GenericArray<_, U8> =
@@ -192,4 +200,201 @@ impl TryFrom<CoseKey> for EncodedPoint {
             _ => Err(Error::UnsupportedKeyType),
         }
     }
+}
+
+impl From<CoseKey> for CborValue {
+    /// # Panics
+    ///
+    /// If X or Y is missing.
+    fn from(key: CoseKey) -> CborValue {
+        let mut map = BTreeMap::new();
+        let x = get_x(&key)
+            .unwrap()
+            .as_bytes()
+            .ok_or(Error::EC2MissingX)
+            .unwrap()
+            .clone();
+        let y = get_y(&key)
+            .unwrap()
+            .as_bytes()
+            .ok_or(Error::EC2MissingY)
+            .unwrap()
+            .clone();
+        if let KeyType::Assigned(kty) = key.0.kty {
+            match kty {
+                iana::KeyType::EC2 => {
+                    // kty: 1, EC2: 2
+                    map.insert(CborValue::Integer(1), CborValue::Integer(2));
+                    // crv: -1
+                    map.insert(
+                        CborValue::Integer(-1),
+                        match key.0.params[0].1 {
+                            Value::Integer(i) => CborValue::Integer(i.into()),
+                            _ => CborValue::Integer(0),
+                        },
+                    );
+                    // x: -2
+                    map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
+                    // y: -3
+                    map.insert(CborValue::Integer(-3), y.into());
+                }
+                iana::KeyType::OKP => {
+                    // kty: 1, OKP: 1
+                    map.insert(CborValue::Integer(1), CborValue::Integer(1));
+                    // crv: -1
+                    map.insert(
+                        CborValue::Integer(-1),
+                        match key.0.params[0].1 {
+                            Value::Integer(i) => CborValue::Integer(i.into()),
+                            _ => CborValue::Integer(0),
+                        },
+                    );
+                    // x: -2
+                    map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
+                }
+                _ => {}
+            }
+        }
+        CborValue::Map(map)
+    }
+}
+
+impl TryFrom<CborValue> for CoseKey {
+    type Error = Error;
+
+    fn try_from(v: CborValue) -> Result<Self, Error> {
+        if let CborValue::Map(mut map) = v {
+            match (
+                map.remove(&CborValue::Integer(1)),
+                map.remove(&CborValue::Integer(-1)),
+                map.remove(&CborValue::Integer(-2)),
+            ) {
+                (
+                    Some(CborValue::Integer(2)),
+                    Some(CborValue::Integer(crv_id)),
+                    Some(CborValue::Bytes(x)),
+                ) => {
+                    let crv = EllipticCurve::from_i64(crv_id as i64).ok_or(Error::UnknownCurve)?;
+                    let y = map
+                        .remove(&CborValue::Integer(-3))
+                        .ok_or(Error::EC2MissingY)?;
+                    let y = if let CborValue::Bytes(y) = y {
+                        y
+                    } else {
+                        Err(Error::InvalidTypeY(y))?
+                    };
+                    let key = coset::CoseKeyBuilder::new_ec2_pub_key(crv, x, y).build();
+                    let key = CoseKey(key);
+                    Ok(key)
+                }
+                (
+                    Some(CborValue::Integer(1)),
+                    Some(CborValue::Integer(crv_id)),
+                    Some(CborValue::Bytes(x)),
+                ) => {
+                    let crv = EllipticCurve::from_i64(crv_id as i64).ok_or(Error::UnknownCurve)?;
+                    let key = coset::CoseKeyBuilder::new_okp_key()
+                        .param(iana::Ec2KeyParameter::Crv as i64, Value::from(crv as u64))
+                        .param(iana::Ec2KeyParameter::X as i64, Value::Bytes(x))
+                        .build();
+                    let key = CoseKey(key);
+                    Ok(key)
+                }
+                _ => Err(Error::UnsupportedKeyType),
+            }
+        } else {
+            Err(Error::NotAMap(v))
+        }
+    }
+}
+
+impl TryFrom<JWK> for CoseKey {
+    type Error = Error;
+
+    fn try_from(jwk: JWK) -> Result<Self, Self::Error> {
+        match jwk.params {
+            ssi_jwk::Params::EC(params) => {
+                let x = params
+                    .x_coordinate
+                    .as_ref()
+                    .ok_or(Error::EC2MissingX)?
+                    .0
+                    .clone();
+                let key = coset::CoseKeyBuilder::new_ec2_pub_key(
+                    into_curve(params.curve.clone().ok_or(Error::UnknownCurve)?)?,
+                    x,
+                    params
+                        .y_coordinate
+                        .as_ref()
+                        .ok_or(Error::EC2MissingY)?
+                        .0
+                        .clone(),
+                )
+                .build();
+                let key = CoseKey(key);
+                Ok(key)
+            }
+            ssi_jwk::Params::OKP(params) => {
+                let crv = EllipticCurve::from_i64(into_curve(params.curve.clone())? as i64)
+                    .ok_or(Error::UnknownCurve)?;
+                let key = coset::CoseKeyBuilder::new_okp_key()
+                    .param(iana::Ec2KeyParameter::Crv as i64, Value::from(crv as u64))
+                    .param(
+                        iana::Ec2KeyParameter::X as i64,
+                        Value::Bytes(params.public_key.0.clone()),
+                    )
+                    .build();
+                let key = CoseKey(key);
+                Ok(key)
+            }
+            _ => Err(Error::UnsupportedKeyType),
+        }
+    }
+}
+
+fn into_curve(str: String) -> Result<EllipticCurve, Error> {
+    Ok(match str.as_str() {
+        "P_256" => EllipticCurve::P_256,
+        "P_384" => EllipticCurve::P_384,
+        "P_521" => EllipticCurve::P_521,
+        "Ed448" => EllipticCurve::Ed448,
+        "Ed25519" => EllipticCurve::Ed25519,
+        "Reserved" => EllipticCurve::Reserved,
+        "Secp256k1" => EllipticCurve::Secp256k1,
+        "X25519" => EllipticCurve::X25519,
+        _ => return Err(Error::UnknownCurve),
+    })
+}
+
+fn get_x(key: &CoseKey) -> Result<&Value, Error> {
+    for (key, value) in &key.0.params {
+        match key {
+            Label::Int(p) if *p == iana::Ec2KeyParameter::X as i64 => return Ok(value),
+            _ => continue,
+        }
+    }
+    Err(Error::EC2MissingX)
+}
+
+fn get_y(key: &CoseKey) -> Result<&Value, Error> {
+    for (key, value) in &key.0.params {
+        match key {
+            Label::Int(p) if *p == iana::Ec2KeyParameter::Y as i64 => return Ok(value),
+            _ => continue,
+        }
+    }
+    Err(Error::EC2MissingY)
+}
+
+fn get_crv(key: &CoseKey) -> Result<EllipticCurve, Error> {
+    for item in &key.0.params {
+        match item {
+            (Label::Int(p), Value::Integer(crv)) if *p == iana::Ec2KeyParameter::Crv as i64 => {
+                let crv: i128 = From::from(*crv);
+                return EllipticCurve::from_i64(crv as i64).ok_or(Error::UnknownCurve);
+            }
+            _ => continue,
+        }
+    }
+    Err(Error::EC2MissingX)
 }
