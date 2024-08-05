@@ -15,8 +15,6 @@
 //! module (you can find the complete code in `examples` directory),
 //! here we focus on the code from the
 //! reader's perspective.
-//!
-//! ```ignore
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
