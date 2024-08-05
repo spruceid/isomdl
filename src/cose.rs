@@ -1,3 +1,4 @@
+pub mod key;
 pub mod mac0;
 pub mod sign1;
 

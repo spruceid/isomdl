@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
 
-pub mod cose_key;
-pub use cose_key::CoseKey;
+pub use crate::cose::key::CoseKey;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

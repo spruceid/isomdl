@@ -25,7 +25,8 @@ impl Stringify for device::SessionManagerEngaged {}
 impl Stringify for device::SessionManager {}
 impl Stringify for reader::SessionManager {}
 
-use crate::definitions::{device_key::cose_key::CoseKey, helpers::Tag24};
+use crate::cose::key::CoseKey;
+use crate::definitions::helpers::Tag24;
 use hkdf::Hkdf;
 use sha2::Sha256;
 
