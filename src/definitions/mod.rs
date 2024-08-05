@@ -11,10 +11,10 @@ pub mod session;
 pub mod traits;
 pub mod validity_info;
 
-pub use crate::cose::key::Error;
 pub use device_engagement::{
     BleOptions, DeviceEngagement, DeviceRetrievalMethod, NfcOptions, Security, WifiOptions,
 };
+pub use device_key::cose_key::Error;
 pub use device_key::{CoseKey, DeviceKeyInfo, KeyAuthorizations};
 pub use device_request::DocRequest;
 pub use device_response::{DeviceResponse, Document};
