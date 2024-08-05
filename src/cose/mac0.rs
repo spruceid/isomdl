@@ -28,6 +28,7 @@ use crate::cose::SignatureAlgorithm;
 /// use digest::Mac;
 /// use hex::FromHex;use hmac::Hmac;
 /// use sha2::Sha256;
+/// use isomdl::cose::mac0::PreparedCoseMac0;
 ///
 /// let key = Vec::<u8>::from_hex("a361316953796d6d6574726963613305622d318f187418681869187318201869187318201874186818651820186b18651879").unwrap();
 /// let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
