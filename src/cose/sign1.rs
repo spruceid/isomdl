@@ -153,7 +153,7 @@ impl PreparedCoseSign1 {
             cose_sign1.protected.clone(),
             None,
             aad.unwrap_or_default().as_ref(),
-            &payload,
+            payload,
         );
 
         Ok(Self {

@@ -1,4 +1,3 @@
-use crate::cose::SignatureAlgorithm;
 use ::hmac::Hmac;
 use coset::cbor::Value;
 use coset::cwt::ClaimsSet;
@@ -7,12 +6,11 @@ use coset::{
     RegisteredLabelWithPrivate,
 };
 use digest::{Mac, MacError};
-use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{ser, Deserialize, Deserializer, Serialize};
-use serde_cbor::tags::Tagged;
 use sha2::Sha256;
 
 use crate::cose::serialize;
+use crate::cose::SignatureAlgorithm;
 
 /// Prepared `COSE_Mac0` for remote signing.
 ///
@@ -144,10 +142,6 @@ impl PreparedCoseMac0 {
             (Some(payload), None) => payload,
             (None, Some(payload)) => payload,
         };
-        let payload = payload
-            // Payload is mandatory
-            .as_ref()
-            .ok_or(Error::NoPayload)?;
         // Create the signature payload ot be used later on signing.
         let tag_payload = mac_structure_data(
             MacContext::CoseMac0,
