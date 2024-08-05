@@ -17,8 +17,6 @@
 //! reader's perspective.
 //!
 //! ```ignore
-#![doc = include_str!("../../tests/on_simulated_reader.rs")]
-//! ```
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},

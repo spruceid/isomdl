@@ -141,8 +141,8 @@ fn create_response(session_manager: Arc<SessionManager>) -> Result<Vec<u8>> {
             .into_iter()
             .collect(),
     )]
-        .into_iter()
-        .collect();
+    .into_iter()
+    .collect();
     session_manager
         .inner
         .lock()
