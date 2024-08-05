@@ -267,7 +267,7 @@ impl ser::Serialize for CoseSign1 {
             .inner
             .clone()
             .to_cbor_value()
-            .map_err(ser::Error::custom)?; // Convert the inner CoseSign1 object to a tagged CBOR vector
+            .map_err(ser::Error::custom)?;
         if self.tagged {
             return Tagged::new(Some(iana::CborTag::CoseSign1 as u64), value).serialize(serializer);
         }

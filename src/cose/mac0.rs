@@ -253,7 +253,7 @@ impl ser::Serialize for CoseMac0 {
             .inner
             .clone()
             .to_cbor_value()
-            .map_err(ser::Error::custom)?; // Convert the inner CoseMac0 object to a tagged CBOR vector
+            .map_err(ser::Error::custom)?;
         if self.tagged {
             return Tagged::new(Some(iana::CborTag::CoseMac0 as u64), value).serialize(serializer);
         }
