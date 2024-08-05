@@ -92,8 +92,8 @@ pub fn create_response(
             .into_iter()
             .collect(),
     )]
-    .into_iter()
-    .collect();
+        .into_iter()
+        .collect();
     session_manager.prepare_response(&requested_items, permitted_items);
     let (_, sign_payload) = session_manager.get_next_signature_payload().unwrap();
     let signature: p256::ecdsa::Signature = key.sign(sign_payload);
