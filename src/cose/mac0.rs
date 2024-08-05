@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn tagging() {
         let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
-        let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
+        let tagger = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
         let protected = coset::HeaderBuilder::new()
             .algorithm(iana::Algorithm::HMAC_256_256)
             .build();
@@ -339,9 +339,9 @@ mod tests {
             .unprotected(unprotected)
             .payload(b"This is the content.".to_vec());
         let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
-        let signature_payload = prepared.signature_payload();
-        let signature = tag(signature_payload, &signer).unwrap();
-        let cose_mac0 = prepared.finalize(signature);
+        let tag_payload = prepared.signature_payload();
+        let tag = tag(tag_payload, &tagger).unwrap();
+        let cose_mac0 = prepared.finalize(tag);
         let serialized =
             serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
 
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn remote_tagging() {
         let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
-        let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
+        let tagger = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
         let protected = coset::HeaderBuilder::new()
             .algorithm(iana::Algorithm::HMAC_256_256)
             .build();
@@ -388,9 +388,9 @@ mod tests {
             .unprotected(unprotected)
             .payload(b"This is the content.".to_vec());
         let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
-        let signature_payload = prepared.signature_payload();
-        let signature = tag(signature_payload, &signer).unwrap();
-        let cose_mac0 = prepared.finalize(signature);
+        let tag_payload = prepared.signature_payload();
+        let tag = tag(tag_payload, &tagger).unwrap();
+        let cose_mac0 = prepared.finalize(tag);
 
         let serialized =
             serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
