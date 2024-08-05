@@ -39,28 +39,12 @@
 //! 4. **Reader Processing mDL data:**
 //!     - The reader processes the response and prints the value of the `age_over_21` element.
 //!
-//! ### Examples
-//!
-//! You can see the example in `simulated_device_and_reader.rs` from `examples` directory or a version that
-//! uses **State pattern**, `Arc` and `Mutex` in `simulated_device_and_reader_state.rs`.
-//!
 //! ## Device perspective
 //!
 //! There are several states through which the device goes during the interaction:
 //!
 //! ```text
 #![doc = include_str!("../docs/on_simulated_device.txt")]
-//! ```
-//!
-//! ### Example
-//!
-//! You can see the full example in `on_simulated_device.rs` in `examples` directory.
-//! The reader is simulated in `common`
-//! module (you can find the complete code in `examples` directory), here we focus on the code from the
-//! device perspective.
-//!
-//! ```ignore
-#![doc = include_str!("../tests/on_simulated_device.rs")]
 //! ```
 //!
 //! ## Reader's perspective
@@ -71,16 +55,19 @@
 #![doc = include_str!("../docs/on_simulated_reader.txt")]
 //! ```
 //!
-//! ### Example
+//! # Example
 //!
-//! You can see the full example in `on_simulated_reader.rs` in `examples` directory. The code is considerably shorter.
-//! Now the device is simulated in `common`
-//! module (you can find the complete code in `examples` directory),
-//! here we focus on the code from the
-//! reader's perspective.
+//! A basic example.
 //!
 //! ```ignore
-#![doc = include_str!("../tests/on_simulated_reader.rs")]
+#![doc = include_str!("../tests/simulated_device_and_reader.rs")]
+//! ```
+//! # Example
+//!
+//! An example that uses `State` pattern, `Arc` and `Mutex`.
+//!
+//! ```ignore
+#![doc = include_str!("../tests/simulated_device_and_reader_state.rs")]
 //! ```
 pub use cose_rs;
 

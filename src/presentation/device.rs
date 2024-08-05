@@ -7,17 +7,6 @@
 //! ```text
 #![doc = include_str!("../../docs/on_simulated_device.txt")]
 //! ```
-//!
-//! # Example
-//!
-//! You can see the full example in `on_simulated_device.rs` in `examples` directory.
-//! The reader is simulated in `common`
-//! module (you can find the complete code in `examples` directory), here we focus on the code from the
-//! device perspective.
-//!
-//! ```ignore
-#![doc = include_str!("../../tests/on_simulated_device.rs")]
-//! ```
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{

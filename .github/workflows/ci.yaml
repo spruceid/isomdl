@@ -5,11 +5,11 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
+  RUSTDOCFLAGS: "-Dwarnings"
 
 jobs:
   build:
@@ -30,6 +30,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets
 
+      - name: Fmt
+        run: cargo fmt --all -- --check
       - name: Fmt
         run: cargo fmt --all -- --check
 

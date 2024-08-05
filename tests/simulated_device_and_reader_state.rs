@@ -46,7 +46,7 @@ pub fn simulated_device_and_reader_interaction() -> Result<()> {
     // Device initialization and engagement
     let session_data = initialise_session(docs, Uuid::new_v4())?;
 
-    // Reader processing QR and requesting needed fields
+    // Reader processing QR and requesting the necessary fields
     let (mut reader_session_manager, request) = establish_reader_session(session_data.qr_code_uri)?;
 
     // Device accepting request
@@ -152,8 +152,8 @@ fn create_response(session_manager: Arc<SessionManager>) -> Result<Vec<u8>> {
             .into_iter()
             .collect(),
     )]
-    .into_iter()
-    .collect();
+        .into_iter()
+        .collect();
     session_manager
         .inner
         .lock()

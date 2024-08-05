@@ -25,7 +25,7 @@ fn on_simulated_device() -> Result<()> {
     // Device initialization and engagement
     let (engaged_state, qr_code_uri) = initialise_session()?;
 
-    // Reader processing QR and requesting needed fields
+    // Reader processing QR and requesting the necessary fields
     let (mut reader_session_manager, request) = establish_reader_session(qr_code_uri)?;
 
     // Device accepting request
@@ -102,8 +102,8 @@ fn create_response(
             .into_iter()
             .collect(),
     )]
-    .into_iter()
-    .collect();
+        .into_iter()
+        .collect();
     session_manager.prepare_response(&requested_items, permitted_items);
     let (_, sign_payload) = session_manager.get_next_signature_payload().unwrap();
     let signature: p256::ecdsa::Signature = key.sign(sign_payload);
