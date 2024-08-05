@@ -12,6 +12,8 @@ use serde::{ser, Deserialize, Deserializer, Serialize};
 use serde_cbor::tags::Tagged;
 use sha2::Sha256;
 
+use crate::cose::serialize;
+
 /// Prepared `COSE_Mac0` for remote signing.
 ///
 /// To produce a `COSE_Mac0` do the following:
@@ -28,7 +30,6 @@ use sha2::Sha256;
 /// use digest::Mac;
 /// use hex::FromHex;use hmac::Hmac;
 /// use sha2::Sha256;
-/// use isomdl::cose::mac0::PreparedCoseMac0;
 ///
 /// let key = Vec::<u8>::from_hex("a361316953796d6d6574726963613305622d318f187418681869187318201869187318201874186818651820186b18651879").unwrap();
 /// let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
@@ -143,6 +144,10 @@ impl PreparedCoseMac0 {
             (Some(payload), None) => payload,
             (None, Some(payload)) => payload,
         };
+        let payload = payload
+            // Payload is mandatory
+            .as_ref()
+            .ok_or(Error::NoPayload)?;
         // Create the signature payload ot be used later on signing.
         let tag_payload = mac_structure_data(
             MacContext::CoseMac0,
@@ -249,75 +254,16 @@ impl ser::Serialize for CoseMac0 {
             .inner
             .clone()
             .to_cbor_value()
-            .map_err(ser::Error::custom)?; // Convert the inner CoseMac0 object to a tagged CBOR vector
-        if self.tagged {
-            return Tagged::new(Some(iana::CborTag::CoseMac0 as u64), value).serialize(serializer);
-        }
-        match value {
-            Value::Bytes(x) => serializer.serialize_bytes(&x),
-            Value::Bool(x) => serializer.serialize_bool(x),
-            Value::Text(x) => serializer.serialize_str(x.as_str()),
-            Value::Null => serializer.serialize_unit(),
-
-            Value::Tag(tag, ref v) => Tagged::new(Some(tag), v).serialize(serializer),
-
-            Value::Float(x) => {
-                let y = x as f32;
-                if (y as f64).to_bits() == x.to_bits() {
-                    serializer.serialize_f32(y)
-                } else {
-                    serializer.serialize_f64(x)
-                }
-            }
-
-            #[allow(clippy::unnecessary_fallible_conversions)]
-            Value::Integer(x) => {
-                if let Ok(x) = u8::try_from(x) {
-                    serializer.serialize_u8(x)
-                } else if let Ok(x) = i8::try_from(x) {
-                    serializer.serialize_i8(x)
-                } else if let Ok(x) = u16::try_from(x) {
-                    serializer.serialize_u16(x)
-                } else if let Ok(x) = i16::try_from(x) {
-                    serializer.serialize_i16(x)
-                } else if let Ok(x) = u32::try_from(x) {
-                    serializer.serialize_u32(x)
-                } else if let Ok(x) = i32::try_from(x) {
-                    serializer.serialize_i32(x)
-                } else if let Ok(x) = u64::try_from(x) {
-                    serializer.serialize_u64(x)
-                } else if let Ok(x) = i64::try_from(x) {
-                    serializer.serialize_i64(x)
-                } else if let Ok(x) = u128::try_from(x) {
-                    serializer.serialize_u128(x)
-                } else if let Ok(x) = i128::try_from(x) {
-                    serializer.serialize_i128(x)
-                } else {
-                    unreachable!()
-                }
-            }
-
-            Value::Array(x) => {
-                let mut map = serializer.serialize_seq(Some(x.len()))?;
-
-                for v in x {
-                    map.serialize_element(&v)?;
-                }
-
-                map.end()
-            }
-
-            Value::Map(x) => {
-                let mut map = serializer.serialize_map(Some(x.len()))?;
-
-                for (k, v) in x {
-                    map.serialize_entry(&k, &v)?;
-                }
-
-                map.end()
-            }
-            _ => unimplemented!(),
-        }
+            .map_err(ser::Error::custom)?;
+        serialize::serialize(
+            &value,
+            if self.tagged {
+                Some(iana::CborTag::CoseMac0 as u64)
+            } else {
+                None
+            },
+            serializer,
+        )
     }
 }
 
@@ -355,13 +301,14 @@ mod hmac {
 
 #[cfg(test)]
 mod tests {
-    use crate::cose::mac0::{CoseMac0, PreparedCoseMac0};
     use coset::cwt::{ClaimsSet, Timestamp};
     use coset::{iana, CborSerializable, Header};
     use digest::Mac;
     use hex::FromHex;
     use hmac::Hmac;
     use sha2::Sha256;
+
+    use crate::cose::mac0::{CoseMac0, PreparedCoseMac0};
 
     static COSE_MAC0: &str = include_str!("../../test/definitions/cose/mac0/serialized.cbor");
     static COSE_KEY: &str = include_str!("../../test/definitions/cose/mac0/secret_key");

@@ -1,3 +1,4 @@
+mod device;
 pub mod device_engagement;
 pub mod device_key;
 pub mod device_request;
