@@ -457,17 +457,17 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 
 #[cfg(test)]
 pub mod test {
-    use crate::definitions::namespaces::{
-        org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
-    };
-    use crate::definitions::traits::{FromJson, ToNamespaceMap};
-    use crate::definitions::CoseKey;
-    use coset::iana::EllipticCurve;
     use elliptic_curve::sec1::ToEncodedPoint;
     use p256::ecdsa::{Signature, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
     use p256::SecretKey;
     use time::OffsetDateTime;
+
+    use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
+    use crate::definitions::namespaces::{
+        org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
+    };
+    use crate::definitions::traits::{FromJson, ToNamespaceMap};
 
     use super::*;
 
@@ -604,13 +604,13 @@ pub mod test {
         let key = p256::SecretKey::from_sec1_der(&der_bytes).unwrap();
         let pub_key = key.public_key();
         let ec = pub_key.to_encoded_point(false);
-        let device_key = coset::CoseKeyBuilder::new_ec2_pub_key(
-            EllipticCurve::P_256,
-            ec.x().unwrap().to_vec(),
-            ec.y().unwrap().to_vec(),
-        )
-        .build();
-        let device_key = CoseKey::new(device_key);
+        let x = ec.x().unwrap().to_vec();
+        let y = EC2Y::Value(ec.y().unwrap().to_vec());
+        let device_key = CoseKey::EC2 {
+            crv: EC2Curve::P256,
+            x,
+            y,
+        };
 
         let device_key_info = DeviceKeyInfo {
             device_key,

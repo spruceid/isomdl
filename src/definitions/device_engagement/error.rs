@@ -1,3 +1,4 @@
+use crate::definitions::device_key::cose_key::Error as CoseKeyError;
 use crate::definitions::helpers::tag24::Error as Tag24Error;
 use serde_cbor::Error as SerdeCborError;
 
@@ -28,6 +29,12 @@ pub enum Error {
     InvalidNfcCommandDataLengthError,
     #[error("NFC Response Data Length must be between 256 and 65536")]
     InvalidNfcResponseDataLengthError,
+}
+
+impl From<CoseKeyError> for Error {
+    fn from(_: CoseKeyError) -> Self {
+        Error::CoseKeyError
+    }
 }
 
 impl From<Tag24Error> for Error {

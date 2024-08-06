@@ -133,30 +133,21 @@ impl PreparedCoseSign1 {
     ) -> Result<Self> {
         let cose_sign1 = builder.build();
 
-        // Check if the signature is already present.
-        match (&cose_sign1.signature, detached_payload.as_ref()) {
-            (v, Some(_)) if !v.is_empty() => return Err(Error::AlreadySigned),
-            _ => {}
-        }
-
         // Check if the payload is present and if it is attached or detached.
         // Needs to be exclusively attached or detached.
-        let payload = match (cose_sign1.payload.as_ref(), detached_payload) {
+        let payload = match (cose_sign1.payload.as_ref(), detached_payload.as_ref()) {
             (Some(_), Some(_)) => return Err(Error::DoublePayload),
             (None, None) => return Err(Error::NoPayload),
-            (Some(payload), None) => Some(payload.clone()),
-            (None, Some(payload)) => Some(payload),
+            (Some(payload), None) => payload,
+            (None, Some(payload)) => payload,
         };
-        let payload = payload
-            // If payload is None, use cbor null as payload.
-            .unwrap_or_else(|| vec![246u8]);
         // Create the signature payload ot be used later on signing.
         let signature_payload = sig_structure_data(
             SignatureContext::CoseSign1,
             cose_sign1.protected.clone(),
             None,
             aad.unwrap_or_default().as_ref(),
-            &payload,
+            payload,
         );
 
         Ok(Self {
@@ -267,7 +258,7 @@ impl ser::Serialize for CoseSign1 {
             .to_cbor_value()
             .map_err(ser::Error::custom)?;
         serialize::serialize(
-            value,
+            &value,
             if self.tagged {
                 Some(iana::CborTag::CoseSign1 as u64)
             } else {

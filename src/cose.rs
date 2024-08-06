@@ -1,4 +1,3 @@
-pub mod key;
 pub mod mac0;
 mod serialize;
 pub mod sign1;

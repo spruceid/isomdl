@@ -1,7 +1,9 @@
 use super::helpers::Tag24;
 use super::DeviceEngagement;
 use crate::definitions::device_engagement::EReaderKeyBytes;
+use crate::definitions::device_key::cose_key::EC2Y;
 use crate::definitions::device_key::CoseKey;
+use crate::definitions::device_key::EC2Curve;
 use crate::definitions::helpers::bytestr::ByteStr;
 use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
 
@@ -12,7 +14,6 @@ use aes_gcm::{
     Nonce, // Or `Aes128Gcm`
 };
 use anyhow::Result;
-use coset::iana::EllipticCurve;
 use ecdsa::EncodedPoint;
 use elliptic_curve::{
     ecdh::EphemeralSecret, ecdh::SharedSecret, generic_array::sequence::Concat,
@@ -139,13 +140,12 @@ pub fn create_p256_ephemeral_keys() -> Result<(p256::SecretKey, CoseKey), Error>
     let x_coordinate = encoded_point.x().ok_or(Error::EphemeralKeyError)?;
     let y_coordinate = encoded_point.y().ok_or(Error::EphemeralKeyError)?;
 
-    let public_key = coset::CoseKeyBuilder::new_ec2_pub_key(
-        EllipticCurve::P_256,
-        x_coordinate.to_vec(),
-        y_coordinate.to_vec(),
-    )
-    .build();
-    let public_key = CoseKey::new(public_key);
+    let crv = EC2Curve::try_from(1).map_err(|_e| Error::EphemeralKeyError)?;
+    let public_key = CoseKey::EC2 {
+        crv,
+        x: x_coordinate.to_vec(),
+        y: EC2Y::Value(y_coordinate.to_vec()),
+    };
 
     Ok((private_key, public_key))
 }

@@ -1,3 +1,4 @@
+mod device;
 pub mod device_engagement;
 pub mod device_key;
 pub mod device_request;
@@ -11,10 +12,10 @@ pub mod session;
 pub mod traits;
 pub mod validity_info;
 
-pub use crate::cose::key::Error;
 pub use device_engagement::{
     BleOptions, DeviceEngagement, DeviceRetrievalMethod, NfcOptions, Security, WifiOptions,
 };
+pub use device_key::cose_key::{EC2Curve, Error, EC2Y};
 pub use device_key::{CoseKey, DeviceKeyInfo, KeyAuthorizations};
 pub use device_request::DocRequest;
 pub use device_response::{DeviceResponse, Document};
