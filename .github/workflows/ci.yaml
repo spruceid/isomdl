@@ -37,6 +37,6 @@ jobs:
 
       - name: Doc
         run: |
-          cargo doc --workspace --all-features
+          cargo doc --all-features --no-deps
           cd macros
-          cargo doc --workspace --all-features
+          cargo doc --all-features --no-deps
