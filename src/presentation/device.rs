@@ -273,7 +273,7 @@ impl SessionManager {
         self.handle_decoded_request(session_data)
     }
 
-    /// Get next payload for signing.
+    /// Get the next payload for signing.
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         match &self.state {
             State::Signing(p) => p.get_next_signature_payload(),
