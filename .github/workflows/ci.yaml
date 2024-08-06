@@ -8,32 +8,26 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Dwarnings" 
+  RUSTFLAGS: "-Dwarnings"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Build
-      run: cargo build
+      - name: Build
+        run: cargo build --all-targets
 
-    - name: Run tests
-      run: |
-        cargo test
-        cd macros
-        cargo test
+      - name: Run tests
+        run: |
+          cargo test
+          cd macros
+          cargo test
 
-    - name: Clippy
-      run: |
-        cargo clippy
-        cd macros
-        cargo clippy
+      - name: Clippy
+        run: cargo clippy --all-targets
 
-    - name: Fmt
-      run: |
-        cargo fmt -- --check
-        cd macros
-        cargo fmt -- --check
+      - name: Fmt
+        run: cargo fmt --all -- --check
