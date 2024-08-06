@@ -1,35 +1,10 @@
-# isomdl
+# isomdl integration tests
 
-[ISO/IEC DIS 18013-5](https://www.iso.org/standard/69084.html) `mDL` implementation in Rust.
+Collection of integration tests that can be used as examples too of how you can use the library.
 
-It is intended to be used in creating apps for devices and readers that can interact with each other to exchange `mDL`
-data.
+# Simulated device and reader interaction
 
-## CLI tool
-
-This crate contains a CLI tool. Run the `--help` command to see what actions you can perform.
-
-```bash
-cargo run -- --help
-```
-
-For example, you can get the namespaces and elements defined in an mDL:
-
-```bash
-cat test/stringified-mdl.txt | cargo run -- get-namespaces -
-```
-
-## Library
-
-Here are some examples on how to use the library.
-You can see more in [tests](tests) and read about in the
-dedicated [README](tests/README.md).
-
-### Examples
-
-#### Simulated device and reader interaction
-
-This example demonstrates a simulated device and reader interaction.  
+This test demonstrates a simulated device and reader interaction.  
 The reader requests the `age_over_21` element, and the device responds with that value.
 
 ```mermaid
@@ -45,14 +20,14 @@ sequenceDiagram
     Note over Device, Reader: Session finished
 ```
 
-### The flow of the interaction
+## The flow of the interaction
 
 1. **Device initialization and engagement:**
-    - The device creates a `QR code` containing `DeviceEngagement` data, which includes its public key.
+    - The device creates a QR code containing `DeviceEngagement` data, which includes its public key.
     - Internally:
-        - The device initializes with the `mDL` data, private key, and public key.
-2. **Reader processing QR code and requesting needed fields:**
-    - The reader processes the `QR code` and creates a request for the `age_over_21` element.
+        - The device initializes with the mDL data, private key, and public key.
+2. **Reader processing `QR code` and requesting the necessary fields:**
+    - The reader processes the QR code and creates a request for the `age_over_21` element.
     - Internally:
         - Generates its private and public keys.
         - Initiates a key exchange, and generates the session keys.
@@ -67,7 +42,7 @@ sequenceDiagram
 4. **Reader Processing mDL data:**
     - The reader processes the response and prints the value of the `age_over_21` element.
 
-##### Device perspective
+### Device perspective
 
 There are several states through which the device goes during the interaction:
 
@@ -127,7 +102,9 @@ stateDiagram
     Reader --> Device: new_request
 ```
 
-### Example
+There are several tests:
 
-You can see the full example in [simulated_device_and_reader](tests/simulated_device_and_reader.rs) and a version that
-uses `State` pattern, `Arc` and `Mutex` [simulated_device_and_reader](tests/simulated_device_and_reader_state.rs).
+- full flow of the interaction:
+    - in a basic structure [simulated_device_and_reader](simulated_device_and_reader.rs)
+    - more organized structure using `State` pattern, `Arc`
+      and `Mutex` [simulated_device_and_reader_state](simulated_device_and_reader_state.rs)

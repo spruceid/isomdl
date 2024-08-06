@@ -1,5 +1,5 @@
 //! ToCbor is specifically NOT implemented for `Vec<T>` where `T: ToCbor`, as `Vec<u8>` likely should be
-//! represented as a `bytestr` instead of an array in cbor.
+//! represented as a `bytestr` instead of an `array` in `cbor`.
 
 use serde_cbor::Value;
 use std::collections::BTreeMap;
