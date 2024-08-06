@@ -1,3 +1,16 @@
+use std::collections::{BTreeMap, HashSet};
+
+use anyhow::{anyhow, Result};
+use async_signature::AsyncSigner;
+use coset::{iana, Label};
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+use serde_cbor::Value as CborValue;
+use sha2::{Digest, Sha256, Sha384, Sha512};
+use signature::{SignatureEncoding, Signer};
+
+use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::cose::SignatureAlgorithm;
 use crate::{
     definitions::{
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
@@ -6,18 +19,6 @@ use crate::{
     },
     issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
-use anyhow::{anyhow, Result};
-use async_signature::AsyncSigner;
-use cose_rs::{
-    algorithm::{Algorithm, SignatureAlgorithm},
-    sign1::{CoseSign1, PreparedCoseSign1},
-};
-use rand::Rng;
-use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
-use sha2::{Digest, Sha256, Sha384, Sha512};
-use signature::{SignatureEncoding, Signer};
-use std::collections::{BTreeMap, HashSet};
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
 
@@ -62,7 +63,7 @@ impl Mdoc {
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
-        signature_algorithm: Algorithm,
+        signature_algorithm: iana::Algorithm,
         enable_decoy_digests: bool,
     ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
@@ -84,11 +85,13 @@ impl Mdoc {
 
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
-        let prepared_sig = CoseSign1::builder()
-            .payload(mso_bytes)
-            .signature_algorithm(signature_algorithm)
-            .prepare()
-            .map_err(|e| anyhow!("error preparing cosesign1: {}", e))?;
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(signature_algorithm)
+            .build();
+        let builder = coset::CoseSign1Builder::new()
+            .protected(protected)
+            .payload(mso_bytes);
+        let prepared_sig = PreparedCoseSign1::new(builder, None, None, true)?;
 
         let preparation_mdoc = PreparedMdoc {
             doc_type,
@@ -190,8 +193,10 @@ impl PreparedMdoc {
 
         let mut issuer_auth = prepared_sig.finalize(signature);
         issuer_auth
-            .unprotected_mut()
-            .insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
+            .inner
+            .unprotected
+            .rest
+            .push((Label::Int(X5CHAIN_HEADER_LABEL as i64), x5chain.into_cbor()));
 
         Mdoc {
             doc_type,
@@ -243,7 +248,7 @@ impl Builder {
     ///
     /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
     /// it is a required field in the signature headers.
-    pub fn prepare(self, signature_algorithm: Algorithm) -> Result<PreparedMdoc> {
+    pub fn prepare(self, signature_algorithm: iana::Algorithm) -> Result<PreparedMdoc> {
         let doc_type = self
             .doc_type
             .ok_or_else(|| anyhow!("missing parameter: 'doc_type'"))?;
@@ -452,18 +457,19 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
-    use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
-    use crate::definitions::namespaces::{
-        org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
-    };
-
-    use crate::definitions::traits::{FromJson, ToNamespaceMap};
     use elliptic_curve::sec1::ToEncodedPoint;
     use p256::ecdsa::{Signature, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
     use p256::SecretKey;
     use time::OffsetDateTime;
+
+    use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
+    use crate::definitions::namespaces::{
+        org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
+    };
+    use crate::definitions::traits::{FromJson, ToNamespaceMap};
+
+    use super::*;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/issuer-cert.pem");
     static ISSUER_KEY: &str = include_str!("../../test/issuance/issuer-key.pem");

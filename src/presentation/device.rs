@@ -1,3 +1,17 @@
+use std::collections::BTreeMap;
+use std::num::ParseIntError;
+
+use coset::{CoseMac0Builder, CoseSign1Builder};
+use p256::FieldBytes;
+use serde::{Deserialize, Serialize};
+use serde_cbor::Value as CborValue;
+use uuid::Uuid;
+
+use session::SessionTranscript180135;
+
+use crate::cose::mac0::PreparedCoseMac0;
+use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -17,14 +31,6 @@ use crate::{
     },
     issuance::Mdoc,
 };
-use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
-use p256::FieldBytes;
-use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
-use session::SessionTranscript180135;
-use std::collections::BTreeMap;
-use std::num::ParseIntError;
-use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
@@ -50,6 +56,7 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     state: State,
+    device_auth_type: DeviceAuthType,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -96,6 +103,22 @@ pub struct PreparedDeviceResponse {
     signed_documents: Vec<DeviceResponseDoc>,
     document_errors: Option<DocumentErrors>,
     status: Status,
+    device_auth_type: DeviceAuthType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum PreparedCose {
+    Sign1(PreparedCoseSign1),
+    Mac0(PreparedCoseMac0),
+}
+
+impl PreparedCose {
+    fn signature_payload(&self) -> &[u8] {
+        match self {
+            PreparedCose::Sign1(inner) => inner.signature_payload(),
+            PreparedCose::Mac0(inner) => inner.signature_payload(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +127,7 @@ struct PreparedDocument {
     doc_type: String,
     issuer_signed: IssuerSigned,
     device_namespaces: DeviceNamespacesBytes,
-    prepared_cose_sign1: PreparedCoseSign1,
+    prepared_cose: PreparedCose,
     errors: Option<NamespaceErrors>,
 }
 
@@ -191,6 +214,7 @@ impl SessionManagerEngaged {
             sk_reader,
             reader_message_counter: 0,
             state: State::AwaitingRequest,
+            device_auth_type: DeviceAuthType::Sign1,
         };
 
         let requested_data = sm.handle_decoded_request(SessionData {
@@ -206,12 +230,12 @@ impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
         let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
             // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
-            PreparedDeviceResponse::empty(Status::CborDecodingError)
+            PreparedDeviceResponse::empty(Status::CborDecodingError, self.device_auth_type)
         })?;
 
         serde_cbor::value::from_value(request).map_err(|_| {
             // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
-            PreparedDeviceResponse::empty(Status::CborValidationError)
+            PreparedDeviceResponse::empty(Status::CborValidationError, self.device_auth_type)
         })
     }
 
@@ -225,7 +249,10 @@ impl SessionManager {
             //     request.version,
             //     DeviceRequest::VERSION
             // );
-            return Err(PreparedDeviceResponse::empty(Status::GeneralError));
+            return Err(PreparedDeviceResponse::empty(
+                Status::GeneralError,
+                self.device_auth_type,
+            ));
         }
         Ok(request
             .doc_requests
@@ -327,7 +354,7 @@ impl SessionManager {
     /// Retrieve the completed response.
     pub fn retrieve_response(&mut self) -> Option<Vec<u8>> {
         if self.response_ready() {
-            // Replace state with AwaitingRequest.
+            // Replace the state with AwaitingRequest.
             let state = std::mem::take(&mut self.state);
             match state {
                 State::ReadyToRespond(r) => Some(r),
@@ -341,12 +368,13 @@ impl SessionManager {
 }
 
 impl PreparedDeviceResponse {
-    fn empty(status: Status) -> Self {
+    fn empty(status: Status, device_auth_type: DeviceAuthType) -> Self {
         PreparedDeviceResponse {
             status,
             prepared_documents: Vec::new(),
             document_errors: None,
             signed_documents: Vec::new(),
+            device_auth_type,
         }
     }
 
@@ -360,7 +388,7 @@ impl PreparedDeviceResponse {
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         self.prepared_documents
             .last()
-            .map(|doc| (doc.id, doc.prepared_cose_sign1.signature_payload()))
+            .map(|doc| (doc.id, doc.prepared_cose.signature_payload()))
     }
 
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) {
@@ -368,7 +396,7 @@ impl PreparedDeviceResponse {
             Some(doc) => doc.finalize(signature),
             None => {
                 //tracing::error!(
-                //    "received a signature for finalising when there are no more prepared docs"
+                //    "received a signature for finalizing when there are no more prepared docs"
                 //);
                 return;
             }
@@ -379,7 +407,8 @@ impl PreparedDeviceResponse {
     pub fn finalize_response(self) -> DeviceResponse {
         if !self.is_complete() {
             //tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
-            return PreparedDeviceResponse::empty(Status::GeneralError).finalize_response();
+            return PreparedDeviceResponse::empty(Status::GeneralError, self.device_auth_type)
+                .finalize_response();
         }
 
         DeviceResponse {
@@ -396,17 +425,23 @@ impl PreparedDocument {
         let Self {
             issuer_signed,
             device_namespaces,
-            prepared_cose_sign1,
+            prepared_cose,
             errors,
             doc_type,
             ..
         } = self;
-        let cose_sign1 = prepared_cose_sign1.finalize(signature);
+        let device_auth = match prepared_cose {
+            PreparedCose::Sign1(inner) => DeviceAuth::Signature {
+                device_signature: inner.finalize(signature),
+            },
+            PreparedCose::Mac0(inner) => DeviceAuth::Mac {
+                device_mac: inner.finalize(signature),
+            },
+        };
+
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,
-            device_auth: DeviceAuth::Signature {
-                device_signature: cose_sign1,
-            },
+            device_auth,
         };
         DeviceResponseDoc {
             doc_type,
@@ -422,6 +457,7 @@ pub trait DeviceSession {
 
     fn documents(&self) -> &Documents;
     fn session_transcript(&self) -> Self::ST;
+    fn device_auth_type(&self) -> DeviceAuthType;
     fn prepare_response(
         &self,
         requests: &RequestedItems,
@@ -542,19 +578,50 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let prepared_cose_sign1 = match CoseSign1::builder()
-                .detached()
-                .payload(device_auth_bytes)
-                .signature_algorithm(signature_algorithm)
-                .prepare()
-            {
-                Ok(prepared) => prepared,
-                Err(_e) => {
-                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                        .into_iter()
-                        .collect();
-                    document_errors.push(error);
-                    continue;
+            let header = coset::HeaderBuilder::new()
+                .algorithm(signature_algorithm)
+                .build();
+
+            let prepared_cose = match self.device_auth_type() {
+                DeviceAuthType::Sign1 => {
+                    let cose_sign1_builder = CoseSign1Builder::new().protected(header);
+                    let prepared_cose_sign1 = match PreparedCoseSign1::new(
+                        cose_sign1_builder,
+                        Some(device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Sign1(prepared_cose_sign1)
+                }
+                DeviceAuthType::Mac0 => {
+                    let cose_mac0_builder = CoseMac0Builder::new().protected(header);
+                    let prepared_cose_mac0 = match PreparedCoseMac0::new(
+                        cose_mac0_builder,
+                        Some(device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Mac0(prepared_cose_mac0)
                 }
             };
 
@@ -566,7 +633,7 @@ pub trait DeviceSession {
                     issuer_auth: document.issuer_auth.clone(),
                 },
                 device_namespaces,
-                prepared_cose_sign1,
+                prepared_cose,
                 errors: errors.try_into().ok(),
             };
             prepared_documents.push(prepared_document);
@@ -576,6 +643,7 @@ pub trait DeviceSession {
             document_errors: document_errors.try_into().ok(),
             status: Status::OK,
             signed_documents: Vec::new(),
+            device_auth_type: self.device_auth_type(),
         }
     }
 }
@@ -589,6 +657,10 @@ impl DeviceSession for SessionManager {
 
     fn session_transcript(&self) -> SessionTranscript180135 {
         self.session_transcript.clone()
+    }
+
+    fn device_auth_type(&self) -> DeviceAuthType {
+        self.device_auth_type
     }
 }
 
@@ -731,11 +803,18 @@ impl TryFrom<String> for AgeOver {
 
 #[cfg(test)]
 mod test {
+    use coset::{iana, CborSerializable, CoseSign1Builder};
+    use ecdsa::Signature;
+    use hex::FromHex;
+    use p256::ecdsa::{SigningKey, VerifyingKey};
+    use p256::{NistP256, SecretKey};
+    use serde_json::json;
+    use signature::{Signer, Verifier};
+
     use crate::definitions::helpers::ByteStr;
+    use crate::definitions::mso::DigestId;
 
     use super::*;
-    use crate::definitions::mso::DigestId;
-    use serde_json::json;
 
     #[test]
     fn filter_permitted() {
@@ -848,5 +927,78 @@ mod test {
         let x = wib.as_bytes();
 
         println!("{:?}", x);
+    }
+
+    // static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
+    static COSE_KEY: &str = include_str!("../../test/definitions/cose/sign1/secret_key");
+
+    fn sign(payload: &[u8]) -> Vec<u8> {
+        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let signer: SigningKey = SecretKey::from_slice(&key).unwrap().into();
+
+        let sig: Signature<NistP256> = signer.try_sign(payload).unwrap();
+        sig.to_vec()
+    }
+
+    fn verify(sig: &[u8], payload: &[u8]) -> coset::Result<(), String> {
+        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let signer: SigningKey = SecretKey::from_slice(&key).unwrap().into();
+        let verifier: VerifyingKey = (&signer).into();
+        let signature: Signature<NistP256> =
+            Signature::from_slice(sig).map_err(|err| err.to_string())?;
+        verifier
+            .verify(payload, &signature)
+            .map_err(|err| err.to_string())
+    }
+
+    #[test]
+    fn test_coset() {
+        // Inputs.
+        let pt = b"This is the content";
+        let aad = b"this is additional data";
+
+        // Build a `CoseSign1` object.
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(iana::Algorithm::ES256)
+            .key_id(b"11".to_vec())
+            .build();
+        let sign1 = CoseSign1Builder::new()
+            .protected(protected)
+            .payload(pt.to_vec())
+            .create_signature(aad, sign) // closure to do sign operation
+            .build();
+
+        // Serialize to bytes.
+        let sign1_data = sign1.to_vec().unwrap();
+        println!(
+            "'{}' + '{}' => {}",
+            String::from_utf8_lossy(pt),
+            String::from_utf8_lossy(aad),
+            hex::encode(&sign1_data)
+        );
+
+        // At the receiving end, deserialize the bytes back to a `CoseSign1` object.
+        let mut sign1 = coset::CoseSign1::from_slice(&sign1_data).unwrap();
+
+        // At this point, real code would validate the protected headers.
+
+        // Check the signature, which needs to have the same `aad` provided, by
+        // providing a closure that can do the verify operation.
+        let result = sign1.verify_signature(aad, verify);
+        println!("Signature verified: {:?}.", result);
+        assert!(result.is_ok());
+
+        // Changing an unprotected header leaves the signature valid.
+        sign1.unprotected.content_type = Some(coset::ContentType::Text("text/plain".to_owned()));
+        assert!(sign1.verify_signature(aad, verify).is_ok());
+
+        // Providing a different `aad` means the signature won't validate.
+        assert!(sign1.verify_signature(b"not aad", verify).is_err());
+
+        // Changing a protected header invalidates the signature.
+        sign1.protected.original_data = None;
+        sign1.protected.header.content_type =
+            Some(coset::ContentType::Text("text/plain".to_owned()));
+        assert!(sign1.verify_signature(aad, verify).is_err());
     }
 }

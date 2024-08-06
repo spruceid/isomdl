@@ -1,10 +1,14 @@
+use std::collections::BTreeMap;
+
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
-use cose_rs::algorithm::Algorithm;
+use coset::iana::EllipticCurve;
+use coset::{iana, CborSerializable};
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use ssi_jwk::JWK;
-use std::collections::BTreeMap;
+
+use crate::definitions::traits::ToCbor;
 
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
 /// restricted to the requirements of ISO/IEC 18013-5:2021.
@@ -31,6 +35,23 @@ pub enum EC2Curve {
     P256K,
 }
 
+impl From<EllipticCurve> for EC2Curve {
+    fn from(value: EllipticCurve) -> Self {
+        match value {
+            EllipticCurve::Reserved => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::P_256 => EC2Curve::P256,
+            EllipticCurve::P_384 => EC2Curve::P384,
+            EllipticCurve::P_521 => EC2Curve::P521,
+            EllipticCurve::X25519 => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::X448 => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::Ed25519 => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::Ed448 => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::Secp256k1 => unimplemented!("{value:?} is not implemented"),
+            _ => unimplemented!("{value:?} is not implemented"),
+        }
+    }
+}
+
 /// The RFC-8152 identifier of the curve, for OKP key type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OKPCurve {
@@ -38,6 +59,23 @@ pub enum OKPCurve {
     X448,
     Ed25519,
     Ed448,
+}
+
+impl From<EllipticCurve> for OKPCurve {
+    fn from(value: EllipticCurve) -> Self {
+        match value {
+            EllipticCurve::Reserved => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::P_256 => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::P_384 => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::P_521 => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::X25519 => OKPCurve::X25519,
+            EllipticCurve::X448 => OKPCurve::X448,
+            EllipticCurve::Ed25519 => OKPCurve::Ed25519,
+            EllipticCurve::Ed448 => OKPCurve::Ed448,
+            EllipticCurve::Secp256k1 => unimplemented!("{value:?} is not implemented"),
+            _ => unimplemented!("{value:?} is not implemented"),
+        }
+    }
 }
 
 /// Errors that can occur when deserialising a COSE_Key.
@@ -64,28 +102,28 @@ pub enum Error {
 }
 
 impl CoseKey {
-    pub fn signature_algorithm(&self) -> Option<Algorithm> {
+    pub fn signature_algorithm(&self) -> Option<iana::Algorithm> {
         match self {
             CoseKey::EC2 {
                 crv: EC2Curve::P256,
                 ..
-            } => Some(Algorithm::ES256),
+            } => Some(iana::Algorithm::ES256),
             CoseKey::EC2 {
                 crv: EC2Curve::P384,
                 ..
-            } => Some(Algorithm::ES384),
+            } => Some(iana::Algorithm::ES384),
             CoseKey::EC2 {
                 crv: EC2Curve::P521,
                 ..
-            } => Some(Algorithm::ES512),
+            } => Some(iana::Algorithm::ES512),
             CoseKey::OKP {
                 crv: OKPCurve::Ed448,
                 ..
-            } => Some(Algorithm::EdDSA),
+            } => Some(iana::Algorithm::EdDSA),
             CoseKey::OKP {
                 crv: OKPCurve::Ed25519,
                 ..
-            } => Some(Algorithm::EdDSA),
+            } => Some(iana::Algorithm::EdDSA),
             _ => None,
         }
     }
@@ -393,10 +431,33 @@ impl TryFrom<&ssi_jwk::OctetParams> for OKPCurve {
     }
 }
 
+impl TryFrom<CoseKey> for coset::CoseKey {
+    type Error = coset::CoseError;
+
+    fn try_from(value: CoseKey) -> Result<Self, Self::Error> {
+        coset::CoseKey::from_slice(
+            &value
+                .to_cbor_bytes()
+                .map_err(|_| coset::CoseError::EncodeFailed)?
+                .to_vec(),
+        )
+    }
+}
+
+impl TryFrom<coset::CoseKey> for CoseKey {
+    type Error = Error;
+
+    fn try_from(value: coset::CoseKey) -> Result<Self, Self::Error> {
+        serde_cbor::from_slice(&value.to_vec().map_err(|_| Error::InvalidCoseKey)?)
+            .map_err(|_| Error::InvalidCoseKey)
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::*;
     use hex::FromHex;
+
+    use super::*;
 
     static EC_P256: &str = include_str!("../../../test/definitions/cose_key/ec_p256.cbor");
 
