@@ -133,12 +133,6 @@ impl PreparedCoseSign1 {
     ) -> Result<Self> {
         let cose_sign1 = builder.build();
 
-        // Check if the signature is already present.
-        match (&cose_sign1.signature, detached_payload.as_ref()) {
-            (v, Some(_)) if !v.is_empty() => return Err(Error::AlreadySigned),
-            _ => {}
-        }
-
         // Check if the payload is present and if it is attached or detached.
         // Needs to be exclusively attached or detached.
         let payload = match (cose_sign1.payload.as_ref(), detached_payload.as_ref()) {

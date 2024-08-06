@@ -129,12 +129,6 @@ impl PreparedCoseMac0 {
     ) -> Result<Self> {
         let cose_mac0 = builder.build();
 
-        // Check if the signature is already present.
-        match (&cose_mac0.tag, detached_payload.as_ref()) {
-            (v, Some(_)) if !v.is_empty() => return Err(Error::AlreadyTagged),
-            _ => {}
-        }
-
         // Check if the payload is present and if it is attached or detached.
         // Needs to be exclusively attached or detached.
         let payload = match (cose_mac0.payload.as_ref(), detached_payload.as_ref()) {
@@ -306,10 +300,10 @@ mod tests {
     use crate::cose::mac0::{CoseMac0, PreparedCoseMac0};
 
     static COSE_MAC0: &str = include_str!("../../test/definitions/cose/mac0/serialized.cbor");
-    static COSE_KEY: &str = include_str!("../../test/definitions/cose/mac0/secret_key");
+    static KEY: &str = include_str!("../../test/definitions/cose/mac0/secret_key");
 
     const RFC8392_KEY: &str = "6c1382765aec5358f117733d281c1c7bdc39884d04a45a1e6c67c858bc206c19";
-    const RFC8392_COSE_MAC0: &str = "d18443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b715820a377dfe17a3c3c3bdb363c426f85d3c1a1f11007765965017602f207700071b0";
+    const RFC8392_MAC0: &str = "d18443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b715820a377dfe17a3c3c3bdb363c426f85d3c1a1f11007765965017602f207700071b0";
 
     #[test]
     fn roundtrip() {
@@ -327,7 +321,7 @@ mod tests {
 
     #[test]
     fn tagging() {
-        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let key = Vec::<u8>::from_hex(KEY).unwrap();
         let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
         let protected = coset::HeaderBuilder::new()
             .algorithm(iana::Algorithm::HMAC_256_256)
@@ -360,7 +354,7 @@ mod tests {
 
     #[test]
     fn verifying() {
-        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let key = Vec::<u8>::from_hex(KEY).unwrap();
         let verifier =
             Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC verifier");
 
@@ -376,7 +370,7 @@ mod tests {
 
     #[test]
     fn remote_tagging() {
-        let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
+        let key = Vec::<u8>::from_hex(KEY).unwrap();
         let signer = Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC signer");
         let protected = coset::HeaderBuilder::new()
             .algorithm(iana::Algorithm::HMAC_256_256)
@@ -449,7 +443,7 @@ mod tests {
         let cose_mac0 = prepared.finalize(signature);
         let serialized =
             serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
-        let expected = hex::decode(RFC8392_COSE_MAC0).unwrap();
+        let expected = hex::decode(RFC8392_MAC0).unwrap();
 
         assert_eq!(
             expected, serialized,
@@ -459,7 +453,7 @@ mod tests {
 
     #[test]
     fn deserializing_tdeserializing_signed_cwtagged_cwt() {
-        let cose_mac0_bytes = hex::decode(RFC8392_COSE_MAC0).unwrap();
+        let cose_mac0_bytes = hex::decode(RFC8392_MAC0).unwrap();
         let cose_mac0: CoseMac0 =
             serde_cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
         let parsed_claims_set = cose_mac0
