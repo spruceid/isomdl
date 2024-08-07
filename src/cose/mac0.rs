@@ -141,7 +141,7 @@ impl PreparedCoseMac0 {
         let tag_payload = mac_structure_data(
             MacContext::CoseMac0,
             cose_mac0.protected.clone(),
-            aad.unwrap_or_default().as_ref(),
+            aad.unwrap_or_default(),
             &payload,
         );
 
@@ -199,7 +199,7 @@ impl CoseMac0 {
         let tag_payload = mac_structure_data(
             MacContext::CoseMac0,
             self.inner.protected.clone(),
-            external_aad.unwrap_or_default().as_ref(),
+            external_aad.unwrap_or_default(),
             payload,
         );
 

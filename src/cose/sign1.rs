@@ -145,7 +145,7 @@ impl PreparedCoseSign1 {
             SignatureContext::CoseSign1,
             cose_sign1.protected.clone(),
             None,
-            aad.unwrap_or_default().as_ref(),
+            aad.unwrap_or_default(),
             &payload,
         );
 
@@ -214,7 +214,7 @@ impl CoseSign1 {
             SignatureContext::CoseSign1,
             self.inner.protected.clone(),
             None,
-            external_aad.unwrap_or_default().as_ref(),
+            external_aad.unwrap_or_default(),
             payload,
         );
 
