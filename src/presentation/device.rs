@@ -54,7 +54,7 @@ use uuid::Uuid;
 /// using the [SessionManagerInit::qr_engagement] method, which will return the
 /// [SessionManagerEngaged] Session Manager state.
 ///
-/// For convience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
+/// For convenience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
 /// to provide the BLE identification string for the device.
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
