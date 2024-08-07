@@ -94,16 +94,16 @@ pub enum VerificationResult {
 impl VerificationResult {
     /// Result of verification.
     ///
-    /// False implies the signature is inauthentic or the verification algorithm encountered an
+    /// `false` implies the signature is inauthentic or the verification algorithm encountered an
     /// error.
-    pub fn success(&self) -> bool {
+    pub fn is_success(&self) -> bool {
         matches!(self, VerificationResult::Success)
     }
 
     /// Translate to a std::result::Result.
     ///
     /// Converts failure reasons and errors into a String.
-    pub fn to_result(self) -> Result<(), String> {
+    pub fn into_result(self) -> Result<(), String> {
         match self {
             VerificationResult::Success => Ok(()),
             VerificationResult::Failure(reason) => Err(reason),
@@ -112,7 +112,7 @@ impl VerificationResult {
     }
 
     /// Retrieve the error if the verification algorithm encountered an error.
-    pub fn to_error(self) -> Option<Error> {
+    pub fn into_error(self) -> Option<Error> {
         match self {
             VerificationResult::Error(e) => Some(e),
             _ => None,
@@ -123,26 +123,26 @@ impl VerificationResult {
 impl PreparedCoseMac0 {
     pub fn new(
         builder: coset::CoseMac0Builder,
-        detached_payload: Option<Vec<u8>>,
-        aad: Option<Vec<u8>>,
+        detached_payload: Option<&[u8]>,
+        aad: Option<&[u8]>,
         tagged: bool,
     ) -> Result<Self> {
         let cose_mac0 = builder.build();
 
         // Check if the payload is present and if it is attached or detached.
         // Needs to be exclusively attached or detached.
-        let payload = match (cose_mac0.payload.as_ref(), detached_payload.as_ref()) {
+        let payload = match (cose_mac0.payload.as_ref(), detached_payload) {
             (Some(_), Some(_)) => return Err(Error::DoublePayload),
             (None, None) => return Err(Error::NoPayload),
-            (Some(payload), None) => payload,
-            (None, Some(payload)) => payload,
+            (Some(payload), None) => payload.clone(),
+            (None, Some(payload)) => payload.to_vec(),
         };
         // Create the signature payload ot be used later on signing.
         let tag_payload = mac_structure_data(
             MacContext::CoseMac0,
             cose_mac0.protected.clone(),
             aad.unwrap_or_default().as_ref(),
-            payload,
+            &payload,
         );
 
         Ok(Self {
@@ -173,8 +173,8 @@ impl CoseMac0 {
     pub fn verify(
         &self,
         verifier: &Hmac<Sha256>,
-        detached_payload: Option<Vec<u8>>,
-        external_aad: Option<Vec<u8>>,
+        detached_payload: Option<&[u8]>,
+        external_aad: Option<&[u8]>,
     ) -> VerificationResult {
         if let Some(RegisteredLabelWithPrivate::Assigned(alg)) =
             self.inner.protected.header.alg.as_ref()
@@ -186,7 +186,7 @@ impl CoseMac0 {
             }
         }
 
-        let payload = match (self.inner.payload.as_ref(), detached_payload.as_ref()) {
+        let payload = match (self.inner.payload.as_ref(), detached_payload) {
             (None, None) => return VerificationResult::Error(Error::NoPayload),
             (Some(attached), None) => attached,
             (None, Some(detached)) => detached,
@@ -224,7 +224,7 @@ impl CoseMac0 {
     }
 
     /// If we are serialized as tagged.
-    pub fn tagged(&self) -> bool {
+    pub fn is_tagged(&self) -> bool {
         self.tagged
     }
 
@@ -364,7 +364,7 @@ mod tests {
 
         cose_mac0
             .verify(&verifier, None, None)
-            .to_result()
+            .into_result()
             .expect("COSE_MAC0 could not be verified")
     }
 
@@ -398,7 +398,7 @@ mod tests {
             Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC verifier");
         cose_mac0
             .verify(&verifier, None, None)
-            .to_result()
+            .into_result()
             .expect("COSE_MAC0 could not be verified")
     }
 

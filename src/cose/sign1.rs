@@ -1,3 +1,4 @@
+use crate::cose::{serialize, SignatureAlgorithm};
 use coset::cbor::Value;
 use coset::cwt::ClaimsSet;
 use coset::{
@@ -6,8 +7,6 @@ use coset::{
 };
 use serde::{ser, Deserialize, Deserializer, Serialize};
 use signature::Verifier;
-
-use crate::cose::{serialize, SignatureAlgorithm};
 
 /// Prepared `COSE_Sign1` for remote signing.
 ///
@@ -98,16 +97,16 @@ pub enum VerificationResult {
 impl VerificationResult {
     /// Result of verification.
     ///
-    /// False implies the signature is inauthentic or the verification algorithm encountered an
+    /// `false` implies the signature is inauthentic or the verification algorithm encountered an
     /// error.
-    pub fn success(&self) -> bool {
+    pub fn is_success(&self) -> bool {
         matches!(self, VerificationResult::Success)
     }
 
     /// Translate to a std::result::Result.
     ///
     /// Converts failure reasons and errors into a String.
-    pub fn to_result(self) -> Result<(), String> {
+    pub fn into_result(self) -> Result<(), String> {
         match self {
             VerificationResult::Success => Ok(()),
             VerificationResult::Failure(reason) => Err(reason),
@@ -116,7 +115,7 @@ impl VerificationResult {
     }
 
     /// Retrieve the error if the verification algorithm encountered an error.
-    pub fn to_error(self) -> Option<Error> {
+    pub fn into_error(self) -> Option<Error> {
         match self {
             VerificationResult::Error(e) => Some(e),
             _ => None,
@@ -127,19 +126,19 @@ impl VerificationResult {
 impl PreparedCoseSign1 {
     pub fn new(
         builder: coset::CoseSign1Builder,
-        detached_payload: Option<Vec<u8>>,
-        aad: Option<Vec<u8>>,
+        detached_payload: Option<&[u8]>,
+        aad: Option<&[u8]>,
         tagged: bool,
     ) -> Result<Self> {
         let cose_sign1 = builder.build();
 
         // Check if the payload is present and if it is attached or detached.
         // Needs to be exclusively attached or detached.
-        let payload = match (cose_sign1.payload.as_ref(), detached_payload.as_ref()) {
+        let payload = match (cose_sign1.payload.as_ref(), detached_payload) {
             (Some(_), Some(_)) => return Err(Error::DoublePayload),
             (None, None) => return Err(Error::NoPayload),
-            (Some(payload), None) => payload,
-            (None, Some(payload)) => payload,
+            (Some(payload), None) => payload.clone(),
+            (None, Some(payload)) => payload.to_vec(),
         };
         // Create the signature payload ot be used later on signing.
         let signature_payload = sig_structure_data(
@@ -147,7 +146,7 @@ impl PreparedCoseSign1 {
             cose_sign1.protected.clone(),
             None,
             aad.unwrap_or_default().as_ref(),
-            payload,
+            &payload,
         );
 
         Ok(Self {
@@ -178,8 +177,8 @@ impl CoseSign1 {
     pub fn verify<'a, V, S>(
         &'a self,
         verifier: &V,
-        detached_payload: Option<Vec<u8>>,
-        external_aad: Option<Vec<u8>>,
+        detached_payload: Option<&[u8]>,
+        external_aad: Option<&[u8]>,
     ) -> VerificationResult
     where
         V: Verifier<S> + SignatureAlgorithm,
@@ -196,7 +195,7 @@ impl CoseSign1 {
             }
         }
 
-        let payload = match (self.inner.payload.as_ref(), detached_payload.as_ref()) {
+        let payload = match (self.inner.payload.as_ref(), detached_payload) {
             (None, None) => return VerificationResult::Error(Error::NoPayload),
             (Some(attached), None) => attached,
             (None, Some(detached)) => detached,
@@ -237,7 +236,7 @@ impl CoseSign1 {
     }
 
     /// If we are serialized as tagged.
-    pub fn tagged(&self) -> bool {
+    pub fn is_tagged(&self) -> bool {
         self.tagged
     }
 
@@ -409,7 +408,7 @@ mod tests {
 
         cose_sign1
             .verify::<VerifyingKey, Signature>(&verifier, None, None)
-            .to_result()
+            .into_result()
             .expect("COSE_Sign1 could not be verified")
     }
 
@@ -442,7 +441,7 @@ mod tests {
         let verifier: VerifyingKey = (&signer).into();
         cose_sign1
             .verify::<VerifyingKey, Signature>(&verifier, None, None)
-            .to_result()
+            .into_result()
             .expect("COSE_Sign1 could not be verified")
     }
 

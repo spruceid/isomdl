@@ -35,19 +35,21 @@ pub enum EC2Curve {
     P256K,
 }
 
-impl From<EllipticCurve> for EC2Curve {
-    fn from(value: EllipticCurve) -> Self {
+impl TryFrom<EllipticCurve> for EC2Curve {
+    type Error = Error;
+
+    fn try_from(value: EllipticCurve) -> Result<Self, Self::Error> {
         match value {
             EllipticCurve::Reserved => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::P_256 => EC2Curve::P256,
-            EllipticCurve::P_384 => EC2Curve::P384,
-            EllipticCurve::P_521 => EC2Curve::P521,
-            EllipticCurve::X25519 => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::X448 => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::Ed25519 => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::Ed448 => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::Secp256k1 => unimplemented!("{value:?} is not implemented"),
-            _ => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::P_256 => Ok(EC2Curve::P256),
+            EllipticCurve::P_384 => Ok(EC2Curve::P384),
+            EllipticCurve::P_521 => Ok(EC2Curve::P521),
+            EllipticCurve::X25519 => Err(Error::UnsupportedCurve),
+            EllipticCurve::X448 => Err(Error::UnsupportedCurve),
+            EllipticCurve::Ed25519 => Err(Error::UnsupportedCurve),
+            EllipticCurve::Ed448 => Err(Error::UnsupportedCurve),
+            EllipticCurve::Secp256k1 => Err(Error::UnsupportedCurve),
+            _ => Err(Error::UnsupportedCurve),
         }
     }
 }
@@ -61,19 +63,16 @@ pub enum OKPCurve {
     Ed448,
 }
 
-impl From<EllipticCurve> for OKPCurve {
-    fn from(value: EllipticCurve) -> Self {
+impl TryFrom<EllipticCurve> for OKPCurve {
+    type Error = Error;
+
+    fn try_from(value: EllipticCurve) -> Result<Self, Self::Error> {
         match value {
-            EllipticCurve::Reserved => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::P_256 => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::P_384 => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::P_521 => unimplemented!("{value:?} is not implemented"),
-            EllipticCurve::X25519 => OKPCurve::X25519,
-            EllipticCurve::X448 => OKPCurve::X448,
-            EllipticCurve::Ed25519 => OKPCurve::Ed25519,
-            EllipticCurve::Ed448 => OKPCurve::Ed448,
-            EllipticCurve::Secp256k1 => unimplemented!("{value:?} is not implemented"),
-            _ => unimplemented!("{value:?} is not implemented"),
+            EllipticCurve::X25519 => Ok(OKPCurve::X25519),
+            EllipticCurve::X448 => Ok(OKPCurve::X448),
+            EllipticCurve::Ed25519 => Ok(OKPCurve::Ed25519),
+            EllipticCurve::Ed448 => Ok(OKPCurve::Ed448),
+            _ => Err(Error::UnsupportedCurve),
         }
     }
 }

@@ -587,7 +587,7 @@ pub trait DeviceSession {
                     let cose_sign1_builder = CoseSign1Builder::new().protected(header);
                     let prepared_cose_sign1 = match PreparedCoseSign1::new(
                         cose_sign1_builder,
-                        Some(device_auth_bytes),
+                        Some(&device_auth_bytes),
                         None,
                         true,
                     ) {
@@ -607,7 +607,7 @@ pub trait DeviceSession {
                     let cose_mac0_builder = CoseMac0Builder::new().protected(header);
                     let prepared_cose_mac0 = match PreparedCoseMac0::new(
                         cose_mac0_builder,
-                        Some(device_auth_bytes),
+                        Some(&device_auth_bytes),
                         None,
                         true,
                     ) {
