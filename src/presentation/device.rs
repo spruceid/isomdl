@@ -1,12 +1,21 @@
-//! This module is responsible for the device's interaction with the reader.
+//! This module is responsible for establishing the device's session with the reader.
 //!
-//! It handles this through **State pattern**.
+//! The device's [SessionManager] state machine is responsible
+//! for handling the session with the reader.
 //!
-//! There are several states through which the device goes during the interaction:
+//! The session is managed through a set of session management states: initialization, engaged,
+//! and established.
+//!
+//! To initialize a session management state, see the [SessionManagerInit] struct.
 //!
 //! ```text
 #![doc = include_str!("../../docs/on_simulated_device.txt")]
 //! ```
+//!
+//! ### Example
+//!
+//! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
+//! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -37,10 +46,16 @@ use uuid::Uuid;
 
 /// Initialisation state.
 ///
-/// It receives the documents and stores the ephemeral generated device key,
-/// and the device engagement.
-/// This is the first state that starts the interaction.
-/// You enter this state by calling [SessionManagerInit::initialise].
+/// You enter this state using [SessionManagerInit::initialise] method, providing
+/// the documents and optional non-empty list of device [DeviceRetrievalMethod] and
+/// server [ServerRetrievalMethods] retrieval methods.
+///
+/// The [SessionManagerInit] state is restricted to creating a QR-code engagement,
+/// using the [SessionManagerInit::qr_engagement] method, which will return the
+/// [SessionManagerEngaged] Session Manager state.
+///
+/// For convience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
+/// to provide the BLE identification string for the device.
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
@@ -50,7 +65,7 @@ pub struct SessionManagerInit {
 
 /// Engaged state.
 ///
-/// Transition to this state is [SessionManagerInit::qr_engagement].
+/// Transition to this state is made with [SessionManagerInit::qr_engagement].  
 /// That creates the `QR code` that the reader will use to establish the session.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
@@ -60,10 +75,20 @@ pub struct SessionManagerEngaged {
     handover: Handover,
 }
 
-/// The state where handling requests from the reader and responding to them happens.
+/// The initial state of the Session Manager.
 ///
-/// This can consist of several request-response cycles.
-/// Transition to this state is [SessionManagerEngaged::process_session_establishment].
+/// The Session Manager contains the documents, ephemeral device key, and device engagement.
+///
+/// Create a new Session Manager using the [SessionManagerInit::initialise] method, providing
+/// the documents and optional non-empty list of device [DeviceRetrievalMethod] and
+/// server [ServerRetrievalMethods] retrieval methods.
+///
+/// The [SessionManagerInit] state is restricted to creating a QR-code engagement,
+/// using the [SessionManagerInit::qr_engagement] method, which will return the
+/// [SessionManagerEngaged] Session Manager state.
+///
+/// For convience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
+/// to provide the BLE identification string for the device.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManager {
     documents: Documents,
@@ -75,7 +100,7 @@ pub struct SessionManager {
     state: State,
 }
 
-/// The internal state of the [SessionManager].
+/// The internal states of the [SessionManager].
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub enum State {
     /// This is the default one where the device is waiting for a request from the reader.

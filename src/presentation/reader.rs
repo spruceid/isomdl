@@ -1,8 +1,9 @@
 //! This module is responsible for the reader's interaction with the device.
 //!
-//! It handles this through **State pattern**.
+//! It handles this through [SessionManager] state
+//! which is responsible for handling the session with the device.
 //!
-//! From the reader's perspective, the flow is simpler:
+//! From the reader's perspective, the flow is as follows:
 //!
 //! ```text
 #![doc = include_str!("../../docs/on_simulated_reader.txt")]
@@ -10,11 +11,8 @@
 //!
 //! ### Example
 //!
-//! You can see the full example in `on_simulated_reader.rs` in `examples` directory. The code is considerably shorter.
-//! Now the device is simulated in `common`
-//! module (you can find the complete code in `examples` directory),
-//! here we focus on the code from the
-//! reader's perspective.
+//! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
+//! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
@@ -35,7 +33,10 @@ use uuid::Uuid;
 
 /// The main state of the reader.
 ///
-/// The transition to this state is [SessionManager::establish_session].
+/// The reader's [SessionManager] state machine is responsible
+/// for handling the session with the device.
+///
+/// The transition to this state is made by [SessionManager::establish_session].
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
     session_transcript: SessionTranscript180135,
