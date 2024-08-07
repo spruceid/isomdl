@@ -9,7 +9,7 @@
 //! The reader requests the `age_over_21` element, and the device responds with that value.
 //! The flow is something like this:
 //!
-//! ```text
+//! ```ignore
 #![doc = include_str!("../../docs/simulated_device_and_reader.txt")]
 //! ```
 //!

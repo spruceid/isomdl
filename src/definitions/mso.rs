@@ -1,3 +1,36 @@
+//! This module contains the definitions for the `MSO (Master Signing Object) structure.
+//!
+//! The `MSO structure represents a master signing object, which is used in cryptographic operations
+//! within the system. It contains information such as the version, digest algorithm, value digests,
+//! device key info, document type, and validity info.
+//!
+//! # Examples
+//!
+//! ```ignore
+//! use spruceid::definitions::mso::{Mso, DigestAlgorithm};
+//! use std::collections::BTreeMap;
+//!
+//! // Create a new MSO object
+//! let mso = Mso {
+//!     version: String::from("1.0"),
+//!     digest_algorithm: DigestAlgorithm::SHA256,
+//!     value_digests: BTreeMap::new(),
+//!     device_key_info: Default::default(),
+//!     doc_type: String::from("document"),
+//!     validity_info: Default::default(),
+//! };
+//!
+//! // Print the MSO object
+//! println!("{:?}", mso);
+//! ```
+//!
+//! # Notes
+//!
+//! - [DigestId] struct represents an unsigned integer between `0` and `(2^31 - 1)` inclusive.  
+//!   It is enforced to be positive.
+//! - [DigestIds] type is a [BTreeMap] that maps [DigestId] to [ByteStr].
+//! - [DigestAlgorithm] enum represents different digest algorithms, such as `SHA-256, `SHA-384,
+//!   and `SHA-512`.
 use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -9,14 +42,26 @@ use std::collections::BTreeMap;
 pub struct DigestId(i32);
 pub type DigestIds = BTreeMap<DigestId, ByteStr>;
 
+/// Represents an [Mso] object.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mso {
+    /// The version of the Mso object.
     pub version: String,
+
+    /// The digest algorithm used by the Mso object.
     pub digest_algorithm: DigestAlgorithm,
+
+    /// A map of value digests associated with their respective digest IDs.
     pub value_digests: BTreeMap<String, DigestIds>,
+
+    /// Information about the device key used by the Mso object.
     pub device_key_info: DeviceKeyInfo,
+
+    /// The document type associated with the Mso object.
     pub doc_type: String,
+
+    /// Information about the validity of the Mso object.
     pub validity_info: ValidityInfo,
 }
 

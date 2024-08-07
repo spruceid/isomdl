@@ -1,3 +1,4 @@
+//! This module contains the definition of the `DeviceResponse` struct and related types.
 use crate::definitions::{
     helpers::{NonEmptyMap, NonEmptyVec},
     DeviceSigned, IssuerSigned,
@@ -5,25 +6,43 @@ use crate::definitions::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Represents a device response.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceResponse {
+    /// The version of the response.
     pub version: String,
+
+    /// The documents associated with the response, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documents: Option<Documents>,
+
+    /// The errors associated with the documents, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_errors: Option<DocumentErrors>,
+
+    /// The status of the response.
     pub status: Status,
 }
 
 pub type Documents = NonEmptyVec<Document>;
 
+/// Represents a document.
+///
+/// This struct is used to store information about a document.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
+    /// A string representing the type of the document.
     pub doc_type: String,
+
+    /// An instance of the [IssuerSigned] struct representing the issuer-signed data.
     pub issuer_signed: IssuerSigned,
+
+    /// An instance of the [DeviceSigned] struct representing the device-signed data.
     pub device_signed: DeviceSigned,
+
+    /// An optional instance of the [Errors] struct representing any errors associated with the document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub errors: Option<Errors>,
 }

@@ -5,7 +5,7 @@
 //!
 //! From the reader's perspective, the flow is as follows:
 //!
-//! ```text
+//! ```ignore
 #![doc = include_str!("../../docs/on_simulated_reader.txt")]
 //! ```
 //!

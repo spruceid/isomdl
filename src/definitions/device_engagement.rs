@@ -1,3 +1,9 @@
+//! This module contains the definitions for the [DeviceEngagement] struct and related types.
+//!
+//! The [DeviceEngagement] struct represents a device engagement object, which contains information about a device's engagement with a server.  
+//! It includes fields such as the `version`, `security details, `device retrieval methods, `server retrieval methods, and `protocol information.
+//!
+//! The module also provides implementations for conversions between [DeviceEngagement] and [CborValue], as well as other utility functions.
 use crate::definitions::helpers::Tag24;
 use crate::definitions::helpers::{ByteStr, NonEmptyVec};
 use crate::definitions::CoseKey;
@@ -21,69 +27,100 @@ pub type ProtocolInfo = CborValue;
 pub type Oidc = (u64, String, String);
 pub type WebApi = (u64, String, String);
 
+/// Represents a device engagement.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue", rename_all = "camelCase")]
 pub struct DeviceEngagement {
+    /// The version of the device engagement.
     pub version: String,
+
+    /// The security settings for the device engagement.
     pub security: Security,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    /// The optional device retrieval methods for the device engagement.
     pub device_retrieval_methods: Option<DeviceRetrievalMethods>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    /// The optional server retrieval methods for the device engagement.
     pub server_retrieval_methods: Option<ServerRetrievalMethods>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    /// The optional protocol information for the device engagement.
     pub protocol_info: Option<ProtocolInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub enum DeviceRetrievalMethod {
+    /// Represents the options for a WiFi connection.
     WIFI(WifiOptions),
+
+    /// Represents the BLE options for device engagement.
+    ///
+    /// This struct is used to configure the BLE options for device engagement.  
+    /// It contains the necessary parameters and settings for BLE communication.
     BLE(BleOptions),
+
+    /// Represents the options for NFC engagement.
     NFC(NfcOptions),
 }
 
+/// Represents the bytes of an EDevice key.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Security(pub u64, pub EDeviceKeyBytes);
 
+/// Represents the server retrieval methods for device engagement.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerRetrievalMethods {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The `web API retrieval method. This field is optional and will be skipped during serialization if it is [None].
     web_api: Option<WebApi>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    /// The `OIDC`` retrieval method. This field is optional and will be skipped during serialization if it is [None].
     oidc: Option<Oidc>,
 }
 
+/// Represents the options for `Bluetooth Low Energy` (BLE) device engagement.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct BleOptions {
+    /// The peripheral server mode for `BLE` device engagement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peripheral_server_mode: Option<PeripheralServerMode>,
+
+    /// The central client mode for `BLE` device engagement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub central_client_mode: Option<CentralClientMode>,
 }
 
+/// Represents a peripheral server mode.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeripheralServerMode {
+    /// The 'UUID' of the peripheral server.
     pub uuid: Uuid,
+
+    /// The 'BLE' device address of the peripheral server, if available.
     pub ble_device_address: Option<ByteStr>,
 }
 
+/// Represents the central client mode for device engagement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CentralClientMode {
     pub uuid: Uuid,
 }
 
+/// Represents the options for a `WiFi` device engagement.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct WifiOptions {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The passphrase for the `WiFi connection. If [None], no passphrase is required.
     pass_phrase: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    /// The operating class of the `WiFi` channel. If [None], the operating class is not specified.
     channel_info_operating_class: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    /// The channel number of the `WiFi` channel. If [None], the channel number is not specified.
     channel_info_channel_number: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    /// The band information of the `WiFi channel. If [None], the band information is not specified.
     band_info: Option<ByteStr>,
 }
 

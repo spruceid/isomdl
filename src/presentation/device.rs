@@ -8,7 +8,7 @@
 //!
 //! To initialize a session management state, see the [SessionManagerInit] struct.
 //!
-//! ```text
+//! ```ignore
 #![doc = include_str!("../../docs/on_simulated_device.txt")]
 //! ```
 //!
