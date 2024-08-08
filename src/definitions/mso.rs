@@ -1,4 +1,4 @@
-//! This module contains the definitions for the `MSO (Master Signing Object) structure.
+//! This module contains the definitions for the `MSO` (Mobile Security Object) structure.
 //!
 //! The `MSO structure represents a master signing object, which is used in cryptographic operations
 //! within the system. It contains information such as the version, digest algorithm, value digests,
@@ -35,7 +35,7 @@ use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// DigestId is a unsigned integer between 0 and (2^31 - 1) inclusive.
+/// DigestId is a unsigned integer between `0` and `(2^31 - 1)` inclusive.
 /// Therefore the most straightforward way to represent it is as a i32 that is enforced to be
 /// positive.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, Ord, PartialEq, PartialOrd, Copy, Hash)]
