@@ -76,6 +76,7 @@ pub struct KeyAuthorizations {
 
     /// The data elements associated with the key. This field is optional and will
     /// be skipped during serialization if it is [None].
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data_elements: Option<NonEmptyMap<String, NonEmptyVec<String>>>,
 }
 

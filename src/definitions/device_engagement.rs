@@ -38,12 +38,15 @@ pub struct DeviceEngagement {
     pub security: Security,
 
     /// The optional device retrieval methods for the device engagement.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_retrieval_methods: Option<DeviceRetrievalMethods>,
 
     /// The optional server retrieval methods for the device engagement.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_retrieval_methods: Option<ServerRetrievalMethods>,
 
     /// The optional protocol information for the device engagement.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol_info: Option<ProtocolInfo>,
 }
 
@@ -72,9 +75,11 @@ pub struct Security(pub u64, pub EDeviceKeyBytes);
 #[serde(rename_all = "camelCase")]
 pub struct ServerRetrievalMethods {
     /// The `web API retrieval method. This field is optional and will be skipped during serialization if it is [None].
+    #[serde(skip_serializing_if = "Option::is_none")]
     web_api: Option<WebApi>,
 
     /// The `OIDC`` retrieval method. This field is optional and will be skipped during serialization if it is [None].
+    #[serde(skip_serializing_if = "Option::is_none")]
     oidc: Option<Oidc>,
 }
 
@@ -112,15 +117,19 @@ pub struct CentralClientMode {
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct WifiOptions {
     /// The passphrase for the `WiFi connection. If [None], no passphrase is required.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pass_phrase: Option<String>,
 
     /// The operating class of the `WiFi` channel. If [None], the operating class is not specified.
+    #[serde(skip_serializing_if = "Option::is_none")]
     channel_info_operating_class: Option<u64>,
 
     /// The channel number of the `WiFi` channel. If [None], the channel number is not specified.
+    #[serde(skip_serializing_if = "Option::is_none")]
     channel_info_channel_number: Option<u64>,
 
     /// The band information of the `WiFi channel. If [None], the band information is not specified.
+    #[serde(skip_serializing_if = "Option::is_none")]
     band_info: Option<ByteStr>,
 }
 
