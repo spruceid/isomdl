@@ -1,6 +1,6 @@
 //! This module contains the definitions for the `MSO` (Mobile Security Object) structure.
 //!
-//! The `MSO structure represents a master signing object, which is used in cryptographic operations
+//! The `MSO structure represents a mobile security object, which is used in cryptographic operations
 //! within the system. It contains information such as the version, digest algorithm, value digests,
 //! device key info, document type, and validity info.
 //!
