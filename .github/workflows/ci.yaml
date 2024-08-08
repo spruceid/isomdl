@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
+  RUSTDOCFLAGS: "-Dwarnings"
 
 jobs:
   build:
@@ -31,3 +32,11 @@ jobs:
 
       - name: Fmt
         run: cargo fmt --all -- --check
+      - name: Fmt
+        run: cargo fmt --all -- --check
+
+      - name: Doc
+        run: |
+          cargo doc --all-features --no-deps
+          cd macros
+          cargo doc --all-features --no-deps

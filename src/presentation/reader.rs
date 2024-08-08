@@ -1,3 +1,18 @@
+//! This module is responsible for the reader's interaction with the device.
+//!
+//! It handles this through [SessionManager] state
+//! which is responsible for handling the session with the device.
+//!
+//! From the reader's perspective, the flow is as follows:
+//!
+//! ```ignore
+#![doc = include_str!("../../docs/on_simulated_reader.txt")]
+//! ```
+//!
+//! ### Example
+//!
+//! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
+//! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
@@ -16,6 +31,12 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+/// The main state of the reader.
+///
+/// The reader's [SessionManager] state machine is responsible
+/// for handling the session with the device.
+///
+/// The transition to this state is made by [SessionManager::establish_session].
 #[derive(Serialize, Deserialize)]
 pub struct SessionManager {
     session_transcript: SessionTranscript180135,
@@ -25,28 +46,40 @@ pub struct SessionManager {
     reader_message_counter: u32,
 }
 
+/// Various errors that can occur during the interaction with the device.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// The QR code had the wrong prefix or the contained data could not be decoded.
     #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
     InvalidQrCode(anyhow::Error),
+    /// Device did not transmit any data.
     #[error("Device did not transmit any data.")]
     DeviceTransmissionError,
+    /// Device did not transmit an mDL.
     #[error("Device did not transmit an mDL.")]
     DocumentTypeError,
+    /// The device did not transmit any mDL data.
     #[error("the device did not transmit any mDL data.")]
     NoMdlDataTransmission,
+    /// Device did not transmit any data in the `org.iso.18013.5.1` namespace.
     #[error("device did not transmit any data in the org.iso.18013.5.1 namespace.")]
     IncorrectNamespace,
+    /// The Device responded with an error.
     #[error("device responded with an error.")]
     HolderError,
+    /// Could not decrypt the response.
     #[error("could not decrypt the response.")]
     DecryptionError,
+    /// Unexpected CBOR type for offered value.
     #[error("Unexpected CBOR type for offered value")]
     CborDecodingError,
+    /// Not a valid JSON input.
     #[error("not a valid JSON input.")]
     JsonError,
+    /// Unexpected date type for data_element.
     #[error("Unexpected date type for data_element.")]
     ParsingError,
+    /// Request for data is invalid.
     #[error("Request for data is invalid.")]
     InvalidRequest,
 }
@@ -64,6 +97,11 @@ impl From<serde_json::Error> for Error {
 }
 
 impl SessionManager {
+    /// Establish a session with the device.
+    ///
+    /// Internally it generates the ephemeral keys,
+    /// derives the shared secret, and derives the session keys
+    /// (using **Diffie–Hellman key exchange**).
     pub fn establish_session(
         qr_code: String,
         namespaces: device_request::Namespaces,
@@ -139,6 +177,7 @@ impl SessionManager {
             })
     }
 
+    /// Creates a new request with specified elements to request.
     pub fn new_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
         let request = self.build_request(namespaces)?;
         let session = SessionData {
@@ -176,6 +215,12 @@ impl SessionManager {
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
+    /// Handles a response from the device.
+    ///
+    /// The response is expected to be a [CBOR](https://cbor.io)
+    /// encoded [SessionData] and encrypted.
+    ///
+    /// Will return the elements and values grouped by namespace.
     pub fn handle_response(
         &mut self,
         response: &[u8],

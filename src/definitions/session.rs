@@ -1,3 +1,7 @@
+//! This module contains the definitions and functions related to session establishment and management.
+//!
+//! The [get_initialization_vector] function generates an initialization vector for encryption/decryption
+//! based on a message count and a flag indicating whether the vector is for the reader or the device.
 use super::helpers::Tag24;
 use super::DeviceEngagement;
 use crate::definitions::device_engagement::EReaderKeyBytes;
@@ -32,17 +36,27 @@ pub type DeviceEngagementBytes = Tag24<DeviceEngagement>;
 pub type SessionTranscriptBytes = Tag24<SessionTranscript180135>;
 pub type NfcHandover = (ByteStr, Option<ByteStr>);
 
+/// Represents the establishment of a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEstablishment {
+    /// The EReader key used for session establishment.
     pub e_reader_key: EReaderKeyBytes,
+
+    /// The data associated with the session establishment.
     pub data: ByteStr,
 }
 
+/// Represents session data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
+    /// An optional [ByteStr] that represents the data associated with the session.  
+    /// The field is skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<ByteStr>,
+
+    /// An optional [Status] that represents the status of the session.  
+    /// Similarly, the field is skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
 }
@@ -80,6 +94,7 @@ impl TryFrom<u64> for Status {
 
 pub trait SessionTranscript: Serialize + for<'a> Deserialize<'a> {}
 
+/// Represents the device engagement bytes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionTranscript180135(
     pub DeviceEngagementBytes,
@@ -110,17 +125,30 @@ pub enum Handover {
 }
 
 pub enum EphemeralSecrets {
+    /// Represents an Eph256 session.  
+    /// This enum variant holds an `EphemeralSecret` of type `NistP256`.
     Eph256(EphemeralSecret<NistP256>),
+
+    /// Represents an ephemeral secret using the NIST P-384 elliptic curve.
     Eph384(EphemeralSecret<NistP384>),
 }
 
 pub enum EncodedPoints {
+    /// Represents a session with an Ep256 encoded point.
     Ep256(EncodedPoint<NistP256>),
+
+    /// Represents an Ep384 session.  
+    /// This struct holds an encoded point of type `EncodedPoint<NistP384>`.
     Ep384(EncodedPoint<NistP384>),
 }
 
 pub enum SharedSecrets {
+    /// Represents a session with a shared secret using the `SS256` algorithm.  
+    /// The shared secret is generated using the `NistP256` elliptic curve.
     Ss256(SharedSecret<NistP256>),
+
+    /// Represents a session with a shared secret using the `Ss384` algorithm.  
+    /// The shared secret is of type [`SharedSecret<NistP384>`].
     Ss384(SharedSecret<NistP384>),
 }
 

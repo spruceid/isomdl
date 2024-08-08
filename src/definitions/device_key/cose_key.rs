@@ -1,3 +1,27 @@
+//! An implementation of `RFC-8152` `COSE_Key` restricted to the requirements of `ISO/IEC 18013-5:2021`.
+//!
+//! This module provides the [CoseKey] enum, which represents a `COSE_Key` object as defined in `RFC-8152`.  
+//! It supports two key types: `EC2 (Elliptic Curve)` and `OKP (Octet Key Pair).
+//!
+//! # Examples
+//!
+//! ```ignore
+//! use ssi_jwk::JWK;
+//! use std::convert::TryInto;
+//! use crate::CoseKey;
+//!
+//! let jwk: JWK = /* ... */;
+//! let cose_key: Result<CoseKey, _> = jwk.try_into();
+//!
+//! match cose_key {
+//!     Ok(key) => {
+//!         // Perform operations with the COSE_Key
+//!     }
+//!     Err(err) => {
+//!         // Handle the error
+//!     }
+//! }
+//! ```
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
 use cose_rs::algorithm::Algorithm;
 use p256::EncodedPoint;
@@ -64,6 +88,7 @@ pub enum Error {
 }
 
 impl CoseKey {
+    /// Returns the signature algorithm associated with the key.
     pub fn signature_algorithm(&self) -> Option<Algorithm> {
         match self {
             CoseKey::EC2 {
