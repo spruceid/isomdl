@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::definitions::{
     helpers::{NonEmptyMap, NonEmptyVec},
     DeviceSigned, IssuerSigned,
 };
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,8 +102,9 @@ impl TryFrom<u64> for Status {
 
 #[cfg(test)]
 mod test {
-    use super::DeviceResponse;
     use hex::FromHex;
+
+    use super::DeviceResponse;
 
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
 
