@@ -3,7 +3,7 @@ use coset::cbor::Value;
 use coset::cwt::ClaimsSet;
 use coset::{
     iana, sig_structure_data, AsCborValue, CborSerializable, CoseError, RegisteredLabelWithPrivate,
-    SignatureContext,
+    SignatureContext, TaggedCborSerializable,
 };
 use serde::{ser, Deserialize, Deserializer, Serialize};
 use signature::Verifier;
@@ -274,13 +274,32 @@ impl<'de> Deserialize<'de> for CoseSign1 {
     where
         D: Deserializer<'de>,
     {
-        // Deserialize the input to a CBOR Value
+        // Step 1: Deserialize the input as a generic `Value`
         let value = Value::deserialize(deserializer)?;
-        // Convert the CBOR Value to CoseSign1
-        Ok(CoseSign1 {
-            tagged: false,
-            inner: coset::CoseSign1::from_cbor_value(value).map_err(serde::de::Error::custom)?,
-        })
+
+        // Step 2: Match against the value to check if it's a tagged value
+        if let Value::Tag(tag, boxed_value) = value {
+            // Step 3: Ensure the tag is for `CoseSign1` (tag 18)
+            if tag == coset::CoseSign1::TAG {
+                // Step 4: Try to convert the `Value` into a `CoseSign1`
+                if let Ok(cose_sign1) = coset::CoseSign1::from_cbor_value(*boxed_value) {
+                    Ok(CoseSign1 {
+                        tagged: true,
+                        inner: cose_sign1,
+                    })
+                } else {
+                    Err(serde::de::Error::custom("Invalid COSE_Sign1 format"))
+                }
+            } else {
+                Err(serde::de::Error::custom("Unexpected CBOR tag"))
+            }
+        } else {
+            Ok(CoseSign1 {
+                tagged: false,
+                inner: coset::CoseSign1::from_cbor_value(value)
+                    .map_err(serde::de::Error::custom)?,
+            })
+        }
     }
 }
 
@@ -328,8 +347,9 @@ mod p384 {
 
 #[cfg(test)]
 mod tests {
+    use ciborium::Value;
     use coset::cwt::{ClaimsSet, Timestamp};
-    use coset::{iana, CborSerializable, Header};
+    use coset::{iana, AsCborValue, CborSerializable, Header};
     use hex::FromHex;
     use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
     use p256::SecretKey;
@@ -505,5 +525,30 @@ mod tests {
             .expect("retrieved empty claims set");
         let (_, _, expected_claims_set) = rfc8392_example_inputs();
         assert_eq!(parsed_claims_set, expected_claims_set);
+    }
+
+    #[test]
+    fn tag_coset() {
+        // this si tagged
+        let bytes = hex::decode(COSE_SIGN1).unwrap();
+
+        // can parse tagged value
+        let parsed = Value::from_slice(&bytes).unwrap();
+        assert!(parsed.is_tag());
+        println!("successfully deserialized Value from tagged bytes");
+
+        // cannot create CoseSign1 from tagged value
+        let res = coset::CoseSign1::from_cbor_value(parsed);
+        assert!(res.is_err());
+        println!("error deserializing CoseSign1 from tagged value: {:?}", res);
+
+        // can only deserialize CoseSign1 directly from tagged bytes with TaggedCborSerializable
+        let cose_sign1: coset::Result<coset::CoseSign1> =
+            coset::TaggedCborSerializable::from_tagged_slice(&bytes);
+        assert!(cose_sign1.is_ok());
+        println!(
+            "successfully deserialized CoseSign1 from tagged bytes: {:?}",
+            cose_sign1
+        );
     }
 }
