@@ -1,3 +1,6 @@
+//! This module contains the definitions for various components related to device engagement,
+//! device keys, device requests, device responses, device signing, helpers, issuer signing,
+//! MSO (Mobile Security Object), namespaces, session management, traits, and validity information.
 pub mod device_engagement;
 pub mod device_key;
 pub mod device_request;
