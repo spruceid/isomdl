@@ -179,6 +179,7 @@ mod tests {
     use serde_json::{json, Value};
 
     #[derive(FromJson)]
+    #[isomdl(crate = "crate")]
     struct S {
         a: Option<u32>,
     }
