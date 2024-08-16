@@ -3,6 +3,7 @@ use crate::definitions::{
     helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
     DigestId,
 };
+use coset::AsCborValue;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 
@@ -25,6 +26,158 @@ pub struct IssuerSignedItem {
     pub random: ByteStr,
     pub element_identifier: String,
     pub element_value: CborValue,
+}
+
+impl coset::CborSerializable for IssuerSignedItem {}
+impl AsCborValue for IssuerSignedItem {
+    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+        let arr = if let ciborium::Value::Array(arr) = value {
+            arr
+        } else {
+            return Err(coset::CoseError::UnexpectedItem(
+                "value",
+                "array for IssuerSignedItem",
+            ));
+        };
+        Ok(IssuerSignedItem {
+            digest_id: DigestId::new(if let ciborium::Value::Integer(i) = arr[0] {
+                i.try_into()?
+            } else {
+                return Err(coset::CoseError::UnexpectedItem(
+                    "value",
+                    "integer for for DigestId",
+                ));
+            }),
+            random: ByteStr::from(if let ciborium::Value::Bytes(b) = &arr[1] {
+                b.to_vec()
+            } else {
+                return Err(coset::CoseError::UnexpectedItem(
+                    "value",
+                    "bytes for for ByteStr",
+                ));
+            }),
+            element_identifier: if let ciborium::Value::Text(s) = &arr[2] {
+                s.clone()
+            } else {
+                return Err(coset::CoseError::UnexpectedItem(
+                    "value",
+                    "bytes for for ByteStr",
+                ));
+            },
+            element_value: ciborium_value_into_cbor_value(&arr[3])?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
+        Ok(ciborium::Value::Array(vec![
+            ciborium::Value::Integer(self.digest_id.0.into()),
+            ciborium::Value::Bytes(self.random.into()),
+            ciborium::Value::Text(self.element_identifier),
+            cbor_value_into_ciborium_value(self.element_value)?,
+        ]))
+    }
+}
+
+impl coset::CborSerializable for IssuerSigned {}
+impl AsCborValue for IssuerSigned {
+    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+        let arr = vec![];
+        if let ciborium::Value::Array(arr) = value {
+            let namespaces = arr.get(0).map(|v| v.clone());
+            let issuer_auth = arr.get(1).map(|v| v.clone());
+            Ok(IssuerSigned {
+                namespaces,
+                issuer_auth,
+            })
+        } else {
+            Err(coset::Error::Custom("Invalid IssuerSigned".to_string()))
+        }
+    }
+
+    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
+        let arr = vec![];
+        if let Some(namespaces) = self.namespaces {
+            arr.push(ciborium::Value::Map(
+                namespaces
+                    .into_iter()
+                    .map(|s| {
+                        let (k, v) = s;
+                        let k = ciborium::Value::Text(k);
+                        let v = v.into_iter().map(|i| i.to_cbor_value()).collect();
+                        (k, v.into_iter().map(|i| i.to_cbor_value()).collect())
+                    })
+                    .collect(),
+            ))
+        }
+        arr.push(self.issuer_auth.to_cbor_value()?);
+        Ok(ciborium::Value::Array(arr))
+    }
+}
+
+fn cbor_value_into_ciborium_value(val: CborValue) -> coset::Result<ciborium::Value> {
+    match val {
+        CborValue::Null => Ok(ciborium::Value::Null),
+        CborValue::Bool(b) => Ok(ciborium::Value::Bool(b)),
+        CborValue::Integer(i) => Ok(ciborium::Value::Integer(i.try_into()?)),
+        CborValue::Float(f) => Ok(ciborium::Value::Float(f)),
+        CborValue::Bytes(b) => Ok(ciborium::Value::Bytes(b)),
+        CborValue::Text(t) => Ok(ciborium::Value::Text(t)),
+        CborValue::Array(a) => Ok(ciborium::Value::Array(
+            a.into_iter()
+                .map(cbor_value_into_ciborium_value)
+                .flatten()
+                .collect(),
+        )),
+        CborValue::Map(m) => Ok(ciborium::Value::Map(
+            m.into_iter()
+                .map(|(k, v)| {
+                    Ok::<(ciborium::Value, ciborium::Value), coset::CoseError>((
+                        cbor_value_into_ciborium_value(k)?,
+                        cbor_value_into_ciborium_value(v)?,
+                    ))
+                })
+                .flatten()
+                .collect(),
+        )),
+        CborValue::Tag(t, v) => Ok(ciborium::Value::Tag(
+            t,
+            Box::new(cbor_value_into_ciborium_value(*v)?),
+        )),
+        _ => unimplemented!("Unsupported cbor value {val:?}"),
+    }
+}
+
+fn ciborium_value_into_cbor_value(val: &ciborium::Value) -> coset::Result<CborValue> {
+    match val {
+        ciborium::Value::Null => Ok(CborValue::Null),
+        ciborium::Value::Bool(b) => Ok(CborValue::Bool(*b)),
+        ciborium::Value::Integer(i) => Ok(CborValue::Integer((*i).into())),
+        ciborium::Value::Float(f) => Ok(CborValue::Float(*f)),
+        ciborium::Value::Bytes(b) => Ok(CborValue::Bytes(*b)),
+        ciborium::Value::Text(t) => Ok(CborValue::Text(*t)),
+        ciborium::Value::Array(a) => Ok(CborValue::Array(
+            a.into_iter()
+                .map(ciborium_value_into_cbor_value)
+                .flatten()
+                .collect(),
+        )),
+        ciborium::Value::Map(m) => Ok(CborValue::Map(
+            m.into_iter()
+                .map(|(k, v)| {
+                    Ok::<(CborValue, CborValue), coset::CoseError>((
+                        ciborium_value_into_cbor_value(k)?,
+                        ciborium_value_into_cbor_value(v)?,
+                    ))
+                })
+                .flatten()
+                .collect(),
+        )),
+        ciborium::Value::Tag(t, v) => Ok(CborValue::Tag(
+            *t,
+            Box::new(ciborium_value_into_cbor_value(v)?),
+        )),
+        _ => unimplemented!("Unsupported cbor value {val:?}"),
+    }
 }
 
 #[cfg(test)]

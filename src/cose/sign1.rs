@@ -303,6 +303,43 @@ impl<'de> Deserialize<'de> for CoseSign1 {
     }
 }
 
+impl coset::CborSerializable for CoseSign1 {}
+impl coset::TaggedCborSerializable for CoseSign1 {
+    const TAG: u64 = iana::CborTag::CoseSign1 as u64;
+}
+
+impl AsCborValue for CoseSign1 {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        if let Value::Tag(tag, value) = value {
+            if tag != iana::CborTag::CoseSign1 as u64 {
+                return Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "unexpected tag".to_string()),
+                ));
+            }
+            Ok(CoseSign1 {
+                tagged: true,
+                inner: coset::CoseSign1::from_cbor_value(*value)?,
+            })
+        } else {
+            Ok(CoseSign1 {
+                tagged: false,
+                inner: coset::CoseSign1::from_cbor_value(value)?,
+            })
+        }
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        if self.tagged {
+            Ok(Value::Tag(
+                iana::CborTag::CoseSign1 as u64,
+                Box::new(self.inner.to_cbor_value()?),
+            ))
+        } else {
+            Ok(self.inner.to_cbor_value()?)
+        }
+    }
+}
+
 mod p256 {
     use coset::iana;
     use p256::ecdsa::{SigningKey, VerifyingKey};
@@ -347,9 +384,8 @@ mod p384 {
 
 #[cfg(test)]
 mod tests {
-    use ciborium::Value;
     use coset::cwt::{ClaimsSet, Timestamp};
-    use coset::{iana, AsCborValue, CborSerializable, Header};
+    use coset::{iana, CborSerializable, Header};
     use hex::FromHex;
     use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
     use p256::SecretKey;
@@ -528,27 +564,16 @@ mod tests {
     }
 
     #[test]
-    fn tag_coset() {
-        // this si tagged
+    fn tag_coset_tagged_roundtrip() {
+        // this is tagged
         let bytes = hex::decode(COSE_SIGN1).unwrap();
 
         // can parse tagged value
-        let parsed = Value::from_slice(&bytes).unwrap();
-        assert!(parsed.is_tag());
+        let parsed = CoseSign1::from_slice(&bytes).unwrap();
+        assert!(parsed.is_tagged());
         println!("successfully deserialized Value from tagged bytes");
 
-        // cannot create CoseSign1 from tagged value
-        let res = coset::CoseSign1::from_cbor_value(parsed);
-        assert!(res.is_err());
-        println!("error deserializing CoseSign1 from tagged value: {:?}", res);
-
-        // can only deserialize CoseSign1 directly from tagged bytes with TaggedCborSerializable
-        let cose_sign1: coset::Result<coset::CoseSign1> =
-            coset::TaggedCborSerializable::from_tagged_slice(&bytes);
-        assert!(cose_sign1.is_ok());
-        println!(
-            "successfully deserialized CoseSign1 from tagged bytes: {:?}",
-            cose_sign1
-        );
+        let roundtrip = parsed.to_vec().unwrap();
+        assert_eq!(bytes, roundtrip);
     }
 }

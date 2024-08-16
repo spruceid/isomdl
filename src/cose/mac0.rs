@@ -3,7 +3,7 @@ use coset::cbor::Value;
 use coset::cwt::ClaimsSet;
 use coset::{
     iana, mac_structure_data, AsCborValue, CborSerializable, CoseError, MacContext,
-    RegisteredLabelWithPrivate,
+    RegisteredLabelWithPrivate, TaggedCborSerializable,
 };
 use digest::{Mac, MacError};
 use serde::{ser, Deserialize, Deserializer, Serialize};
@@ -262,13 +262,31 @@ impl<'de> Deserialize<'de> for CoseMac0 {
     where
         D: Deserializer<'de>,
     {
-        // Deserialize the input to a CBOR Value
+        // Step 1: Deserialize the input as a generic `Value`
         let value = Value::deserialize(deserializer)?;
-        // Convert the CBOR Value to CoseMac0
-        Ok(CoseMac0 {
-            tagged: false,
-            inner: coset::CoseMac0::from_cbor_value(value).map_err(serde::de::Error::custom)?,
-        })
+
+        // Step 2: Match against the value to check if it's a tagged value
+        if let Value::Tag(tag, boxed_value) = value {
+            // Step 3: Ensure the tag is for `CoseMac0` (tag 17)
+            if tag == coset::CoseMac0::TAG {
+                // Step 4: Try to convert the `Value` into a `CoseMac0`
+                if let Ok(cose_mac0) = coset::CoseMac0::from_cbor_value(*boxed_value) {
+                    Ok(CoseMac0 {
+                        tagged: true,
+                        inner: cose_mac0,
+                    })
+                } else {
+                    Err(serde::de::Error::custom("Invalid COSE_Mac0 format"))
+                }
+            } else {
+                Err(serde::de::Error::custom("Unexpected CBOR tag"))
+            }
+        } else {
+            Ok(CoseMac0 {
+                tagged: false,
+                inner: coset::CoseMac0::from_cbor_value(value).map_err(serde::de::Error::custom)?,
+            })
+        }
     }
 }
 

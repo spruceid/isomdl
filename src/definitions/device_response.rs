@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use ciborium::Value;
+use coset::{iana, AsCborValue};
 use serde::{Deserialize, Serialize};
 
 use crate::definitions::{
@@ -20,6 +22,11 @@ pub struct DeviceResponse {
 
 pub type Documents = NonEmptyVec<Document>;
 
+fn to_cbor_value(docs: Documents) -> coset::Result<Value> {
+    docs.into_iter().map(|s| s.)
+    Ok(t.to_cbor_value()?)
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
@@ -29,6 +36,18 @@ pub struct Document {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub errors: Option<Errors>,
 }
+
+impl coset::CborSerializable for Document {}
+impl AsCborValue for Document {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        todo!()
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        todo!()
+    }
+}
+
 
 pub type Errors = NonEmptyMap<String, NonEmptyMap<String, DocumentErrorCode>>;
 pub type DocumentErrors = NonEmptyVec<DocumentError>;
@@ -52,6 +71,49 @@ pub enum Status {
 
 impl DeviceResponse {
     pub const VERSION: &'static str = "1.0";
+}
+
+impl coset::CborSerializable for DeviceResponse {}
+impl AsCborValue for DeviceResponse {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        if let Value::Tag(tag, value) = value {
+            if tag != iana::CborTag::CoseSign1 as u64 {
+                return Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "unexpected tag".to_string()),
+                ));
+            }
+            Ok(CoseSign1 {
+                tagged: true,
+                inner: coset::CoseSign1::from_cbor_value(*value)?,
+            })
+        } else {
+            Ok(CoseSign1 {
+                tagged: false,
+                inner: coset::CoseSign1::from_cbor_value(value)?,
+            })
+        }
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Array(vec![
+            self.documents.cbor_bstr()?,
+            self.unprotected.to_cbor_value()?,
+            match self.payload {
+                Some(b) => Value::Bytes(b),
+                None => Value::Null,
+            },
+            Value::Bytes(self.signature),
+        ]))
+
+        if self.tagged {
+            Ok(Value::Tag(
+                iana::CborTag::CoseSign1 as u64,
+                Box::new(self.inner.to_cbor_value()?),
+            ))
+        } else {
+            Ok(self.inner.to_cbor_value()?)
+        }
+    }
 }
 
 impl From<DocumentErrorCode> for i128 {
