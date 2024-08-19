@@ -26,6 +26,7 @@ use crate::macros::{FromJson, ToCbor};
 /// `org.iso.18013.5.1.aamva` namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.2).
 #[derive(Debug, Clone, FromJson, ToCbor)]
+#[isomdl(crate = "crate")]
 pub struct OrgIso1801351Aamva {
     pub domestic_driving_privileges: DomesticDrivingPrivileges,
     pub name_suffix: Option<NameSuffix>,

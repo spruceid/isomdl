@@ -7,6 +7,7 @@ use serde_cbor::Value as Cbor;
 
 /// `driving_privileges` in the org.iso.18013.5.1 namespace.
 #[derive(Clone, Debug, FromJson)]
+#[isomdl(crate = "crate")]
 pub struct DrivingPrivileges(Vec<DrivingPrivilege>);
 
 impl From<DrivingPrivileges> for Cbor {
@@ -16,6 +17,7 @@ impl From<DrivingPrivileges> for Cbor {
 }
 
 #[derive(Clone, Debug, FromJson, ToCbor)]
+#[isomdl(crate = "crate")]
 pub struct DrivingPrivilege {
     pub vehicle_category_code: String,
     pub issue_date: Option<FullDate>,
@@ -24,6 +26,7 @@ pub struct DrivingPrivilege {
 }
 
 #[derive(Clone, Debug, FromJson)]
+#[isomdl(crate = "crate")]
 pub struct Codes(NonEmptyVec<Code>);
 
 impl From<Codes> for Cbor {
@@ -33,6 +36,7 @@ impl From<Codes> for Cbor {
 }
 
 #[derive(Clone, Debug, FromJson, ToCbor)]
+#[isomdl(crate = "crate")]
 pub struct Code {
     pub code: String,
     pub sign: Option<String>,
