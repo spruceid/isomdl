@@ -105,10 +105,25 @@ impl AsCborValue for IssuerSignedItem {
 impl coset::CborSerializable for IssuerSigned {}
 impl AsCborValue for IssuerSigned {
     fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
-        let arr = vec![];
         if let ciborium::Value::Array(arr) = value {
-            let namespaces = arr.get(0).map(|v| v.clone());
-            let issuer_auth = arr.get(1).map(|v| v.clone());
+            if arr.len() != 2 {
+                return Err(coset::CoseError::ExtraneousData);
+            }
+            let idx = 0;
+            let namespaces = if arr.len() >= 2 {
+                let res = arr.get(0).map(|v| v.clone());
+                idx += 1;
+                res
+            } else {
+                None
+            };
+            let issuer_auth = arr
+                .get(idx)
+                .map(|v| v.clone())
+                .map(|s| CoseSign1::from_cbor_value(s))
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "unexpected tag".to_string()),
+                ))??;
             Ok(IssuerSigned {
                 namespaces,
                 issuer_auth,

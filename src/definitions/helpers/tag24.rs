@@ -1,6 +1,7 @@
 //! Support for embedded
 //! [CBOR Data Items](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item),
 //! also known as a tagged data item with tag number 24.
+use coset::{AsCborValue, CborSerializable};
 use serde::{
     de::{self, Error as DeError},
     ser, Deserialize, Serialize,
@@ -97,6 +98,36 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
         CborValue::deserialize(d)?
             .try_into()
             .map_err(D::Error::custom)
+    }
+}
+
+impl<T> coset::CborSerializable for Tag24<T> {}
+impl<T> AsCborValue for Tag24<T> {
+    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+        if let ciborium::Value::Tag(24, inner_value) = value {
+            if let ciborium::Value::Bytes(inner_bytes) = *inner_value {
+                let inner: T = ciborium::Value::from_slice(&inner_bytes)?;
+                Ok(Tag24 {
+                    inner,
+                    inner_bytes: inner_bytes.to_vec(),
+                })
+            } else {
+                Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "invalid inner bytes".to_string()),
+                ))
+            }
+        } else {
+            Err(coset::CoseError::DecodeFailed(
+                ciborium::de::Error::Semantic(None, "not tag 24".to_string()),
+            ))
+        }
+    }
+
+    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
+        Ok(ciborium::Value::Tag(
+            24,
+            Box::new(ciborium::Value::Bytes(self.inner_bytes)),
+        ))
     }
 }
 
