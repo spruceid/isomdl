@@ -51,7 +51,7 @@ impl FromStr for EyeColour {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Error> {
-        match s {
+        match s.to_lowercase().as_str() {
             "black" => Ok(Self::Black),
             "blue" => Ok(Self::Blue),
             "brown" => Ok(Self::Brown),
