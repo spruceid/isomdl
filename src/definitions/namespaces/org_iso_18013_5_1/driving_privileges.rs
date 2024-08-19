@@ -21,7 +21,7 @@ impl From<DrivingPrivileges> for Cbor {
 }
 
 /// The specifications of vehicle categories and restrictions
-#[derive(Clone, EnumString, Debug, EnumVariantNames, AsRefStr)]
+#[derive(Clone, Eq, PartialEq, EnumString, Debug, EnumVariantNames, AsRefStr)]
 pub enum VehicleCategoryCode {
     /// Motorcycles
     A,
@@ -96,4 +96,21 @@ pub struct Code {
     pub code: String,
     pub sign: Option<String>,
     pub value: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::definitions::traits::ToCbor;
+
+    use super::VehicleCategoryCode;
+
+    #[test]
+    fn vehicle_category_code() {
+        let c = VehicleCategoryCode::A.as_ref().to_string();
+        let c: VehicleCategoryCode = c.parse().unwrap();
+        assert_eq!(c, VehicleCategoryCode::A);
+
+        let v = c.to_cbor();
+        assert_eq!(v, serde_cbor::Value::Text("A".to_string()));
+    }
 }
