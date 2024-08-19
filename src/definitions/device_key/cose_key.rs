@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
-use coset::iana::EllipticCurve;
+use coset::iana::{Algorithm, EllipticCurve};
 use coset::{iana, CborSerializable};
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
@@ -101,28 +101,28 @@ pub enum Error {
 }
 
 impl CoseKey {
-    pub fn signature_algorithm(&self) -> Option<iana::Algorithm> {
+    pub fn signature_algorithm(&self) -> Option<Algorithm> {
         match self {
             CoseKey::EC2 {
                 crv: EC2Curve::P256,
                 ..
-            } => Some(iana::Algorithm::ES256),
+            } => Some(Algorithm::ES256),
             CoseKey::EC2 {
                 crv: EC2Curve::P384,
                 ..
-            } => Some(iana::Algorithm::ES384),
+            } => Some(Algorithm::ES384),
             CoseKey::EC2 {
                 crv: EC2Curve::P521,
                 ..
-            } => Some(iana::Algorithm::ES512),
+            } => Some(Algorithm::ES512),
             CoseKey::OKP {
                 crv: OKPCurve::Ed448,
                 ..
-            } => Some(iana::Algorithm::EdDSA),
+            } => Some(Algorithm::EdDSA),
             CoseKey::OKP {
                 crv: OKPCurve::Ed25519,
                 ..
-            } => Some(iana::Algorithm::EdDSA),
+            } => Some(Algorithm::EdDSA),
             _ => None,
         }
     }
@@ -430,33 +430,10 @@ impl TryFrom<&ssi_jwk::OctetParams> for OKPCurve {
     }
 }
 
-impl TryFrom<CoseKey> for coset::CoseKey {
-    type Error = coset::CoseError;
-
-    fn try_from(value: CoseKey) -> Result<Self, Self::Error> {
-        coset::CoseKey::from_slice(
-            &value
-                .to_cbor_bytes()
-                .map_err(|_| coset::CoseError::EncodeFailed)?
-                .to_vec(),
-        )
-    }
-}
-
-impl TryFrom<coset::CoseKey> for CoseKey {
-    type Error = Error;
-
-    fn try_from(value: coset::CoseKey) -> Result<Self, Self::Error> {
-        serde_cbor::from_slice(&value.to_vec().map_err(|_| Error::InvalidCoseKey)?)
-            .map_err(|_| Error::InvalidCoseKey)
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use hex::FromHex;
-
     use super::*;
+    use hex::FromHex;
 
     static EC_P256: &str = include_str!("../../../test/definitions/cose_key/ec_p256.cbor");
 

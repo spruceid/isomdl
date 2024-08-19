@@ -3,20 +3,28 @@ use std::collections::BTreeMap;
 use ciborium::Value;
 use coset::{iana, AsCborValue};
 use serde::{Deserialize, Serialize};
-
+use crate::cose::sign1::CoseSign1;
 use crate::definitions::{
     helpers::{NonEmptyMap, NonEmptyVec},
     DeviceSigned, IssuerSigned,
 };
 
+/// Represents a device response.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceResponse {
+    /// The version of the response.
     pub version: String,
+
+    /// The documents associated with the response, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documents: Option<Documents>,
+
+    /// The errors associated with the documents, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_errors: Option<DocumentErrors>,
+
+    /// The status of the response.
     pub status: Status,
 }
 
@@ -27,12 +35,22 @@ fn to_cbor_value(docs: Documents) -> coset::Result<Value> {
     Ok(t.to_cbor_value()?)
 }
 
+/// Represents a document.
+///
+/// This struct is used to store information about a document.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
+    /// A string representing the type of the document.
     pub doc_type: String,
+
+    /// An instance of the [IssuerSigned] struct representing the issuer-signed data.
     pub issuer_signed: IssuerSigned,
+
+    /// An instance of the [DeviceSigned] struct representing the device-signed data.
     pub device_signed: DeviceSigned,
+
+    /// An optional instance of the [Errors] struct representing any errors associated with the document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub errors: Option<Errors>,
 }
@@ -49,10 +67,14 @@ impl AsCborValue for Document {
 }
 
 
+/// Errors mapped by namespace and element identifier.
 pub type Errors = NonEmptyMap<String, NonEmptyMap<String, DocumentErrorCode>>;
+/// A list of document errors.
 pub type DocumentErrors = NonEmptyVec<DocumentError>;
+/// A map of document type to document error for them.
 pub type DocumentError = BTreeMap<String, DocumentErrorCode>;
 
+/// Document specific errors.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "i128", into = "i128")]
 pub enum DocumentErrorCode {

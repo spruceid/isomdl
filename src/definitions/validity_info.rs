@@ -1,3 +1,32 @@
+//! This module contains the definition of the [ValidityInfo] struct and related error types.
+//!
+//! The [ValidityInfo] struct represents information about the validity of a certain entity.  
+//! It contains fields such as `signed`, `valid_from`, `valid_until`, and `expected_update`.
+//!
+//! # Errors
+//!
+//! The [Error] enum represents various errors that can occur when working with [ValidityInfo] objects.
+//!
+//! # Serialization and Deserialization
+//!
+//! The [ValidityInfo] struct implements the [Serialize] and [Deserialize] traits from the [serde] crate,
+//! allowing it to be easily serialized and deserialized to and from CBOR format.
+//!
+//! # Conversion to and from CBOR
+//!
+//! The [ValidityInfo] struct also provides implementations of the [TryFrom] trait for converting
+//! to and from [CborValue], which is a type provided by the [serde_cbor] crate for representing CBOR values.  
+//! These implementations allow you to convert [ValidityInfo] objects to `CBOR` format and vice versa.
+//!
+//! # Dependencies
+//!
+//! This module depends on the following external crates:
+//!
+//! - [serde]: Provides the serialization and deserialization traits and macros.
+//! - [serde_cbor]: Provides the `CBOR` serialization and deserialization functionality.
+//! - [std::collections::BTreeMap]: Provides the [BTreeMap] type for storing key-value pairs in a sorted order.
+//! - [time]: Provides date and time manipulation functionality.
+//! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
 use serde::{
     ser::{Error as SerError, Serializer},
     Deserialize, Serialize,

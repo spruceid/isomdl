@@ -4,7 +4,17 @@ use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Field, Fields, FieldsNamed, FieldsUnnamed, Ident};
 
 pub fn derive(input: TokenStream) -> TokenStream {
-    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+    let DeriveInput {
+        ident, data, attrs, ..
+    } = parse_macro_input!(input);
+    let isomdl_path = Ident::new(
+        &attrs
+            .iter()
+            .filter_map(super::crate_path)
+            .next()
+            .unwrap_or_else(|| "isomdl".to_owned()),
+        Span::call_site(),
+    );
     let struct_data = match data {
         Data::Struct(s) => s,
         Data::Enum(_) => {
@@ -22,8 +32,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
     };
 
     match struct_data.fields {
-        Fields::Named(f) => named_fields(ident, f),
-        Fields::Unnamed(f) => unnamed_fields(ident, f),
+        Fields::Named(f) => named_fields(isomdl_path, ident, f),
+        Fields::Unnamed(f) => unnamed_fields(isomdl_path, ident, f),
         Fields::Unit => quote! {
             compile_error!("cannot derive ToCbor for unit struct");
         }
@@ -31,7 +41,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     }
 }
 
-fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
+fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenStream {
     let mut conversions = quote! {};
 
     input.named.into_iter().for_each(
@@ -78,7 +88,7 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
         mod #mod_name {
             use serde_cbor::Value;
             use super::*;
-            use crate::definitions::traits::{ToCbor, ToNamespaceMap};
+            use #isomdl_path::definitions::traits::{ToCbor, ToNamespaceMap};
             impl ToNamespaceMap for #ident {
                 fn to_ns_map(self) -> std::collections::BTreeMap<String, Value> {
                     let mut map = std::collections::BTreeMap::default();
@@ -103,7 +113,7 @@ fn named_fields(ident: Ident, input: FieldsNamed) -> TokenStream {
     output.into()
 }
 
-fn unnamed_fields(ident: Ident, mut input: FieldsUnnamed) -> TokenStream {
+fn unnamed_fields(isomdl_path: Ident, ident: Ident, mut input: FieldsUnnamed) -> TokenStream {
     let field_type = match input.unnamed.pop() {
         Some(pair) => pair.into_value().ty,
         None => {
@@ -129,7 +139,7 @@ fn unnamed_fields(ident: Ident, mut input: FieldsUnnamed) -> TokenStream {
     let output = quote! {
         mod #mod_name {
             use super::*;
-            use crate::definitions::traits::{ToCbor, ToCborError};
+            use #isomdl_path::definitions::traits::{ToCbor, ToCborError};
             use serde_cbor::Value;
             impl ToCbor for #ident {
                 fn to_cbor(self) -> Value {
