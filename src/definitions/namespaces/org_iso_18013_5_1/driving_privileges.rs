@@ -63,11 +63,10 @@ impl From<VehicleCategoryCode> for Cbor {
 
 impl crate::definitions::traits::FromJson for VehicleCategoryCode {
     fn from_json(v: &serde_json::Value) -> Result<Self, FromJsonError> {
-        v.as_str()
-            .map(str::to_uppercase)
-            .map(|s| s.parse::<VehicleCategoryCode>())
-            .unwrap_or(Err(strum::ParseError::VariantNotFound))
-            .map_err(|_| FromJsonError::Missing)
+        String::from_json(v)?
+            .to_uppercase()
+            .parse::<VehicleCategoryCode>()
+            .map_err(|err| FromJsonError::Parsing(anyhow::Error::new(err)))
     }
 }
 
@@ -100,7 +99,7 @@ pub struct Code {
 
 #[cfg(test)]
 mod tests {
-    use crate::definitions::traits::ToCbor;
+    use crate::definitions::traits::{FromJson, ToCbor};
 
     use super::VehicleCategoryCode;
 
@@ -112,5 +111,9 @@ mod tests {
 
         let v = c.to_cbor();
         assert_eq!(v, serde_cbor::Value::Text("A".to_string()));
+
+        let j = serde_json::json!("A");
+        let c = VehicleCategoryCode::from_json(&j).unwrap();
+        assert_eq!(c, VehicleCategoryCode::A);
     }
 }
