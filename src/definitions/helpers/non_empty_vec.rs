@@ -1,9 +1,10 @@
+use coset::AsCborValue;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "Vec<T>", into = "Vec<T>")]
-pub struct NonEmptyVec<T: Clone>(Vec<T>);
+pub struct NonEmptyVec<T: Clone + AsCborValue>(Vec<T>);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -11,7 +12,7 @@ pub enum Error {
     Empty,
 }
 
-impl<T: Clone> NonEmptyVec<T> {
+impl<T: Clone + AsCborValue> NonEmptyVec<T> {
     pub fn new(t: T) -> Self {
         Self(vec![t])
     }
@@ -30,7 +31,7 @@ impl<T: Clone> NonEmptyVec<T> {
 
     pub fn into<T2>(self) -> NonEmptyVec<T2>
     where
-        T2: From<T> + Clone,
+        T2: From<T> + Clone + AsCborValue,
     {
         self.into_inner()
             .into_iter()
@@ -44,7 +45,7 @@ impl<T: Clone> NonEmptyVec<T> {
 
     pub fn try_into<T2, E>(self) -> Result<NonEmptyVec<T2>, E>
     where
-        T2: TryFrom<T, Error = E> + Clone,
+        T2: TryFrom<T, Error = E> + Clone + AsCborValue,
     {
         Ok(self
             .into_inner()
@@ -58,7 +59,7 @@ impl<T: Clone> NonEmptyVec<T> {
     }
 }
 
-impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {
+impl<T: Clone + AsCborValue> TryFrom<Vec<T>> for NonEmptyVec<T> {
     type Error = Error;
 
     fn try_from(v: Vec<T>) -> Result<NonEmptyVec<T>, Error> {
@@ -69,22 +70,56 @@ impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {
     }
 }
 
-impl<T: Clone> From<NonEmptyVec<T>> for Vec<T> {
+impl<T: Clone + AsCborValue> From<NonEmptyVec<T>> for Vec<T> {
     fn from(NonEmptyVec(v): NonEmptyVec<T>) -> Vec<T> {
         v
     }
 }
 
-impl<T: Clone> AsRef<[T]> for NonEmptyVec<T> {
+impl<T: Clone + AsCborValue> AsRef<[T]> for NonEmptyVec<T> {
     fn as_ref(&self) -> &[T] {
         &self.0
     }
 }
 
-impl<T: Clone> Deref for NonEmptyVec<T> {
+impl<T: Clone + AsCborValue> Deref for NonEmptyVec<T> {
     type Target = [T];
 
     fn deref(&self) -> &[T] {
         &self.0
+    }
+}
+
+impl<T: Clone + AsCborValue> coset::CborSerializable for NonEmptyVec<T> {}
+impl<T: Clone + AsCborValue> AsCborValue for NonEmptyVec<T> {
+    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+        let v = match value {
+            ciborium::Value::Array(v) => v,
+            _ => {
+                return Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "not an array".to_string()),
+                ))
+            }
+        };
+        Ok(NonEmptyVec::try_from(
+            v.into_iter()
+                .map(T::from_cbor_value)
+                .collect::<coset::Result<Vec<T>>>()?,
+        )
+        .map_err(|_| {
+            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "empty array".to_string(),
+            ))
+        })?)
+    }
+
+    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
+        Ok(ciborium::Value::Array(
+            self.into_inner()
+                .into_iter()
+                .map(AsCborValue::to_cbor_value)
+                .collect::<coset::Result<Vec<ciborium::Value>>>()?,
+        ))
     }
 }

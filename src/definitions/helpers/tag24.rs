@@ -101,12 +101,12 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
     }
 }
 
-impl<T> coset::CborSerializable for Tag24<T> {}
-impl<T> AsCborValue for Tag24<T> {
+impl<T: CborSerializable> coset::CborSerializable for Tag24<T> {}
+impl<T: CborSerializable> AsCborValue for Tag24<T> {
     fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
         if let ciborium::Value::Tag(24, inner_value) = value {
             if let ciborium::Value::Bytes(inner_bytes) = *inner_value {
-                let inner: T = ciborium::Value::from_slice(&inner_bytes)?;
+                let inner: T = CborSerializable::from_slice(&inner_bytes)?;
                 Ok(Tag24 {
                     inner,
                     inner_bytes: inner_bytes.to_vec(),
