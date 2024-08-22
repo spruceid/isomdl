@@ -20,19 +20,17 @@ pub fn serde_cbor_value_into_ciborium_value(val: CborValue) -> coset::Result<cib
         CborValue::Text(t) => Ok(ciborium::Value::Text(t)),
         CborValue::Array(a) => Ok(ciborium::Value::Array(
             a.into_iter()
-                .map(serde_cbor_value_into_ciborium_value)
-                .flatten()
+                .flat_map(serde_cbor_value_into_ciborium_value)
                 .collect(),
         )),
         CborValue::Map(m) => Ok(ciborium::Value::Map(
             m.into_iter()
-                .map(|(k, v)| {
+                .flat_map(|(k, v)| {
                     Ok::<(ciborium::Value, ciborium::Value), coset::CoseError>((
                         serde_cbor_value_into_ciborium_value(k)?,
                         serde_cbor_value_into_ciborium_value(v)?,
                     ))
                 })
-                .flatten()
                 .collect(),
         )),
         CborValue::Tag(t, v) => Ok(ciborium::Value::Tag(
@@ -53,19 +51,17 @@ pub fn ciborium_value_into_serde_cbor_value(val: ciborium::Value) -> coset::Resu
         ciborium::Value::Text(t) => Ok(CborValue::Text(t)),
         ciborium::Value::Array(a) => Ok(CborValue::Array(
             a.into_iter()
-                .map(ciborium_value_into_serde_cbor_value)
-                .flatten()
+                .flat_map(ciborium_value_into_serde_cbor_value)
                 .collect(),
         )),
         ciborium::Value::Map(m) => Ok(CborValue::Map(
             m.into_iter()
-                .map(|(k, v)| {
+                .flat_map(|(k, v)| {
                     Ok::<(CborValue, CborValue), coset::CoseError>((
                         ciborium_value_into_serde_cbor_value(k)?,
                         ciborium_value_into_serde_cbor_value(v)?,
                     ))
                 })
-                .flatten()
                 .collect(),
         )),
         ciborium::Value::Tag(t, v) => Ok(CborValue::Tag(

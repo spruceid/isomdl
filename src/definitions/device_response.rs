@@ -1,9 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use ciborium::Value;
 use coset::AsCborValue;
+use isomdl_macros::FieldsNames;
 use serde::{Deserialize, Serialize};
-use strum_macros::{AsRefStr, EnumString, EnumVariantNames};
+use strum_macros::{AsRefStr, EnumString};
 use thiserror::Error;
 
 use crate::definitions::{
@@ -12,7 +13,7 @@ use crate::definitions::{
 };
 
 /// Represents a device response.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceResponse {
     /// The version of the response.
@@ -35,7 +36,7 @@ pub type Documents = NonEmptyVec<Document>;
 /// Represents a document.
 ///
 /// This struct is used to store information about a document.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     /// A string representing the type of the document.
@@ -55,16 +56,25 @@ pub struct Document {
 impl coset::CborSerializable for Document {}
 impl AsCborValue for Document {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let mut arr = if let Value::Array(arr) = value {
-            arr
-        } else {
-            return Err(coset::CoseError::UnexpectedItem(
-                "value",
-                "array for Document",
-            ));
-        };
+        let mut fields = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "Document is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .flat_map(|f| match f.0 {
+                Value::Text(s) => Ok::<(String, Value), coset::CoseError>((s, f.1)),
+                _ => Err(coset::CoseError::UnexpectedItem(
+                    "key",
+                    "text for field in Document",
+                )),
+            })
+            .collect::<HashMap<String, Value>>();
         Ok(Document {
-            doc_type: if let Value::Text(s) = arr.remove(0) {
+            doc_type: if let Some(Value::Text(s)) = fields.remove(Document::doc_type()) {
                 s
             } else {
                 return Err(coset::CoseError::UnexpectedItem(
@@ -72,10 +82,22 @@ impl AsCborValue for Document {
                     "text for doc_type",
                 ));
             },
-            issuer_signed: IssuerSigned::from_cbor_value(arr.remove(0))?,
-            device_signed: DeviceSigned::from_cbor_value(arr.remove(0))?,
+            issuer_signed: IssuerSigned::from_cbor_value(
+                fields
+                    .remove(Document::issuer_signed())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "issuer_signed is missing".to_string()),
+                    ))?,
+            )?,
+            device_signed: DeviceSigned::from_cbor_value(
+                fields
+                    .remove(Document::device_signed())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "device_signed is missing".to_string()),
+                    ))?,
+            )?,
 
-            errors: if let Some(errors) = arr.get(0).cloned() {
+            errors: if let Some(errors) = fields.remove(Document::errors()) {
                 Some(cbor_value_to_errors(errors)?)
             } else {
                 None
@@ -84,15 +106,27 @@ impl AsCborValue for Document {
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
-        let mut arr = vec![
-            Value::Text(self.doc_type),
-            self.issuer_signed.to_cbor_value()?,
-            self.device_signed.to_cbor_value()?,
+        let mut map = vec![
+            (
+                Value::Text(Document::doc_type().to_string()),
+                Value::Text(self.doc_type),
+            ),
+            (
+                Value::Text(Document::issuer_signed().to_string()),
+                self.issuer_signed.to_cbor_value()?,
+            ),
+            (
+                Value::Text(Document::device_signed().to_string()),
+                self.device_signed.to_cbor_value()?,
+            ),
         ];
         if let Some(errors) = self.errors {
-            arr.push(errors_to_cbor_value(errors)?);
+            map.push((
+                Value::Text(Document::errors().to_string()),
+                errors_to_cbor_value(errors)?,
+            ));
         }
-        Ok(Value::Array(arr))
+        Ok(Value::Map(map))
     }
 }
 
@@ -178,7 +212,7 @@ pub enum DocumentErrorCode {
     ApplicationSpecific(i128),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, EnumString, EnumVariantNames, AsRefStr)]
+#[derive(Clone, Debug, Deserialize, Serialize, EnumString, AsRefStr)]
 #[serde(try_from = "u64", into = "u64")]
 pub enum Status {
     OK = 0,
@@ -226,60 +260,89 @@ impl DeviceResponse {
 impl coset::CborSerializable for DeviceResponse {}
 impl AsCborValue for DeviceResponse {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let mut arr = value.into_array().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "not an array".to_string(),
-            ))
-        })?;
-        let version = arr
-            .remove(0)
-            .as_text()
-            .ok_or(coset::CoseError::DecodeFailed(
-                ciborium::de::Error::Semantic(None, "not an text".to_string()),
-            ))?
-            .to_string();
-        let documents = if let Some(documents) = arr.get(0).cloned() {
-            Some(Documents::from_cbor_value(documents)?)
+        let fields = if let Value::Map(map) = value {
+            map
         } else {
-            None
+            return Err(coset::CoseError::UnexpectedItem(
+                "value",
+                "map for DeviceResponse",
+            ));
         };
-        let document_errors = if let Some(document_errors) = arr.get(0).cloned() {
-            Some(cbor_value_to_document_errors(document_errors)?)
-        } else {
-            None
-        };
-        let status: i32 = arr
-            .last()
-            .ok_or(coset::CoseError::DecodeFailed(
-                ciborium::de::Error::Semantic(None, "no status".to_string()),
-            ))?
-            .as_integer()
-            .ok_or(coset::CoseError::DecodeFailed(
-                ciborium::de::Error::Semantic(None, "not an text".to_string()),
-            ))?
-            .try_into()?;
-        let status = Status::try_from(status).map_err(|_| {
-            ciborium::de::Error::Semantic::<Status>(None, "invalid status value".to_string())
-        })?;
+        let mut fields = fields
+            .into_iter()
+            .flat_map(|f| match f.0 {
+                Value::Text(s) => Ok::<(String, Value), coset::CoseError>((s, f.1)),
+                _ => Err(coset::CoseError::UnexpectedItem(
+                    "key",
+                    "text for field in DeviceResponse",
+                )),
+            })
+            .collect::<HashMap<String, Value>>();
         Ok(DeviceResponse {
-            version,
-            documents,
-            document_errors,
-            status,
+            version: if let Some(Value::Text(s)) = fields.remove(DeviceResponse::version()) {
+                s
+            } else {
+                return Err(coset::CoseError::UnexpectedItem(
+                    "value",
+                    "text for version",
+                ));
+            },
+            documents: if let Some(documents) = fields.remove(DeviceResponse::documents()) {
+                Some(Documents::from_cbor_value(documents)?)
+            } else {
+                None
+            },
+            document_errors: if let Some(document_errors) =
+                fields.remove(DeviceResponse::document_errors())
+            {
+                Some(cbor_value_to_document_errors(document_errors)?)
+            } else {
+                None
+            },
+            status: {
+                let status: u64 = fields
+                    .remove(DeviceResponse::status())
+                    .ok_or(coset::CoseError::UnexpectedItem(
+                        "value",
+                        "integer for status",
+                    ))?
+                    .into_integer()
+                    .map_err(|_| coset::CoseError::UnexpectedItem("value", "integer for status"))?
+                    .try_into()
+                    .map_err(|_| coset::CoseError::UnexpectedItem("value", "integer for status"))?;
+                Status::try_from(status).map_err(|_| {
+                    ciborium::de::Error::Semantic::<Status>(
+                        None,
+                        "invalid status value".to_string(),
+                    )
+                })?
+            },
         })
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
-        let mut arr = vec![Value::Text(self.version)];
+        let mut map = vec![];
+        map.push((
+            Value::Text(DeviceResponse::version().to_string()),
+            Value::Text(self.version),
+        ));
         if let Some(documents) = self.documents {
-            arr.push(documents.to_cbor_value()?);
+            map.push((
+                Value::Text(DeviceResponse::documents().to_string()),
+                documents.to_cbor_value()?,
+            ));
         }
         if let Some(document_errors) = self.document_errors {
-            arr.push(document_errors_to_cbor_value(document_errors)?);
+            map.push((
+                Value::Text(DeviceResponse::document_errors().to_string()),
+                document_errors_to_cbor_value(document_errors)?,
+            ));
         }
-        arr.push(Value::Integer((self.status as u64).into()));
-        Ok(Value::Array(arr))
+        map.push((
+            Value::Text(DeviceResponse::status().to_string()),
+            Value::Integer((self.status as u64).into()),
+        ));
+        Ok(Value::Map(map))
     }
 }
 
@@ -345,7 +408,7 @@ fn document_errors_to_cbor_value(docs: DocumentErrors) -> coset::Result<Value> {
     ))
 }
 
-fn cbor_value_to_document_errors(val: ciborium::Value) -> coset::Result<DocumentErrors> {
+fn cbor_value_to_document_errors(val: Value) -> coset::Result<DocumentErrors> {
     let arr = val.into_array().map_err(|_| {
         coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
             None,
@@ -397,9 +460,7 @@ fn cbor_value_to_document_errors(val: ciborium::Value) -> coset::Result<Document
 
 #[cfg(test)]
 mod test {
-    use coset::CborSerializable;
-    use hex::FromHex;
-
+    use super::DeviceResponse;
     use crate::cose::sign1::CoseSign1;
     use crate::definitions::device_signed::{
         DeviceNamespaces, DeviceNamespacesBytes, DeviceSignedItems,
@@ -409,8 +470,10 @@ mod test {
     use crate::definitions::{
         DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem,
     };
-
-    use super::DeviceResponse;
+    use coset::CborSerializable;
+    use hex::FromHex;
+    use isomdl_macros::CborSerializable;
+    use serde::{Deserialize, Serialize};
 
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
 
@@ -437,6 +500,8 @@ mod test {
         let roundtripped_bytes = response
             .to_vec()
             .expect("unable to encode DeviceResponse as cbor bytes");
+        println!("cbor_bytes {:?}", hex::encode(&cbor_bytes));
+        println!("roundtripped_bytes {:?}", hex::encode(&roundtripped_bytes));
         assert_eq!(
             cbor_bytes, roundtripped_bytes,
             "original cbor and re-serialized DeviceResponse do not match"
@@ -478,35 +543,34 @@ mod test {
             errors: None,
         };
         let bytes = document.to_vec().unwrap();
-        let document: Document = Document::from_slice(&bytes).unwrap();
+        println!("{:?}", hex::encode(&bytes));
+        let document = Document::from_slice(&bytes).unwrap();
         let bytes2 = document.to_vec().unwrap();
         assert_eq!(bytes, bytes2);
     }
 
     #[test]
-    fn ciborium_issuer_signed() {
-        static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
-        let cose_sign1 = CoseSign1::from_slice(&<Vec<u8>>::from_hex(COSE_SIGN1).unwrap()).unwrap();
-
-        let issuer_signed_item = IssuerSignedItem {
-            digest_id: DigestId(0),
-            random: ByteStr::from(vec![0, 1, 2, 3]),
-            element_identifier: "a".to_string(),
-            element_value: serde_cbor::Value::Text("b".to_string()),
+    fn macro_test() {
+        #[derive(CborSerializable, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Test {
+            a: ciborium::Value,
+            #[serde(rename = "c")]
+            b: ciborium::Value,
+            c_d: ciborium::Value,
+        }
+        let test = Test {
+            a: ciborium::Value::Text("".to_string()),
+            b: ciborium::Value::Text("".to_string()),
+            c_d: ciborium::Value::Text("".to_string()),
         };
-        let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
-        let issuer_signed_item_bytes_vec = NonEmptyVec::new(issuer_signed_item_bytes);
-        let issuer_namespaces =
-            IssuerNamespaces::new("a".to_string(), issuer_signed_item_bytes_vec);
-        let issuer_signed = IssuerSigned {
-            namespaces: Some(issuer_namespaces),
-            issuer_auth: cose_sign1.clone(),
-        };
-
-        let bytes = issuer_signed.to_vec().unwrap();
-        eprintln!("{:?}", hex::encode(&bytes));
-        let issuer_signed: IssuerSigned = IssuerSigned::from_slice(&bytes).unwrap();
-        let bytes2 = issuer_signed.to_vec().unwrap();
+        let bytes = test.to_vec().unwrap();
+        let test = Test::from_slice(&bytes).unwrap();
+        let bytes2 = test.to_vec().unwrap();
         assert_eq!(bytes, bytes2);
+
+        assert_eq!(Test::a(), "a");
+        assert_eq!(Test::b(), "c");
+        assert_eq!(Test::c_d(), "cD");
     }
 }

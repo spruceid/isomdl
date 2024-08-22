@@ -2,7 +2,6 @@
 //! [CBOR Data Items](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item),
 //! also known as a tagged data item with tag number 24.
 use coset::{AsCborValue, CborSerializable};
-use hex::encode;
 use serde::{
     de::{self, Error as DeError},
     ser, Deserialize, Serialize,

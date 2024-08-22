@@ -4,6 +4,15 @@
 //!
 //! The [Error] enum represents the possible errors that can occur in this module.
 //! - [Error::UnableToEncode]: Indicates an error when encoding a value as CBOR.
+use std::collections::{BTreeMap, HashMap};
+
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable};
+use isomdl_macros::FieldsNames;
+use serde::{Deserialize, Serialize};
+use serde_cbor::{Error as CborError, Value as CborValue};
+use strum_macros::AsRefStr;
+
 use crate::cose::mac0::CoseMac0;
 use crate::cose::sign1::CoseSign1;
 use crate::cose::{ciborium_value_into_serde_cbor_value, serde_cbor_value_into_ciborium_value};
@@ -11,15 +20,9 @@ use crate::definitions::{
     helpers::{NonEmptyMap, Tag24},
     session::SessionTranscript,
 };
-use ciborium::Value;
-use coset::{AsCborValue, CborSerializable};
-use serde::{Deserialize, Serialize};
-use serde_cbor::{Error as CborError, Value as CborValue};
-use std::collections::BTreeMap;
-use strum_macros::{AsRefStr, EnumVariantNames};
 
 /// Represents a device-signed structure.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceSigned {
     #[serde(rename = "nameSpaces")]
@@ -40,7 +43,7 @@ struct DeviceNamespaces2(DeviceNamespaces);
 ///
 /// This struct contains the device signature in the form of a [CoseSign1] object.
 /// The [CoseSign1] object represents a `COSE (CBOR Object Signing and Encryption) signature.
-#[derive(Clone, Debug, Deserialize, Serialize, EnumVariantNames, AsRefStr)]
+#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize, AsRefStr)]
 #[serde(untagged)]
 pub enum DeviceAuth {
     #[serde(rename_all = "camelCase")]
@@ -86,9 +89,9 @@ pub enum Error {
     UnableToEncode(CborError),
 }
 
-impl coset::CborSerializable for DeviceAuth {}
+impl CborSerializable for DeviceAuth {}
 impl AsCborValue for DeviceAuth {
-    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
         value
             .into_map()
             .map_err(|_| {
@@ -126,10 +129,14 @@ impl AsCborValue for DeviceAuth {
             })
     }
 
-    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
-        Ok(ciborium::Value::Map(
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let key = match self {
+            DeviceAuth::Signature { .. } => "deviceSignature",
+            DeviceAuth::Mac { .. } => "deviceMac",
+        };
+        Ok(Value::Map(
             vec![(
-                ciborium::Value::Text(self.as_ref().to_string()),
+                Value::Text(key.to_string()),
                 match self {
                     DeviceAuth::Signature { device_signature } => {
                         device_signature.to_cbor_value()?
@@ -143,26 +150,59 @@ impl AsCborValue for DeviceAuth {
     }
 }
 
-impl coset::CborSerializable for DeviceSigned {}
+impl CborSerializable for DeviceSigned {}
 impl AsCborValue for DeviceSigned {
-    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
-        let mut arr = value.into_array().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "not an array".to_string(),
-            ))
-        })?;
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut fields = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "DeviceSigned is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .flat_map(|f| match f.0 {
+                Value::Text(s) => Ok::<(String, Value), coset::CoseError>((s, f.1)),
+                _ => Err(coset::CoseError::UnexpectedItem(
+                    "key",
+                    "text for field in DeviceSigned",
+                )),
+            })
+            .collect::<HashMap<String, Value>>();
         Ok(DeviceSigned {
-            namespaces: cbor_value_to_device_namespaces_bytes(arr.remove(0))?,
-            device_auth: DeviceAuth::from_cbor_value(arr.remove(0))?,
+            namespaces: cbor_value_to_device_namespaces_bytes(
+                fields
+                    .remove(DeviceSigned::namespaces())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "DeviceSigned::namespaces is missing".to_string(),
+                        ),
+                    ))?,
+            )?,
+            device_auth: DeviceAuth::from_cbor_value(
+                fields.remove(DeviceSigned::device_auth()).ok_or(
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "DeviceSigned::device_auth is missing".to_string(),
+                    )),
+                )?,
+            )?,
         })
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
-        Ok(Value::Array(
+        Ok(Value::Map(
             vec![
-                device_namespaces_bytes_to_cbor_value(self.namespaces)?,
-                self.device_auth.to_cbor_value()?,
+                (
+                    Value::Text(DeviceSigned::namespaces().to_string()),
+                    device_namespaces_bytes_to_cbor_value(self.namespaces)?,
+                ),
+                (
+                    Value::Text(DeviceSigned::device_auth().to_string()),
+                    self.device_auth.to_cbor_value()?,
+                ),
             ]
             .into_iter()
             .collect(),

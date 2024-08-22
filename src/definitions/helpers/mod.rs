@@ -1,3 +1,4 @@
+pub mod b_tree_map_cbor;
 pub mod bytestr;
 pub mod non_empty_map;
 pub mod non_empty_vec;

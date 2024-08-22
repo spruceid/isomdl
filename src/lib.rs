@@ -231,6 +231,7 @@
 //! ```ignore
 #![doc = include_str!("../tests/simulated_device_and_reader_state.rs")]
 //! ```
+
 pub mod cose;
 pub mod definitions;
 pub mod issuance;

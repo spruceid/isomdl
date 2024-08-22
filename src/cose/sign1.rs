@@ -417,6 +417,23 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_ciborium() {
+        let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
+        let mut parsed: CoseSign1 =
+            CoseSign1::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
+        parsed.set_tagged();
+        let roundtripped = parsed
+            .to_vec()
+            .expect("failed to serialize COSE_Sign1 to bytes");
+        println!("bytes: {:?}", hex::encode(&bytes));
+        println!("roundtripped: {:?}", hex::encode(&roundtripped));
+        assert_eq!(
+            bytes, roundtripped,
+            "original bytes and roundtripped bytes do not match"
+        );
+    }
+
+    #[test]
     fn signing() {
         let key = Vec::<u8>::from_hex(COSE_KEY).unwrap();
         let signer: SigningKey = SecretKey::from_slice(&key).unwrap().into();

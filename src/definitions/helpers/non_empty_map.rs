@@ -1,3 +1,4 @@
+use ciborium::Value;
 use coset::AsCborValue;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, ops::Deref};
@@ -79,11 +80,11 @@ impl<K: Ord + Eq + Clone + AsCborValue, V: Clone + AsCborValue> AsCborValue for 
             ciborium::Value::Map(v) => v,
             _ => {
                 return Err(coset::CoseError::DecodeFailed(
-                    ciborium::de::Error::Semantic(None, "not an array".to_string()),
+                    ciborium::de::Error::Semantic(None, "not a map".to_string()),
                 ))
             }
         };
-        Ok(NonEmptyMap::try_from(
+        NonEmptyMap::try_from(
             v.into_iter()
                 .map(|(k, v)| Ok((K::from_cbor_value(k)?, V::from_cbor_value(v)?)))
                 .collect::<coset::Result<BTreeMap<K, V>>>()?,
@@ -91,9 +92,9 @@ impl<K: Ord + Eq + Clone + AsCborValue, V: Clone + AsCborValue> AsCborValue for 
         .map_err(|_| {
             coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                 None,
-                "empty array".to_string(),
+                "empty map in NonEmptyMap".to_string(),
             ))
-        })?)
+        })
     }
 
     fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
@@ -106,19 +107,17 @@ impl<K: Ord + Eq + Clone + AsCborValue, V: Clone + AsCborValue> AsCborValue for 
     }
 }
 
-pub fn to_cbor_value<V: Clone + AsCborValue>(
-    m: NonEmptyMap<String, V>,
-) -> coset::Result<ciborium::Value> {
-    Ok(ciborium::Value::Map(
+pub fn to_cbor_value<V: Clone + AsCborValue>(m: NonEmptyMap<String, V>) -> coset::Result<Value> {
+    Ok(Value::Map(
         m.into_inner()
             .into_iter()
-            .map(|(k, v)| Ok((ciborium::Value::Text(k), v.to_cbor_value()?)))
-            .collect::<coset::Result<Vec<(ciborium::Value, ciborium::Value)>>>()?,
+            .map(|(k, v)| Ok((Value::Text(k), v.to_cbor_value()?)))
+            .collect::<coset::Result<Vec<(Value, Value)>>>()?,
     ))
 }
 
 pub fn from_cbor_value<V: Clone + AsCborValue>(
-    value: ciborium::Value,
+    value: Value,
 ) -> coset::Result<NonEmptyMap<String, V>> {
     let v = match value {
         ciborium::Value::Map(v) => v,
@@ -128,7 +127,7 @@ pub fn from_cbor_value<V: Clone + AsCborValue>(
             ))
         }
     };
-    Ok(NonEmptyMap::try_from(
+    NonEmptyMap::try_from(
         v.into_iter()
             .map(|(k, v)| {
                 Ok::<(String, V), coset::CoseError>((
@@ -145,5 +144,19 @@ pub fn from_cbor_value<V: Clone + AsCborValue>(
             None,
             "invalid values".to_string(),
         ))
-    })?)
+    })
+}
+
+pub fn from_slice<V: Clone + AsCborValue>(slice: &[u8]) -> coset::Result<NonEmptyMap<String, V>> {
+    coset::CborSerializable::from_slice(slice).and_then(from_cbor_value)
+}
+
+pub fn to_vec<V: Clone + AsCborValue>(value: NonEmptyMap<String, V>) -> coset::Result<Vec<u8>> {
+    coset::CborSerializable::to_vec(Value::Map(
+        value
+            .into_inner()
+            .into_iter()
+            .map(|(k, v)| Ok((Value::Text(k), v.to_cbor_value()?)))
+            .collect::<coset::Result<Vec<(Value, Value)>>>()?,
+    ))
 }

@@ -15,7 +15,6 @@ pub type ReaderAuth = CoseSign1;
 /// Represents a device request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-
 pub struct DeviceRequest {
     /// The version of the device request.
     pub version: String,
