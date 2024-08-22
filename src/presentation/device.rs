@@ -1,3 +1,6 @@
+use crate::cose::mac0::PreparedCoseMac0;
+use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -17,17 +20,14 @@ use crate::{
     },
     issuance::Mdoc,
 };
+use coset::{CoseMac0Builder, CoseSign1Builder};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
-use coset::{CoseMac0Builder, CoseSign1Builder};
 use uuid::Uuid;
-use crate::cose::mac0::PreparedCoseMac0;
-use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
-use crate::definitions::device_signed::DeviceAuthType;
 
 /// Initialisation state.
 ///
@@ -955,8 +955,6 @@ mod test {
     use crate::definitions::mso::DigestId;
 
     use super::*;
-    use crate::definitions::mso::DigestId;
-    use serde_json::json;
 
     #[test]
     fn filter_permitted() {

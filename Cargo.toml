@@ -47,8 +47,10 @@ clap-stdin = "0.5.1"
 digest = "0.10.7"
 serde_bytes = "0.11.15"
 
+strum = "0.24"
+strum_macros = "0.24"
+
 [dev-dependencies]
 hex = "0.4.3"
 p256 = "0.13.0"
 serde_json = "*"
-

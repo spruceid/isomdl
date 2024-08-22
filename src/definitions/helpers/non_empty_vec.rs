@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "Vec<T>", into = "Vec<T>")]
-pub struct NonEmptyVec<T: Clone + AsCborValue>(Vec<T>);
+pub struct NonEmptyVec<T: Clone>(Vec<T>);
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -12,7 +12,7 @@ pub enum Error {
     Empty,
 }
 
-impl<T: Clone + AsCborValue> NonEmptyVec<T> {
+impl<T: Clone> NonEmptyVec<T> {
     pub fn new(t: T) -> Self {
         Self(vec![t])
     }
@@ -59,7 +59,7 @@ impl<T: Clone + AsCborValue> NonEmptyVec<T> {
     }
 }
 
-impl<T: Clone + AsCborValue> TryFrom<Vec<T>> for NonEmptyVec<T> {
+impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {
     type Error = Error;
 
     fn try_from(v: Vec<T>) -> Result<NonEmptyVec<T>, Error> {
@@ -70,23 +70,29 @@ impl<T: Clone + AsCborValue> TryFrom<Vec<T>> for NonEmptyVec<T> {
     }
 }
 
-impl<T: Clone + AsCborValue> From<NonEmptyVec<T>> for Vec<T> {
+impl<T: Clone> From<NonEmptyVec<T>> for Vec<T> {
     fn from(NonEmptyVec(v): NonEmptyVec<T>) -> Vec<T> {
         v
     }
 }
 
-impl<T: Clone + AsCborValue> AsRef<[T]> for NonEmptyVec<T> {
+impl<T: Clone> AsRef<[T]> for NonEmptyVec<T> {
     fn as_ref(&self) -> &[T] {
         &self.0
     }
 }
 
-impl<T: Clone + AsCborValue> Deref for NonEmptyVec<T> {
+impl<T: Clone> Deref for NonEmptyVec<T> {
     type Target = [T];
 
     fn deref(&self) -> &[T] {
         &self.0
+    }
+}
+
+impl<T: Clone> FromIterator<T> for NonEmptyVec<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        NonEmptyVec::maybe_new(iter.into_iter().collect()).unwrap()
     }
 }
 
@@ -101,7 +107,7 @@ impl<T: Clone + AsCborValue> AsCborValue for NonEmptyVec<T> {
                 ))
             }
         };
-        Ok(NonEmptyVec::try_from(
+        NonEmptyVec::try_from(
             v.into_iter()
                 .map(T::from_cbor_value)
                 .collect::<coset::Result<Vec<T>>>()?,
@@ -111,7 +117,7 @@ impl<T: Clone + AsCborValue> AsCborValue for NonEmptyVec<T> {
                 None,
                 "empty array".to_string(),
             ))
-        })?)
+        })
     }
 
     fn to_cbor_value(self) -> coset::Result<ciborium::Value> {

@@ -2,6 +2,7 @@
 //! [CBOR Data Items](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item),
 //! also known as a tagged data item with tag number 24.
 use coset::{AsCborValue, CborSerializable};
+use hex::encode;
 use serde::{
     de::{self, Error as DeError},
     ser, Deserialize, Serialize,
@@ -101,7 +102,7 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
     }
 }
 
-impl<T: CborSerializable> coset::CborSerializable for Tag24<T> {}
+impl<T: CborSerializable> CborSerializable for Tag24<T> {}
 impl<T: CborSerializable> AsCborValue for Tag24<T> {
     fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
         if let ciborium::Value::Tag(24, inner_value) = value {

@@ -290,6 +290,43 @@ impl<'de> Deserialize<'de> for CoseMac0 {
     }
 }
 
+impl coset::CborSerializable for CoseMac0 {}
+impl coset::TaggedCborSerializable for CoseMac0 {
+    const TAG: u64 = iana::CborTag::CoseMac0 as u64;
+}
+
+impl AsCborValue for CoseMac0 {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        if let Value::Tag(tag, value) = value {
+            if tag != iana::CborTag::CoseMac0 as u64 {
+                return Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "unexpected tag".to_string()),
+                ));
+            }
+            Ok(CoseMac0 {
+                tagged: true,
+                inner: coset::CoseMac0::from_cbor_value(*value)?,
+            })
+        } else {
+            Ok(CoseMac0 {
+                tagged: false,
+                inner: coset::CoseMac0::from_cbor_value(value)?,
+            })
+        }
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        if self.tagged {
+            Ok(Value::Tag(
+                iana::CborTag::CoseMac0 as u64,
+                Box::new(self.inner.to_cbor_value()?),
+            ))
+        } else {
+            Ok(self.inner.to_cbor_value()?)
+        }
+    }
+}
+
 mod hmac {
     use coset::iana;
     use hmac::Hmac;
