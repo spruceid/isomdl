@@ -4,6 +4,9 @@ mod to_cbor;
 use proc_macro::{self, TokenStream};
 use syn::{Attribute, Lit, Meta, NestedMeta, Type};
 
+use quote::{format_ident, quote};
+use syn::{parse_macro_input, DeriveInput, MetaList, MetaNameValue};
+
 #[proc_macro_derive(FromJson, attributes(isomdl))]
 pub fn derive_from_json(input: TokenStream) -> TokenStream {
     from_json::derive(input)
@@ -302,4 +305,131 @@ mod test {
         assert!(super::is_many(&attr));
         assert!(super::is_dynamic_parse(&attr))
     }
+}
+
+#[proc_macro_derive(FieldsNames)]
+pub fn detect_field_names_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let struct_name = &input.ident;
+    let mut methods = Vec::new();
+    let mut rename_all_strategy: Option<String> = None;
+
+    // Check for serde(rename_all = "...") at the struct level
+    for attr in &input.attrs {
+        if attr.path.is_ident("serde") {
+            if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
+                for meta in nested {
+                    if let NestedMeta::Meta(Meta::NameValue(MetaNameValue { path, lit, .. })) = meta
+                    {
+                        if path.is_ident("rename_all") {
+                            if let Lit::Str(lit_str) = lit {
+                                rename_all_strategy = Some(lit_str.value());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Process each field
+    if let syn::Data::Struct(data_struct) = input.data {
+        for field in data_struct.fields {
+            let field_name = field.ident.as_ref().unwrap().to_string();
+            let mut rename_value = field_name.clone();
+
+            // Check for serde(rename = "...") at the field level
+            for attr in &field.attrs {
+                if attr.path.is_ident("serde") {
+                    if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
+                        for meta in nested {
+                            if let NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                                path,
+                                lit,
+                                ..
+                            })) = meta
+                            {
+                                if path.is_ident("rename") {
+                                    if let Lit::Str(lit_str) = lit {
+                                        rename_value = lit_str.value();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Apply rename_all strategy if no specific rename is found
+            if rename_value == field_name {
+                if let Some(strategy) = &rename_all_strategy {
+                    rename_value = apply_rename_all_strategy(&field_name, strategy);
+                }
+            }
+
+            let method_name = format_ident!("{}", field_name);
+            methods.push(quote! {
+                impl #struct_name {
+                    pub fn #method_name() -> &'static str {
+                        #rename_value
+                    }
+                }
+            });
+        }
+    }
+
+    let expanded = quote! {
+        #(#methods)*
+    };
+
+    TokenStream::from(expanded)
+}
+
+// Helper function to apply rename_all strategies
+fn apply_rename_all_strategy(field_name: &str, strategy: &str) -> String {
+    match strategy {
+        "camelCase" => to_camel_case(field_name),
+        "snake_case" => to_snake_case(field_name),
+        "PascalCase" => to_pascal_case(field_name),
+        _ => field_name.to_string(),
+    }
+}
+
+// Convert to camelCase
+fn to_camel_case(field_name: &str) -> String {
+    let mut s = String::new();
+    let mut capitalize = false;
+    for c in field_name.chars() {
+        if c == '_' {
+            capitalize = true;
+        } else if capitalize {
+            s.push(c.to_ascii_uppercase());
+            capitalize = false;
+        } else {
+            s.push(c);
+        }
+    }
+    s
+}
+
+// Convert to snake_case (this is trivial because the field name is already in snake_case)
+fn to_snake_case(field_name: &str) -> String {
+    field_name.to_string()
+}
+
+// Convert to PascalCase
+fn to_pascal_case(field_name: &str) -> String {
+    let mut s = String::new();
+    let mut capitalize = true;
+    for c in field_name.chars() {
+        if c == '_' {
+            capitalize = true;
+        } else if capitalize {
+            s.push(c.to_ascii_uppercase());
+            capitalize = false;
+        } else {
+            s.push(c);
+        }
+    }
+    s
 }
