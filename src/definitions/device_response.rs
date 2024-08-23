@@ -465,11 +465,13 @@ mod test {
     use crate::definitions::device_signed::{
         DeviceNamespaces, DeviceNamespacesBytes, DeviceSignedItems,
     };
+    use crate::definitions::helpers::string_cbor::CborString;
     use crate::definitions::helpers::{ByteStr, NonEmptyVec};
     use crate::definitions::issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes};
     use crate::definitions::{
         DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem,
     };
+    use ciborium::Value;
     use coset::CborSerializable;
     use hex::FromHex;
     use isomdl_macros::CborSerializable;
@@ -513,9 +515,9 @@ mod test {
         static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
         let cose_sign1 = CoseSign1::from_slice(&<Vec<u8>>::from_hex(COSE_SIGN1).unwrap()).unwrap();
         let device_signed_items =
-            DeviceSignedItems::new("a".to_string(), serde_cbor::Value::Text("b".to_string()));
+            DeviceSignedItems::new(CborString::from("a"), Value::Text("b".to_string()));
         let mut device_namespaces = DeviceNamespaces::new();
-        device_namespaces.insert("eu-dl".to_string(), device_signed_items);
+        device_namespaces.insert(CborString::from("eu-dl"), device_signed_items);
         let namespaces = DeviceNamespacesBytes::new(device_namespaces).unwrap();
 
         let issuer_signed_item = IssuerSignedItem {
@@ -527,7 +529,7 @@ mod test {
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let issuer_signed_item_bytes_vec = NonEmptyVec::new(issuer_signed_item_bytes);
         let issuer_namespaces =
-            IssuerNamespaces::new("a".to_string(), issuer_signed_item_bytes_vec);
+            IssuerNamespaces::new(CborString::from("a"), issuer_signed_item_bytes_vec);
         let document = Document {
             doc_type: "a".to_string(),
             issuer_signed: IssuerSigned {

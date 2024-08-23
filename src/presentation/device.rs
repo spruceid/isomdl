@@ -1,6 +1,8 @@
 use crate::cose::mac0::PreparedCoseMac0;
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
 use crate::definitions::device_signed::DeviceAuthType;
+use crate::definitions::helpers::b_tree_map_string_cbor::BTreeMapCbor;
+use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::IssuerSignedItem;
 use crate::{
     definitions::{
@@ -628,8 +630,10 @@ pub trait DeviceSession {
                 }
             };
 
-            let mut issuer_namespaces: BTreeMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
-                Default::default();
+            let mut issuer_namespaces: BTreeMapCbor<
+                CborString,
+                NonEmptyVec<IssuerSignedItemBytes>,
+            > = Default::default();
             let mut errors: BTreeMap<String, NonEmptyMap<String, DocumentErrorCode>> =
                 Default::default();
 
@@ -637,11 +641,13 @@ pub trait DeviceSession {
                 if let Some(issuer_items) = document.namespaces.get(&namespace) {
                     for element_identifier in elements.into_iter() {
                         if let Some(item) = issuer_items.get(&element_identifier) {
-                            if let Some(returned_items) = issuer_namespaces.get_mut(&namespace) {
+                            if let Some(returned_items) =
+                                issuer_namespaces.get_mut(&namespace.clone().into())
+                            {
                                 returned_items.push(item.clone());
                             } else {
                                 let returned_items = NonEmptyVec::new(item.clone());
-                                issuer_namespaces.insert(namespace.clone(), returned_items);
+                                issuer_namespaces.insert(namespace.clone().into(), returned_items);
                             }
                         } else if let Some(returned_errors) = errors.get_mut(&namespace) {
                             returned_errors
@@ -815,7 +821,7 @@ impl From<Mdoc> for Document {
         let namespaces = namespaces
             .into_inner()
             .into_iter()
-            .map(|(ns, v)| (ns, extract(v)))
+            .map(|(ns, v)| (ns.into(), extract(v)))
             .collect::<BTreeMap<_, _>>()
             .try_into()
             // Can unwrap as there is always at least one element in a NonEmptyMap.

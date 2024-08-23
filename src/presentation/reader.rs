@@ -13,6 +13,7 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
+use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
@@ -254,7 +255,7 @@ impl SessionManager {
             .into_inner();
 
         namespaces
-            .remove("org.iso.18013.5.1")
+            .remove(&CborString::from("org.iso.18013.5.1"))
             .ok_or(Error::IncorrectNamespace)?
             .into_inner()
             .into_iter()
@@ -268,7 +269,9 @@ impl SessionManager {
 
         parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
 
-        if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
+        if let Some(aamva_response) =
+            namespaces.remove(&CborString::from("org.iso.18013.5.1.aamva"))
+        {
             aamva_response
                 .into_inner()
                 .into_iter()

@@ -20,8 +20,9 @@ use serde_cbor::Value as CborValue;
 
 use crate::cose;
 use crate::cose::sign1::CoseSign1;
+use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::{
-    helpers::{non_empty_map, ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
+    helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
     DigestId,
 };
 
@@ -38,7 +39,7 @@ pub struct IssuerSigned {
     pub issuer_auth: CoseSign1,
 }
 
-pub type IssuerNamespaces = NonEmptyMap<String, NonEmptyVec<IssuerSignedItemBytes>>;
+pub type IssuerNamespaces = NonEmptyMap<CborString, NonEmptyVec<IssuerSignedItemBytes>>;
 pub type IssuerSignedItemBytes = Tag24<IssuerSignedItem>;
 
 /// Represents an item signed by the issuer.
@@ -158,23 +159,23 @@ impl AsCborValue for IssuerSigned {
             })?
             .into_iter()
             .flat_map(|f| match f.0 {
-                Value::Text(s) => Ok::<(String, Value), coset::CoseError>((s, f.1)),
+                Value::Text(s) => Ok::<(CborString, Value), coset::CoseError>((s.into(), f.1)),
                 _ => Err(coset::CoseError::UnexpectedItem(
                     "key",
                     "text for field in IssuerSigned",
                 )),
             })
-            .collect::<HashMap<String, Value>>();
+            .collect::<HashMap<CborString, Value>>();
         Ok(IssuerSigned {
             namespaces: if let Some(Value::Map(namespaces)) =
-                fields.remove(IssuerSigned::namespaces())
+                fields.remove(&IssuerSigned::namespaces().into())
             {
-                Some(non_empty_map::from_cbor_value(Value::Map(namespaces))?)
+                Some(NonEmptyMap::from_cbor_value(Value::Map(namespaces))?)
             } else {
                 None
             },
             issuer_auth: CoseSign1::from_cbor_value(
-                if let Some(issuer_auth) = fields.remove(IssuerSigned::issuer_auth()) {
+                if let Some(issuer_auth) = fields.remove(&IssuerSigned::issuer_auth().into()) {
                     issuer_auth
                 } else {
                     return Err(coset::CoseError::UnexpectedItem(
@@ -191,7 +192,7 @@ impl AsCborValue for IssuerSigned {
         if let Some(namespaces) = self.namespaces {
             values.push((
                 Value::Text(IssuerSigned::namespaces().to_string()),
-                non_empty_map::to_cbor_value(namespaces)?,
+                namespaces.to_cbor_value()?,
             ))
         }
         values.push((
@@ -204,12 +205,14 @@ impl AsCborValue for IssuerSigned {
 
 #[cfg(test)]
 mod test {
+    use ciborium::Value;
     use coset::CborSerializable;
     use hex::FromHex;
 
     use crate::cose::sign1::CoseSign1;
     use crate::definitions::device_signed::{DeviceNamespaces, DeviceSignedItems};
-    use crate::definitions::helpers::{non_empty_map, ByteStr, NonEmptyMap, NonEmptyVec, Tag24};
+    use crate::definitions::helpers::string_cbor::CborString;
+    use crate::definitions::helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24};
     use crate::definitions::{DigestId, IssuerSignedItem};
 
     use super::{IssuerNamespaces, IssuerSigned, IssuerSignedItemBytes};
@@ -250,9 +253,9 @@ mod test {
         static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
         let cose_sign1 = CoseSign1::from_slice(&<Vec<u8>>::from_hex(COSE_SIGN1).unwrap()).unwrap();
         let device_signed_items =
-            DeviceSignedItems::new("a".to_string(), serde_cbor::Value::Text("b".to_string()));
+            DeviceSignedItems::new(CborString::from("a"), Value::Text("b".to_string()));
         let mut device_namespaces = DeviceNamespaces::new();
-        device_namespaces.insert("eu-dl".to_string(), device_signed_items);
+        device_namespaces.insert(CborString::from("eu-dl".to_string()), device_signed_items);
         let issuer_signed_item = IssuerSignedItem {
             digest_id: DigestId(0),
             random: ByteStr::from(vec![0, 1, 2, 3]),
@@ -262,7 +265,7 @@ mod test {
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let issuer_signed_item_bytes_vec = NonEmptyVec::new(issuer_signed_item_bytes);
         let issuer_namespaces =
-            IssuerNamespaces::new("a".to_string(), issuer_signed_item_bytes_vec);
+            IssuerNamespaces::new("a".to_string().into(), issuer_signed_item_bytes_vec);
 
         let issuer_signed = IssuerSigned {
             namespaces: Some(issuer_namespaces),
@@ -313,10 +316,10 @@ mod test {
             element_identifier: "a".to_string(),
             element_value: serde_cbor::Value::Text("b".to_string()),
         };
-        let vec = NonEmptyMap::new("a".to_string(), issuer_signed_item);
-        let bytes = non_empty_map::to_vec(vec).unwrap();
-        let vec: NonEmptyMap<String, IssuerSignedItem> = non_empty_map::from_slice(&bytes).unwrap();
-        let bytes2 = non_empty_map::to_vec(vec).unwrap();
+        let vec = NonEmptyMap::new(CborString::from("a"), issuer_signed_item);
+        let bytes = vec.to_vec().unwrap();
+        let vec = NonEmptyMap::<CborString, IssuerSignedItem>::from_slice(&bytes).unwrap();
+        let bytes2 = vec.to_vec().unwrap();
         assert_eq!(bytes, bytes2);
     }
 
@@ -331,11 +334,12 @@ mod test {
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let issuer_signed_item_bytes_vec = NonEmptyVec::new(issuer_signed_item_bytes);
         let issuer_namespaces =
-            IssuerNamespaces::new("a".to_string(), issuer_signed_item_bytes_vec);
-        let bytes = non_empty_map::to_vec(issuer_namespaces).unwrap();
-        let issuer_namespaces: NonEmptyMap<String, NonEmptyVec<IssuerSignedItemBytes>> =
-            non_empty_map::from_slice(&bytes).unwrap();
-        let bytes2 = non_empty_map::to_vec(issuer_namespaces).unwrap();
+            IssuerNamespaces::new(CborString::from("a"), issuer_signed_item_bytes_vec);
+        let bytes = issuer_namespaces.to_vec().unwrap();
+        let issuer_namespaces =
+            NonEmptyMap::<CborString, NonEmptyVec<IssuerSignedItemBytes>>::from_slice(&bytes)
+                .unwrap();
+        let bytes2 = issuer_namespaces.to_vec().unwrap();
         assert_eq!(bytes, bytes2);
     }
 }

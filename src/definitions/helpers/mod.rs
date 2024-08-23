@@ -1,8 +1,10 @@
-pub mod b_tree_map_cbor;
+pub mod b_tree_map_string_cbor;
 pub mod bytestr;
 pub mod non_empty_map;
 pub mod non_empty_vec;
+pub mod string_cbor;
 pub mod tag24;
+pub mod tag24_ciborium;
 
 pub use bytestr::ByteStr;
 pub use non_empty_map::NonEmptyMap;

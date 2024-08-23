@@ -11,6 +11,7 @@ use signature::{SignatureEncoding, Signer};
 
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
 use crate::cose::SignatureAlgorithm;
+use crate::definitions::helpers::string_cbor::CborString;
 use crate::{
     definitions::{
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
@@ -361,9 +362,9 @@ fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
                     NonEmptyVec::try_from(items)
                         .map_err(|_| anyhow!("at least one element required in each namespace"))
                 })
-                .map(|elems| (name, elems))
+                .map(|elems| (CborString::from(name), elems))
         })
-        .collect::<Result<BTreeMap<String, NonEmptyVec<Tag24<IssuerSignedItem>>>>>()
+        .collect::<Result<BTreeMap<CborString, NonEmptyVec<Tag24<IssuerSignedItem>>>>>()
         .and_then(|namespaces| {
             NonEmptyMap::try_from(namespaces)
                 .map_err(|_| anyhow!("at least one namespace required"))
@@ -395,7 +396,7 @@ fn digest_namespaces(
         .iter()
         .map(|(name, elements)| {
             Ok((
-                name.clone(),
+                name.clone().into(),
                 digest_namespace(elements, digest_algorithm, enable_decoy_digests)?,
             ))
         })

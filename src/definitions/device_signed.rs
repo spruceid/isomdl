@@ -4,18 +4,19 @@
 //!
 //! The [Error] enum represents the possible errors that can occur in this module.
 //! - [Error::UnableToEncode]: Indicates an error when encoding a value as CBOR.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use ciborium::Value;
 use coset::{AsCborValue, CborSerializable};
 use isomdl_macros::FieldsNames;
 use serde::{Deserialize, Serialize};
-use serde_cbor::{Error as CborError, Value as CborValue};
+use serde_cbor::Error as CborError;
 use strum_macros::AsRefStr;
 
 use crate::cose::mac0::CoseMac0;
 use crate::cose::sign1::CoseSign1;
-use crate::cose::{ciborium_value_into_serde_cbor_value, serde_cbor_value_into_ciborium_value};
+use crate::definitions::helpers::b_tree_map_string_cbor::BTreeMapCbor;
+use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::{
     helpers::{NonEmptyMap, Tag24},
     session::SessionTranscript,
@@ -34,10 +35,8 @@ pub struct DeviceSigned {
 }
 
 pub type DeviceNamespacesBytes = Tag24<DeviceNamespaces>;
-pub type DeviceNamespaces = BTreeMap<String, DeviceSignedItems>;
-pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
-
-struct DeviceNamespaces2(DeviceNamespaces);
+pub type DeviceNamespaces = BTreeMapCbor<CborString, DeviceSignedItems>;
+pub type DeviceSignedItems = NonEmptyMap<CborString, Value>;
 
 /// Represents a device signature.
 ///
@@ -171,7 +170,7 @@ impl AsCborValue for DeviceSigned {
             })
             .collect::<HashMap<String, Value>>();
         Ok(DeviceSigned {
-            namespaces: cbor_value_to_device_namespaces_bytes(
+            namespaces: DeviceNamespacesBytes::from_cbor_value(
                 fields
                     .remove(DeviceSigned::namespaces())
                     .ok_or(coset::CoseError::DecodeFailed(
@@ -197,7 +196,7 @@ impl AsCborValue for DeviceSigned {
             vec![
                 (
                     Value::Text(DeviceSigned::namespaces().to_string()),
-                    device_namespaces_bytes_to_cbor_value(self.namespaces)?,
+                    self.namespaces.to_cbor_value()?,
                 ),
                 (
                     Value::Text(DeviceSigned::device_auth().to_string()),
@@ -206,127 +205,6 @@ impl AsCborValue for DeviceSigned {
             ]
             .into_iter()
             .collect(),
-        ))
-    }
-}
-
-impl CborSerializable for DeviceNamespaces2 {}
-impl AsCborValue for DeviceNamespaces2 {
-    fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        Ok(DeviceNamespaces2(
-            value
-                .into_map()
-                .map_err(|_| {
-                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                        None,
-                        "unknown key".to_string(),
-                    ))
-                })?
-                .into_iter()
-                .map(|(k, v)| {
-                    let key = k.into_text().map_err(|_| {
-                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                            None,
-                            "not a text".to_string(),
-                        ))
-                    })?;
-                    let value = v
-                        .into_map()
-                        .map_err(|_| {
-                            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                                None,
-                                "not a map".to_string(),
-                            ))
-                        })
-                        .map(|v| {
-                            v.into_iter()
-                                .map(|(k, v)| {
-                                    let k = k.into_text().map_err(|_| {
-                                        coset::CoseError::DecodeFailed(
-                                            ciborium::de::Error::Semantic(
-                                                None,
-                                                "not a text".to_string(),
-                                            ),
-                                        )
-                                    })?;
-                                    let v = ciborium_value_into_serde_cbor_value(v)?;
-                                    Ok::<(String, CborValue), coset::CoseError>((k, v))
-                                })
-                                .collect::<Result<DeviceSignedItems, coset::CoseError>>()
-                        })?;
-                    Ok::<(String, DeviceSignedItems), coset::CoseError>((key, value?))
-                })
-                .collect::<Result<DeviceNamespaces, coset::CoseError>>()?,
-        ))
-    }
-
-    fn to_cbor_value(self) -> coset::Result<Value> {
-        Ok(Value::Map(
-            self.0
-                .into_iter()
-                .map(|(k, v)| {
-                    let key = Value::Text(k);
-                    let value = Value::Map(
-                        v.into_inner()
-                            .into_iter()
-                            .map(|(k, v)| {
-                                let key = Value::Text(k);
-                                let value = serde_cbor_value_into_ciborium_value(v)?;
-                                Ok((key, value))
-                            })
-                            .collect::<Result<Vec<(Value, Value)>, coset::CoseError>>()?,
-                    );
-                    Ok::<(Value, Value), coset::CoseError>((key, value))
-                })
-                .collect::<Result<Vec<(Value, Value)>, coset::CoseError>>()?,
-        ))
-    }
-}
-
-fn device_namespaces_bytes_to_cbor_value(val: DeviceNamespacesBytes) -> coset::Result<Value> {
-    let device_namespaces = Value::Map(
-        val.into_inner()
-            .into_iter()
-            .flat_map(|(k, v)| {
-                let key = Value::Text(k);
-                let value = Value::Map(
-                    v.into_inner()
-                        .into_iter()
-                        .flat_map(|(k, v)| {
-                            let key = Value::Text(k);
-                            let value = serde_cbor_value_into_ciborium_value(v)?;
-                            Ok::<(Value, Value), coset::CoseError>((key, value))
-                        })
-                        .collect::<Vec<(Value, Value)>>(),
-                );
-                Ok::<(Value, Value), coset::CoseError>((key, value))
-            })
-            .collect::<Vec<(Value, Value)>>(),
-    );
-    Ok(Value::Tag(
-        24,
-        Box::new(Value::Bytes(device_namespaces.to_vec()?)),
-    ))
-}
-
-fn cbor_value_to_device_namespaces_bytes(val: Value) -> coset::Result<DeviceNamespacesBytes> {
-    if let Value::Tag(24, inner_value) = val {
-        if let Value::Bytes(inner_bytes) = *inner_value {
-            let inner: DeviceNamespaces2 = CborSerializable::from_slice(&inner_bytes)?;
-            Ok(Tag24::new(inner.0).map_err(|_| {
-                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                    None,
-                    "invalid inner bytes".to_string(),
-                ))
-            })?)
-        } else {
-            Err(coset::CoseError::DecodeFailed(
-                ciborium::de::Error::Semantic(None, "invalid inner bytes".to_string()),
-            ))
-        }
-    } else {
-        Err(coset::CoseError::DecodeFailed(
-            ciborium::de::Error::Semantic(None, "not tag 24".to_string()),
         ))
     }
 }
