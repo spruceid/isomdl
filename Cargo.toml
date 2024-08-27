@@ -43,6 +43,9 @@ isomdl-macros = { version = "0.1.0", path = "macros" }
 clap = { version = "4", features = ["derive"] }
 clap-stdin = "0.2.1"
 
+strum = "0.24"
+strum_macros = "0.24"
+
 [dependencies.cose-rs]
 git = "https://github.com/spruceid/cose-rs"
 rev = "4104505"
@@ -51,4 +54,3 @@ rev = "4104505"
 hex = "0.4.3"
 p256 = "0.13.0"
 serde_json = "*"
-

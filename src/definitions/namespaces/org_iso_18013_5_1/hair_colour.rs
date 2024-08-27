@@ -51,7 +51,7 @@ impl FromStr for HairColour {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Error> {
-        match s {
+        match s.to_lowercase().as_str() {
             "bald" => Ok(Self::Bald),
             "black" => Ok(Self::Black),
             "blond" => Ok(Self::Blond),
