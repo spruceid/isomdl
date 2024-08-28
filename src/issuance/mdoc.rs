@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
 
-use crate::cose::CborValue;
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;
 use coset::{iana, Label};

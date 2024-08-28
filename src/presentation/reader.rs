@@ -13,7 +13,7 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use crate::cose::CborValue;
+
 use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,

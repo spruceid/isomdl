@@ -1,4 +1,3 @@
-use crate::cose::CborValue;
 use ciborium::Value;
 use serde::{Deserialize, Serialize};
 

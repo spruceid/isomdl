@@ -12,7 +12,6 @@
 
 use std::collections::HashMap;
 
-use crate::cose::CborValue;
 use ciborium::Value;
 use coset::AsCborValue;
 use isomdl_macros::FieldsNames;
@@ -114,7 +113,7 @@ impl AsCborValue for IssuerSignedItem {
             element_value: if let Some(element_value) =
                 fields.remove(IssuerSignedItem::element_value())
             {
-                cose::ciborium_value_into_serde_cbor_value(element_value)?
+                cose::ciborium_value_into_cbor_value(element_value)?
             } else {
                 return Err(coset::CoseError::UnexpectedItem(
                     "value",
@@ -140,7 +139,7 @@ impl AsCborValue for IssuerSignedItem {
             ),
             (
                 Value::Text(IssuerSignedItem::element_value().to_string()),
-                cose::serde_cbor_value_into_ciborium_value(self.element_value)?,
+                cose::cbor_value_into_ciborium_value(self.element_value)?,
             ),
         ]))
     }

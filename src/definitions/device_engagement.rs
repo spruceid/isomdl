@@ -4,7 +4,7 @@
 //! It includes fields such as the `version`, `security details, `device retrieval methods, `server retrieval methods, and `protocol information.
 //!
 //! The module also provides implementations for conversions between [DeviceEngagement] and [CborValue], as well as other utility functions.
-use crate::cose::CborValue;
+
 use crate::definitions::helpers::Tag24;
 use crate::definitions::helpers::{ByteStr, NonEmptyVec};
 use crate::definitions::CoseKey;
@@ -20,6 +20,7 @@ pub mod error;
 pub use error::Error;
 
 pub mod nfc_options;
+use crate::cbor::CborValue;
 pub use nfc_options::NfcOptions;
 
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
@@ -596,7 +597,7 @@ impl TryFrom<CborValue> for WifiOptions {
                 .get(&Value::Integer(idx.try_into().map_err(|_| Error::InvalidWifiOptions)?).into())
             {
                 None => Ok(None),
-                Some(CborValue(Value::Text(text))) => Ok(Some(text.to_string())),
+                Some(CborValue::Text(text)) => Ok(Some(text.to_string())),
                 _ => Err(Error::InvalidWifiOptions),
             }
         }
@@ -609,7 +610,7 @@ impl TryFrom<CborValue> for WifiOptions {
                 .get(&Value::Integer(idx.try_into().map_err(|_| Error::InvalidWifiOptions)?).into())
             {
                 None => Ok(None),
-                Some(CborValue(Value::Integer(int_val))) => {
+                Some(CborValue::Integer(int_val)) => {
                     let uint_val =
                         u64::try_from(*int_val).map_err(|_| Error::InvalidWifiOptions)?;
                     Ok(Some(uint_val))
@@ -719,7 +720,6 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
     type Error = Error;
 
     fn try_from(value: CborValue) -> std::result::Result<Self, Self::Error> {
-        serde_cbor::Value::
         let mut map = value
             .into_map()
             .map_err(|_| Error::Malformed)?

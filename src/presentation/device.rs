@@ -1,6 +1,6 @@
 use crate::cose::mac0::PreparedCoseMac0;
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
-use crate::cose::CborValue;
+
 use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::helpers::b_tree_map_string_cbor::BTreeMapCbor;
 use crate::definitions::helpers::string_cbor::CborString;

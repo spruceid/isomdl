@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::cose::CborValue;
+use crate::cbor::CborValue;
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
 use ciborium::Value;
 use coset::iana::{Algorithm, EllipticCurve};
@@ -193,21 +193,16 @@ impl TryFrom<CborValue> for CoseKey {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        let v2: Value = v.clone().into();
-        if let Value::Map(mut map) = v2 {
-            let mut map = map
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect::<BTreeMap<CborValue, CborValue>>();
+        if let CborValue::Map(mut map) = v {
             match (
-                map.remove(&Value::Integer(1.into()).into()),
-                map.remove(&Value::Integer((-1).into()).into()),
-                map.remove(&Value::Integer((-2).into()).into()),
+                map.remove(&CborValue::Integer(1.into()).into()),
+                map.remove(&CborValue::Integer((-1).into()).into()),
+                map.remove(&CborValue::Integer((-2).into()).into()),
             ) {
                 (
-                    Some(CborValue(Value::Integer(i2))),
-                    Some(CborValue(Value::Integer(crv_id))),
-                    Some(CborValue(Value::Bytes(x))),
+                    Some(CborValue::Integer(i2)),
+                    Some(CborValue::Integer(crv_id)),
+                    Some(CborValue::Bytes(x)),
                 ) if i2.into() == 2 => {
                     let crv: i128 = crv_id.into();
                     let crv = match crv {

@@ -1,4 +1,4 @@
-use crate::cose::CborValue;
+use crate::cbor::CborValue;
 use crate::definitions::device_engagement::error::Error;
 use anyhow::Result;
 use ciborium::Value;
@@ -17,7 +17,6 @@ pub struct CommandDataLength(u16);
 pub struct ResponseDataLength(u32);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(try_from = "CborValue", into = "CborValue")]
 pub struct NfcOptions {
     max_len_command_data_field: CommandDataLength,
     max_len_response_data_field: ResponseDataLength,

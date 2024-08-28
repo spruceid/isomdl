@@ -27,7 +27,7 @@
 //! - [std::collections::BTreeMap]: Provides the [BTreeMap] type for storing key-value pairs in a sorted order.
 //! - [time]: Provides date and time manipulation functionality.
 //! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
-use crate::cose::CborValue;
+
 use serde::{
     ser::{Error as SerError, Serializer},
     Deserialize, Serialize,

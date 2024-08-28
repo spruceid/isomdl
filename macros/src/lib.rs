@@ -184,18 +184,12 @@ pub fn cbor_serializable_derive(input: TokenStream) -> TokenStream {
         }
     }
 
-    // enum FieldHandling {
-    //     Named,
-    //     Unnamed,
-    // }
-    // let mut struct_type = FieldHandling::Named;
     let field_handling = match &input.data {
         Data::Struct(data_struct) => match &data_struct.fields {
             Fields::Named(fields_named) => {
                 let field_deserialization = fields_named.named.iter().map(|f| {
                     let field_name = f.ident.as_ref().unwrap();
                     let field_name_str = field_name.to_string();
-                    // let key = format!("{}::{}()", format_ident!("{struct_name}"), field_name_str);
                     let key = get_field_name(
                         field_name,
                         &f.attrs,
@@ -217,11 +211,9 @@ pub fn cbor_serializable_derive(input: TokenStream) -> TokenStream {
                     let field_type = &f.ty;
                     let field_name_ts = quote!(self.#field_name);
                     let field_value = generate_field_serialization(field_type, field_name_ts);
-                    // let field_name_str = field_name.to_string();
-                    // let key = format!("{}::{}()", format_ident!("{struct_name}"), field_name_str);
                     let key = get_field_name(field_name, &f.attrs, &struct_rename_all_strategy);
                     quote! {
-                        map.push((ciborium::Value::Text(#key.to_string()), #field_value));
+                        map.push((CborValue::Text(#key.to_string()), #field_value));
                     }
                 });
 
@@ -231,7 +223,6 @@ pub fn cbor_serializable_derive(input: TokenStream) -> TokenStream {
                 )
             }
             Fields::Unnamed(fields_unnamed) => {
-                // struct_type = FieldHandling::Unnamed;
                 let field_deserialization = fields_unnamed.unnamed.iter().enumerate().map(|(i, _f)| {
                     let index = syn::Index::from(i);
                     quote! {
@@ -295,63 +286,6 @@ pub fn cbor_serializable_derive(input: TokenStream) -> TokenStream {
             }
         }
     };
-    // let expanded = match struct_type {
-    //     FieldHandling::Named => quote! {
-    //         #(#methods)*
-    //
-    //         impl coset::CborSerializable for #struct_name {}
-    //
-    //         impl coset::AsCborValue for #struct_name {
-    //             fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
-    //                     let mut fields = value.into_map().map_err(|_| {
-    //                         coset::CoseError::DecodeFailed(
-    //                             ciborium::de::Error::Semantic(None, format!("{} is not a map", stringify!(#struct_name)))
-    //                         )
-    //                     })?.into_iter().flat_map(|f| match f.0 {
-    //                         ciborium::Value::Text(s) => Ok((s, f.1)),
-    //                         _ => Err(coset::CoseError::UnexpectedItem(
-    //                             "key",
-    //                             "text for field",
-    //                         )),
-    //                     }).collect::<std::collections::HashMap<String, ciborium::Value>>();
-    //                     Ok(Self {
-    //                         #field_deserialization
-    //                     })
-    //                 }
-    //             }
-    //
-    //             fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
-    //                 let mut map = Vec::new();
-    //                 #field_serialization
-    //                 Ok(ciborium::Value::Array(map))
-    //             }
-    //     },
-    //     FieldHandling::Unnamed => quote! {
-    //         #(#methods)*
-    //
-    //         impl coset::CborSerializable for #struct_name {}
-    //
-    //         impl coset::AsCborValue for #struct_name {
-    //             fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
-    //                     let mut fields = value.into_array().map_err(|_| {
-    //                         coset::CoseError::DecodeFailed(
-    //                             ciborium::de::Error::Semantic(None, format!("{} is not an array", stringify!(#struct_name)))
-    //                         )
-    //                     })?.into_iter()
-    //                     .collect::<Vec<ciborium::Value>>();
-    //                     Ok(Self {
-    //                         #field_deserialization
-    //                     })
-    //                 }
-    //             }
-    //
-    //             fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
-    //                 let mut array = Vec::new();
-    //                 #field_serialization
-    //                 Ok(ciborium::Value::Array(array))
-    //             }
-    //     }
-    // };
 
     TokenStream::from(expanded)
 }
@@ -587,16 +521,6 @@ fn get_field_name2(
         }
     }
     rename_value
-
-    // let method_name_override = method_name_override.unwrap_or_else(|| format_ident!("{}", field_name_str));
-    // methods.push(quote! {
-    //     impl #struct_name {
-    //         pub fn #method_name() -> &'static str {
-    //             #rename_value
-    //         }
-    //     }
-    // });
-    // method_name_override.to_string()
 }
 
 fn get_field_name(

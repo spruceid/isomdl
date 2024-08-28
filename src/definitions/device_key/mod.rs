@@ -41,7 +41,7 @@
 //! assert!(result.is_err());
 //! assert_eq!(result.unwrap_err(), Error::DoubleAuthorized("namespace1".to_string()));
 //! ```
-use crate::cose::CborValue;
+
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
