@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
+use crate::cose::CborValue;
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
+use ciborium::Value;
 use coset::iana::{Algorithm, EllipticCurve};
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use ssi_jwk::JWK;
 
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
@@ -30,6 +31,20 @@ pub enum EC2Curve {
     P384,
     P521,
     P256K,
+}
+
+impl coset::CborSerializable for CoseKey {}
+impl coset::AsCborValue for CoseKey {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let v: CborValue = value.into();
+        Ok(v.try_into()
+            .map_err(|e| coset::CoseError::DecodeFailed(e))?)
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let v: CborValue = self.into();
+        Ok(v.into())
+    }
 }
 
 impl TryFrom<EllipticCurve> for EC2Curve {
@@ -127,28 +142,50 @@ impl CoseKey {
 
 impl From<CoseKey> for CborValue {
     fn from(key: CoseKey) -> CborValue {
-        let mut map = BTreeMap::new();
+        let mut map = vec![];
         match key {
             CoseKey::EC2 { crv, x, y } => {
                 // kty: 1, EC2: 2
-                map.insert(CborValue::Integer(1), CborValue::Integer(2));
+                map.push((Value::Integer(1.into()), Value::Integer(2.into())));
                 // crv: -1
-                map.insert(CborValue::Integer(-1), crv.into());
+                map.push((
+                    Value::Integer((-1).into()),
+                    match crv {
+                        EC2Curve::P256 => Value::Integer(1.into()),
+                        EC2Curve::P384 => Value::Integer(2.into()),
+                        EC2Curve::P521 => Value::Integer(3.into()),
+                        EC2Curve::P256K => Value::Integer(8.into()),
+                    },
+                ));
                 // x: -2
-                map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
+                map.push((Value::Integer((-2).into()), Value::Bytes(x)));
                 // y: -3
-                map.insert(CborValue::Integer(-3), y.into());
+                map.push((
+                    Value::Integer((-3).into()),
+                    match y {
+                        EC2Y::Value(v) => Value::Bytes(v),
+                        EC2Y::SignBit(b) => Value::Bool(b),
+                    },
+                ));
             }
             CoseKey::OKP { crv, x } => {
                 // kty: 1, OKP: 1
-                map.insert(CborValue::Integer(1), CborValue::Integer(1));
+                map.push((Value::Integer(1.into()), Value::Integer(1.into())));
                 // crv: -1
-                map.insert(CborValue::Integer(-1), crv.into());
+                map.push((
+                    Value::Integer((-1).into()),
+                    match crv {
+                        OKPCurve::X25519 => Value::Integer(4.into()),
+                        OKPCurve::X448 => Value::Integer(5.into()),
+                        OKPCurve::Ed25519 => Value::Integer(6.into()),
+                        OKPCurve::Ed448 => Value::Integer(7.into()),
+                    },
+                ));
                 // x: -2
-                map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
+                map.push((Value::Integer((-2).into()), Value::Bytes(x)));
             }
         }
-        CborValue::Map(map)
+        Value::Map(map).into()
     }
 }
 
@@ -156,30 +193,53 @@ impl TryFrom<CborValue> for CoseKey {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        if let CborValue::Map(mut map) = v {
+        let v2: Value = v.clone().into();
+        if let Value::Map(mut map) = v2 {
+            let mut map = map
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect::<BTreeMap<CborValue, CborValue>>();
             match (
-                map.remove(&CborValue::Integer(1)),
-                map.remove(&CborValue::Integer(-1)),
-                map.remove(&CborValue::Integer(-2)),
+                map.remove(&Value::Integer(1.into()).into()),
+                map.remove(&Value::Integer((-1).into()).into()),
+                map.remove(&Value::Integer((-2).into()).into()),
             ) {
                 (
-                    Some(CborValue::Integer(2)),
-                    Some(CborValue::Integer(crv_id)),
-                    Some(CborValue::Bytes(x)),
-                ) => {
-                    let crv = crv_id.try_into()?;
-                    let y = map
-                        .remove(&CborValue::Integer(-3))
-                        .ok_or(Error::EC2MissingY)?
-                        .try_into()?;
+                    Some(CborValue(Value::Integer(i2))),
+                    Some(CborValue(Value::Integer(crv_id))),
+                    Some(CborValue(Value::Bytes(x))),
+                ) if i2.into() == 2 => {
+                    let crv: i128 = crv_id.into();
+                    let crv = match crv {
+                        1 => EC2Curve::P256,
+                        2 => EC2Curve::P384,
+                        3 => EC2Curve::P521,
+                        8 => EC2Curve::P256K,
+                        _ => return Err(Error::InvalidCoseKey),
+                    };
+                    let y: Value = map
+                        .remove(&Value::Integer((-3).into()).into())
+                        .map(|v| v.into())
+                        .ok_or(Error::EC2MissingY)?;
+                    let y = match y {
+                        Value::Bytes(v) => EC2Y::Value(v),
+                        Value::Bool(b) => EC2Y::SignBit(b),
+                        _ => return Err(Error::InvalidCoseKey),
+                    };
                     Ok(Self::EC2 { crv, x, y })
                 }
                 (
-                    Some(CborValue::Integer(1)),
-                    Some(CborValue::Integer(crv_id)),
-                    Some(CborValue::Bytes(x)),
-                ) => {
-                    let crv = crv_id.try_into()?;
+                    Some(CborValue(Value::Integer(i1))),
+                    Some(CborValue(Value::Integer(crv_id))),
+                    Some(CborValue(Value::Bytes(x))),
+                ) if i1.into() == 1 => {
+                    let crv = match crv_id.into() {
+                        4 => OKPCurve::X25519,
+                        5 => OKPCurve::X448,
+                        6 => OKPCurve::Ed25519,
+                        7 => OKPCurve::Ed448,
+                        _ => return Err(Error::InvalidCoseKey),
+                    };
                     Ok(Self::OKP { crv, x })
                 }
                 _ => Err(Error::UnsupportedKeyType),
@@ -249,9 +309,9 @@ impl TryFrom<CborValue> for EC2Y {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        match v {
-            CborValue::Bytes(s) => Ok(EC2Y::Value(s)),
-            CborValue::Bool(b) => Ok(EC2Y::SignBit(b)),
+        match v.clone().into() {
+            Value::Bytes(s) => Ok(EC2Y::Value(s)),
+            Value::Bool(b) => Ok(EC2Y::SignBit(b)),
             _ => Err(Error::InvalidTypeY(v)),
         }
     }
@@ -260,7 +320,7 @@ impl TryFrom<CborValue> for EC2Y {
 impl From<EC2Curve> for CborValue {
     fn from(crv: EC2Curve) -> CborValue {
         match crv {
-            EC2Curve::P256 => CborValue::Integer(1),
+            EC2Curve::P256 => ciborium::Value::Integer(1.into()).into(),
             EC2Curve::P384 => CborValue::Integer(2),
             EC2Curve::P521 => CborValue::Integer(3),
             EC2Curve::P256K => CborValue::Integer(8),
@@ -447,5 +507,18 @@ mod test {
             key_bytes,
             "cbor encoding roundtrip failed"
         );
+    }
+
+    #[test]
+    fn cose_key() {
+        let key = CoseKey::EC2 {
+            crv: EC2Curve::P256,
+            x: vec![0x01, 0x02, 0x03],
+            y: EC2Y::Value(vec![0x04, 0x05, 0x06]),
+        };
+        let cbor = serde_cbor::to_vec(&key).unwrap();
+        println!("{:?}", hex::encode(cbor));
+        let key2: CoseKey = serde_cbor::from_slice(&cbor).unwrap();
+        assert_eq!(key, key2);
     }
 }

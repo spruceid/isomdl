@@ -13,6 +13,7 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
+use crate::cose::CborValue;
 use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
@@ -26,7 +27,6 @@ use crate::definitions::{
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;

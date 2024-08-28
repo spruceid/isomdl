@@ -12,11 +12,11 @@
 
 use std::collections::HashMap;
 
+use crate::cose::CborValue;
 use ciborium::Value;
 use coset::AsCborValue;
 use isomdl_macros::FieldsNames;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 
 use crate::cose;
 use crate::cose::sign1::CoseSign1;

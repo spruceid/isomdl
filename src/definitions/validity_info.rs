@@ -27,11 +27,11 @@
 //! - [std::collections::BTreeMap]: Provides the [BTreeMap] type for storing key-value pairs in a sorted order.
 //! - [time]: Provides date and time manipulation functionality.
 //! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
+use crate::cose::CborValue;
 use serde::{
     ser::{Error as SerError, Serializer},
     Deserialize, Serialize,
 };
-use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
 use time::{
     error::Format as FormatError, error::Parse as ParseError,
@@ -101,7 +101,7 @@ impl TryFrom<ValidityInfo> for CborValue {
             insert_date!(map, expected_update, "expectedUpdate");
         }
 
-        Ok(CborValue::Map(map))
+        Ok(ciborium::Value::Map(map))
     }
 }
 

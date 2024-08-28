@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashSet};
 
+use crate::cose::CborValue;
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;
 use coset::{iana, Label};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 

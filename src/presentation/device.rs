@@ -1,5 +1,6 @@
 use crate::cose::mac0::PreparedCoseMac0;
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::cose::CborValue;
 use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::helpers::b_tree_map_string_cbor::BTreeMapCbor;
 use crate::definitions::helpers::string_cbor::CborString;
@@ -25,7 +26,6 @@ use crate::{
 use coset::{CoseMac0Builder, CoseSign1Builder};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;

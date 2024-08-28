@@ -1,9 +1,10 @@
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
-use std::collections::BTreeMap;
-
+use crate::cose::CborValue;
 use crate::definitions::device_engagement::error::Error;
+use anyhow::Result;
+use ciborium::Value;
+use coset::AsCborValue;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// The maximum length of the NFC command, as specified in ISO_18013-5 2021 Section 8.3.3.1.2
 /// Values of this type must lie between 255 and 65,535 inclusive, as specified in Note 2.
@@ -22,18 +23,41 @@ pub struct NfcOptions {
     max_len_response_data_field: ResponseDataLength,
 }
 
+impl coset::CborSerializable for NfcOptions {}
+impl AsCborValue for NfcOptions {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let cbor = CborValue::from(value);
+        Ok(cbor.try_into().map_err(|_| {
+            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "invalid bytes".to_string(),
+            ))
+        })?)
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let cbor: CborValue = self
+            .try_into()
+            .map_err(|_| coset::CoseError::EncodeFailed)?;
+        Ok(cbor.into())
+    }
+}
+
 impl TryFrom<CborValue> for NfcOptions {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        let map: BTreeMap<CborValue, CborValue> = match v {
-            CborValue::Map(map) => Ok(map),
+        let map: BTreeMap<CborValue, CborValue> = match v.into() {
+            ciborium::Value::Map(map) => Ok(map
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect::<BTreeMap<_, _>>()),
             _ => Err(Error::InvalidNfcOptions),
         }?;
 
         Ok(NfcOptions::default())
             .and_then(|nfc_opts| {
-                map.get(&CborValue::Integer(0))
+                map.get(&Value::Integer(0.into()).into())
                     .ok_or(Error::InvalidNfcOptions)
                     .and_then(CommandDataLength::try_from)
                     .map(|max_len_command_data_field| NfcOptions {
@@ -42,7 +66,7 @@ impl TryFrom<CborValue> for NfcOptions {
                     })
             })
             .and_then(|nfc_opts| {
-                map.get(&CborValue::Integer(1))
+                map.get(&Value::Integer(1.into()).into())
                     .ok_or(Error::InvalidNfcOptions)
                     .and_then(ResponseDataLength::try_from)
                     .map(|max_len_response_data_field| NfcOptions {
@@ -55,17 +79,17 @@ impl TryFrom<CborValue> for NfcOptions {
 
 impl From<NfcOptions> for CborValue {
     fn from(o: NfcOptions) -> CborValue {
-        let mut map = BTreeMap::<CborValue, CborValue>::new();
-        map.insert(
-            CborValue::Integer(0),
-            CborValue::from(o.max_len_command_data_field),
-        );
-        map.insert(
-            CborValue::Integer(1),
-            CborValue::from(o.max_len_response_data_field),
-        );
+        let mut map = vec![];
+        map.push((
+            Value::Integer(0.into()).into(),
+            Value::Integer(o.max_len_command_data_field.get().into()),
+        ));
+        map.push((
+            Value::Integer(1.into()).into(),
+            Value::Integer(o.max_len_response_data_field.get().into()),
+        ));
 
-        CborValue::Map(map)
+        Value::Map(map).into()
     }
 }
 
@@ -126,8 +150,14 @@ impl TryFrom<&CborValue> for CommandDataLength {
     type Error = Error;
 
     fn try_from(v: &CborValue) -> Result<Self, Error> {
+        let v: Value = v.clone().into();
         match v {
-            CborValue::Integer(int_val) => Self::try_from(*int_val),
+            Value::Integer(int_val) => {
+                let int_val: u64 = int_val
+                    .try_into()
+                    .map_err(|_| Error::InvalidNfcCommandDataLengthError)?;
+                Self::try_from(int_val)
+            }
             _ => Err(Error::InvalidNfcOptions),
         }
     }
@@ -135,7 +165,7 @@ impl TryFrom<&CborValue> for CommandDataLength {
 
 impl From<CommandDataLength> for CborValue {
     fn from(cdl: CommandDataLength) -> CborValue {
-        CborValue::Integer(cdl.get().into())
+        Value::Integer(cdl.get().into()).into()
     }
 }
 
@@ -194,8 +224,14 @@ impl TryFrom<&CborValue> for ResponseDataLength {
     type Error = Error;
 
     fn try_from(v: &CborValue) -> Result<Self, Error> {
+        let v: Value = v.clone().into();
         match v {
-            CborValue::Integer(int_val) => Self::try_from(*int_val),
+            Value::Integer(int_val) => {
+                let int_val: u64 = int_val
+                    .try_into()
+                    .map_err(|_| Error::InvalidNfcResponseDataLengthError)?;
+                Self::try_from(int_val)
+            }
             _ => Err(Error::InvalidNfcOptions),
         }
     }
@@ -203,7 +239,7 @@ impl TryFrom<&CborValue> for ResponseDataLength {
 
 impl From<ResponseDataLength> for CborValue {
     fn from(rdl: ResponseDataLength) -> CborValue {
-        CborValue::Integer(rdl.get().into())
+        ciborium::Value::Integer(rdl.get().into()).into()
     }
 }
 

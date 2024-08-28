@@ -41,9 +41,9 @@
 //! assert!(result.is_err());
 //! assert_eq!(result.unwrap_err(), Error::DoubleAuthorized("namespace1".to_string()));
 //! ```
+use crate::cose::CborValue;
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
 
 pub mod cose_key;

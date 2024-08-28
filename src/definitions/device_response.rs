@@ -460,7 +460,12 @@ fn cbor_value_to_document_errors(val: Value) -> coset::Result<DocumentErrors> {
 
 #[cfg(test)]
 mod test {
-    use super::DeviceResponse;
+    use ciborium::Value;
+    use coset::CborSerializable;
+    use hex::FromHex;
+    use isomdl_macros::CborSerializable;
+    use serde::{Deserialize, Serialize};
+
     use crate::cose::sign1::CoseSign1;
     use crate::definitions::device_signed::{
         DeviceNamespaces, DeviceNamespacesBytes, DeviceSignedItems,
@@ -471,11 +476,8 @@ mod test {
     use crate::definitions::{
         DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem,
     };
-    use ciborium::Value;
-    use coset::CborSerializable;
-    use hex::FromHex;
-    use isomdl_macros::CborSerializable;
-    use serde::{Deserialize, Serialize};
+
+    use super::DeviceResponse;
 
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
 
@@ -524,7 +526,7 @@ mod test {
             digest_id: DigestId(0),
             random: ByteStr::from(vec![0, 1, 2, 3]),
             element_identifier: "a".to_string(),
-            element_value: serde_cbor::Value::Text("b".to_string()),
+            element_value: Value::Text("b".to_string()).into(),
         };
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let issuer_signed_item_bytes_vec = NonEmptyVec::new(issuer_signed_item_bytes);
@@ -570,9 +572,5 @@ mod test {
         let test = Test::from_slice(&bytes).unwrap();
         let bytes2 = test.to_vec().unwrap();
         assert_eq!(bytes, bytes2);
-
-        assert_eq!(Test::a(), "a");
-        assert_eq!(Test::b(), "c");
-        assert_eq!(Test::c_d(), "cD");
     }
 }

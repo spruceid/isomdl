@@ -1,5 +1,6 @@
+use crate::cose::CborValue;
+use ciborium::Value;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
@@ -33,7 +34,7 @@ impl AsRef<[u8]> for ByteStr {
 
 impl From<ByteStr> for CborValue {
     fn from(ByteStr(bytes): ByteStr) -> CborValue {
-        CborValue::Bytes(bytes)
+        Value::Bytes(bytes).into()
     }
 }
 
@@ -41,7 +42,8 @@ impl TryFrom<CborValue> for ByteStr {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<ByteStr> {
-        if let CborValue::Bytes(bytes) = v {
+        let v2: Value = v.clone().into();
+        if let Value::Bytes(bytes) = v2 {
             Ok(ByteStr(bytes))
         } else {
             Err(Error::NotAByteString(v))
