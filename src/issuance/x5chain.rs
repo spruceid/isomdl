@@ -58,6 +58,7 @@
 //!
 //! The [X5Chain] struct also provides a [X5Chain::builder] method for creating a new [Builder] instance.
 
+use crate::cbor::CborValue;
 use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
 use std::{fs::File, io::Read};

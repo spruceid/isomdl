@@ -43,16 +43,21 @@
 //! ```
 
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use isomdl_macros::FieldsNames;
 
 pub mod cose_key;
+use crate::cbor::CborValue;
 pub use cose_key::CoseKey;
 pub use cose_key::EC2Curve;
 
 /// Represents information about a device key.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct DeviceKeyInfo {
     /// The device key.
     pub device_key: CoseKey,
@@ -66,8 +71,48 @@ pub struct DeviceKeyInfo {
     pub key_info: Option<BTreeMap<i128, CborValue>>,
 }
 
+impl CborSerializable for DeviceKeyInfo {}
+impl AsCborValue for DeviceKeyInfo {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map: BTreeMap::<CborValue, CborValue> = value.into_map().map_err(|_| coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+            None,
+            "DeviceKeyInfo is not a map".to_string(),
+        ))
+        )?
+            .into_iter()
+            .map(|(k, v)| {
+                Ok((k.try_into()?, v.try_into()?))
+            })
+            .collect()?;
+        Ok(
+            DeviceKeyInfo{
+                device_key: map.remove(&DeviceKeyInfo::device_key().into())
+                    .
+                    .try_into()?,
+                key_authorizations: None,
+                key_info: None,
+            }
+        )
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let mut map = BTreeMap::new();
+        map.insert(DeviceKeyInfo::device_key().into(), self.device_key.to_cbor_value());
+        if let Some(key_authorizations) = self.key_authorizations {
+            map.insert(DeviceKeyInfo::key_authorizations().into(), key_authorizations.to_cbor_value());
+        }
+        if let Some(key_info) = self.key_info {
+            map.insert(DeviceKeyInfo::key_info().into(), key_info.into_iter()
+                .map(|(k, v)| (CborValue::Integer(k as i128), v)
+                .collect::<BTreeMap<CborValue, CborValue>>());
+        }
+        Ok(Value::Map(map))
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct KeyAuthorizations {
     /// The namespaces associated with the key. This field is optional and will
     /// be skipped during serialization if it is [None].

@@ -1,8 +1,8 @@
+use crate::cbor::CborValue;
 use ciborium::Value;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "CborValue", into = "CborValue")]
 pub struct ByteStr(Vec<u8>);
 
 type Result<T, E = Error> = std::result::Result<T, E>;

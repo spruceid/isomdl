@@ -15,6 +15,7 @@ pub type ReaderAuth = CoseSign1;
 /// Represents a device request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct DeviceRequest {
     /// The version of the device request.
     pub version: String,
@@ -26,6 +27,7 @@ pub struct DeviceRequest {
 /// Represents a document request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct DocRequest {
     /// The items request for the document.
     pub items_request: ItemsRequestBytes,
@@ -38,6 +40,7 @@ pub struct DocRequest {
 /// Represents a request for items.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct ItemsRequest {
     /// The type of document.
     pub doc_type: DocType,

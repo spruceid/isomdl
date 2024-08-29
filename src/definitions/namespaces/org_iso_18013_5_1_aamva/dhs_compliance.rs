@@ -1,3 +1,4 @@
+use crate::cbor::CborValue;
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
@@ -27,7 +28,7 @@ impl DHSCompliance {
 }
 
 impl ToCbor for DHSCompliance {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> CborValue {
         self.to_str().to_string().into()
     }
 }

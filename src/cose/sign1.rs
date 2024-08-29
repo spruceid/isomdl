@@ -1,5 +1,6 @@
+use crate::cbor::CborValue;
 use crate::cose::{serialize, SignatureAlgorithm};
-use coset::cbor::Value;
+use ciborium::Value;
 use coset::cwt::ClaimsSet;
 use coset::{
     iana, sig_structure_data, AsCborValue, CborSerializable, CoseError, RegisteredLabelWithPrivate,
@@ -296,15 +297,15 @@ impl<'de> Deserialize<'de> for CoseSign1 {
         } else {
             Ok(CoseSign1 {
                 tagged: false,
-                inner: coset::CoseSign1::from_cbor_value(value)
+                inner: coset::CoseSign1::from_cbor_value(value.into())
                     .map_err(serde::de::Error::custom)?,
             })
         }
     }
 }
 
-impl coset::CborSerializable for CoseSign1 {}
-impl coset::TaggedCborSerializable for CoseSign1 {
+impl CborSerializable for CoseSign1 {}
+impl TaggedCborSerializable for CoseSign1 {
     const TAG: u64 = iana::CborTag::CoseSign1 as u64;
 }
 
@@ -312,9 +313,10 @@ impl AsCborValue for CoseSign1 {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
         if let Value::Tag(tag, value) = value {
             if tag != iana::CborTag::CoseSign1 as u64 {
-                return Err(coset::CoseError::DecodeFailed(
-                    ciborium::de::Error::Semantic(None, "unexpected tag".to_string()),
-                ));
+                return Err(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "unexpected tag".to_string(),
+                )));
             }
             Ok(CoseSign1 {
                 tagged: true,

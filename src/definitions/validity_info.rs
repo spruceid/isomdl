@@ -28,23 +28,66 @@
 //! - [time]: Provides date and time manipulation functionality.
 //! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
 
+use crate::cbor::CborValue;
+use ciborium::Value;
+use serde::de::Error as SerdeError;
 use serde::{
     ser::{Error as SerError, Serializer},
-    Deserialize, Serialize,
+    Deserialize, Deserializer, Serialize,
 };
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 use time::{
     error::Format as FormatError, error::Parse as ParseError,
     format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset,
 };
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(try_from = "CborValue")]
+#[derive(Clone, Debug)]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct ValidityInfo {
+    /// Deserialize [CoseSign1] by first deserializing the [Value] and then using [coset::CoseSign1::from_cbor_value].
     pub signed: OffsetDateTime,
     pub valid_from: OffsetDateTime,
     pub valid_until: OffsetDateTime,
     pub expected_update: Option<OffsetDateTime>,
+}
+
+impl<'de> Deserialize<'de> for ValidityInfo {
+    fn deserialize<D>(deserializer: D) -> crate::cose::sign1::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        macro_rules! extract_date {
+            ($map:ident, $name:literal) => {{
+                let key = CborValue::Text(String::from($name));
+                $map.remove(&key)
+                    .ok_or(Error::MissingField(key))
+                    .and_then(cbor_to_datetime)
+                    .map_err(|_| D::Error::custom("cannot deserialize"))?
+            }};
+        }
+
+        let value = Value::deserialize(deserializer)?;
+        let value: CborValue = value.into();
+        // todo: use mar_err
+        let mut map = value.into_map().expect("not a map");
+        let signed = extract_date!(map, "signed");
+        let valid_from = extract_date!(map, "validFrom");
+        let valid_until = extract_date!(map, "validUntil");
+
+        let expected_update_key = CborValue::Text(String::from("expectedUpdate"));
+        let expected_update = map
+            .remove(&expected_update_key)
+            .map(cbor_to_datetime)
+            .transpose()
+            .map_err(|_| D::Error::custom("cannot deserialize"))?;
+        Ok(ValidityInfo {
+            signed,
+            valid_from,
+            valid_until,
+            expected_update,
+        })
+    }
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -101,7 +144,7 @@ impl TryFrom<ValidityInfo> for CborValue {
             insert_date!(map, expected_update, "expectedUpdate");
         }
 
-        Ok(ciborium::Value::Map(map))
+        Ok(CborValue::Map(map))
     }
 }
 

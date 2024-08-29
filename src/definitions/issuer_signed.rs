@@ -12,11 +12,7 @@
 
 use std::collections::HashMap;
 
-use ciborium::Value;
-use coset::AsCborValue;
-use isomdl_macros::FieldsNames;
-use serde::{Deserialize, Serialize};
-
+use crate::cbor::CborValue;
 use crate::cose;
 use crate::cose::sign1::CoseSign1;
 use crate::definitions::helpers::string_cbor::CborString;
@@ -24,6 +20,10 @@ use crate::definitions::{
     helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
     DigestId,
 };
+use ciborium::Value;
+use coset::AsCborValue;
+use isomdl_macros::FieldsNames;
+use serde::{Deserialize, Serialize};
 
 /// Represents an issuer-signed object.
 ///
@@ -32,6 +32,7 @@ use crate::definitions::{
 /// [IssuerSigned::issuer_auth] field is a [CoseSign1] object that represents the issuer authentication.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct IssuerSigned {
     #[serde(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
     pub namespaces: Option<IssuerNamespaces>,
@@ -44,6 +45,7 @@ pub type IssuerSignedItemBytes = Tag24<IssuerSignedItem>;
 /// Represents an item signed by the issuer.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct IssuerSignedItem {
     /// The ID of the digest used for signing.
     #[serde(rename = "digestID")]
@@ -113,7 +115,7 @@ impl AsCborValue for IssuerSignedItem {
             element_value: if let Some(element_value) =
                 fields.remove(IssuerSignedItem::element_value())
             {
-                cose::ciborium_value_into_cbor_value(element_value)?
+                element_value.into()
             } else {
                 return Err(coset::CoseError::UnexpectedItem(
                     "value",
@@ -139,7 +141,7 @@ impl AsCborValue for IssuerSignedItem {
             ),
             (
                 Value::Text(IssuerSignedItem::element_value().to_string()),
-                cose::cbor_value_into_ciborium_value(self.element_value)?,
+                self.element_value.into(),
             ),
         ]))
     }
@@ -204,15 +206,15 @@ impl AsCborValue for IssuerSigned {
 
 #[cfg(test)]
 mod test {
-    use ciborium::Value;
-    use coset::CborSerializable;
-    use hex::FromHex;
-
+    use crate::cbor::CborValue;
     use crate::cose::sign1::CoseSign1;
     use crate::definitions::device_signed::{DeviceNamespaces, DeviceSignedItems};
     use crate::definitions::helpers::string_cbor::CborString;
     use crate::definitions::helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24};
     use crate::definitions::{DigestId, IssuerSignedItem};
+    use ciborium::Value;
+    use coset::CborSerializable;
+    use hex::FromHex;
 
     use super::{IssuerNamespaces, IssuerSigned, IssuerSignedItemBytes};
 
@@ -259,7 +261,7 @@ mod test {
             digest_id: DigestId(0),
             random: ByteStr::from(vec![0, 1, 2, 3]),
             element_identifier: "a".to_string(),
-            element_value: serde_cbor::Value::Text("b".to_string()),
+            element_value: CborValue::Text("b".to_string()),
         };
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let issuer_signed_item_bytes_vec = NonEmptyVec::new(issuer_signed_item_bytes);
@@ -283,7 +285,7 @@ mod test {
             digest_id: DigestId(0),
             random: ByteStr::from(vec![0, 1, 2, 3]),
             element_identifier: "a".to_string(),
-            element_value: serde_cbor::Value::Text("b".to_string()),
+            element_value: CborValue::Text("b".to_string()),
         };
         let bytes = issuer_signed_item.to_vec().unwrap();
         println!("{:?}", hex::encode(&bytes));
@@ -298,7 +300,7 @@ mod test {
             digest_id: DigestId(0),
             random: ByteStr::from(vec![0, 1, 2, 3]),
             element_identifier: "a".to_string(),
-            element_value: serde_cbor::Value::Text("b".to_string()),
+            element_value: CborValue::Text("b".to_string()),
         };
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let bytes = issuer_signed_item_bytes.to_vec().unwrap();
@@ -313,7 +315,7 @@ mod test {
             digest_id: DigestId(0),
             random: ByteStr::from(vec![0, 1, 2, 3]),
             element_identifier: "a".to_string(),
-            element_value: serde_cbor::Value::Text("b".to_string()),
+            element_value: CborValue::Text("b".to_string()),
         };
         let vec = NonEmptyMap::new(CborString::from("a"), issuer_signed_item);
         let bytes = vec.to_vec().unwrap();
@@ -328,7 +330,7 @@ mod test {
             digest_id: DigestId(0),
             random: ByteStr::from(vec![0, 1, 2, 3]),
             element_identifier: "a".to_string(),
-            element_value: serde_cbor::Value::Text("b".to_string()),
+            element_value: CborValue::Text("b".to_string()),
         };
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let issuer_signed_item_bytes_vec = NonEmptyVec::new(issuer_signed_item_bytes);

@@ -25,6 +25,7 @@ use crate::definitions::{
 /// Represents a device-signed structure.
 #[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct DeviceSigned {
     #[serde(rename = "nameSpaces")]
     /// A [DeviceNamespacesBytes] struct representing the namespaces.
@@ -44,6 +45,7 @@ pub type DeviceSignedItems = NonEmptyMap<CborString, Value>;
 /// The [CoseSign1] object represents a `COSE (CBOR Object Signing and Encryption) signature.
 #[derive(Clone, Debug, FieldsNames, Deserialize, Serialize, AsRefStr)]
 #[serde(untagged)]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub enum DeviceAuth {
     #[serde(rename_all = "camelCase")]
     Signature { device_signature: CoseSign1 },
@@ -53,6 +55,7 @@ pub enum DeviceAuth {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(untagged)]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub enum DeviceAuthType {
     #[serde(rename_all = "camelCase")]
     Sign1,

@@ -1,3 +1,4 @@
+use crate::cbor::CborValue;
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
@@ -28,7 +29,7 @@ impl From<Sex> for u8 {
 }
 
 impl ToCbor for Sex {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> CborValue {
         u8::from(self).into()
     }
 }

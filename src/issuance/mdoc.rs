@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 
+use crate::cbor::CborValue;
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
 use crate::cose::SignatureAlgorithm;
 use crate::definitions::helpers::string_cbor::CborString;
@@ -24,6 +25,7 @@ pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 /// A signed mdoc.
 pub struct Mdoc {
     pub doc_type: String,

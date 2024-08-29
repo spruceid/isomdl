@@ -290,8 +290,8 @@ impl<'de> Deserialize<'de> for CoseMac0 {
     }
 }
 
-impl coset::CborSerializable for CoseMac0 {}
-impl coset::TaggedCborSerializable for CoseMac0 {
+impl CborSerializable for CoseMac0 {}
+impl TaggedCborSerializable for CoseMac0 {
     const TAG: u64 = iana::CborTag::CoseMac0 as u64;
 }
 

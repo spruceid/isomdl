@@ -86,7 +86,6 @@ fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenSt
 
     let output = quote! {
         mod #mod_name {
-            use serde_cbor::Value;
             use super::*;
             use #isomdl_path::definitions::traits::{ToCbor, ToNamespaceMap};
             impl ToNamespaceMap for #ident {
@@ -102,9 +101,9 @@ fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenSt
                 fn to_cbor(self) -> Value {
                     let map = self.to_ns_map()
                         .into_iter()
-                        .map(|(k, v)| (Value::Text(k), v))
+                        .map(|(k, v)| (CborValue::Text(k), v))
                         .collect();
-                    Value::Map(map)
+                    CborValue::Map(map)
                 }
             }
         }
@@ -140,7 +139,6 @@ fn unnamed_fields(isomdl_path: Ident, ident: Ident, mut input: FieldsUnnamed) ->
         mod #mod_name {
             use super::*;
             use #isomdl_path::definitions::traits::{ToCbor, ToCborError};
-            use serde_cbor::Value;
             impl ToCbor for #ident {
                 fn to_cbor(self) -> Value {
                     <#field_type as ToCbor>::to_cbor(self)

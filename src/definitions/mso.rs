@@ -31,20 +31,60 @@
 //! - [DigestIds] type is a [BTreeMap] that maps [DigestId] to [ByteStr].
 //! - [DigestAlgorithm] enum represents different digest algorithms, such as `SHA-256, `SHA-384,
 //!   and `SHA-512`.
+use crate::cbor::CborValue;
 use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable};
+use isomdl_macros::FieldsNames;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub enum Error {
+    Deserialize(&'static str),
+}
+
 /// DigestId is a unsigned integer between `0` and `(2^31 - 1)` inclusive.
-/// Therefore the most straightforward way to represent it is as a i32 that is enforced to be
+/// Therefore, the most straightforward way to represent it is as a i32 that is enforced to be
 /// positive.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, Ord, PartialEq, PartialOrd, Copy, Hash)]
 pub struct DigestId(pub(crate) i32);
 pub type DigestIds = BTreeMap<DigestId, ByteStr>;
 
+impl From<DigestIds> for CborValue {
+    fn from(value: DigestIds) -> Self {
+        CborValue::Map(
+            value
+                .into_iter()
+                .map(|(k, v)| (CborValue::Integer(k.0 as i128), v.into()))
+                .collect::<BTreeMap<CborValue, CborValue>>(),
+        )
+    }
+}
+
+impl TryFrom<CborValue> for DigestIds {
+    type Error = Error;
+
+    fn try_from(value: CborValue) -> Result<Self, Self::Error> {
+        Ok(value
+            .into_map()
+            .map_err(|_| Error::Deserialize("not an map"))?
+            .into_iter()
+            .map(|(k, v)| {
+                let k = k
+                    .into_integer()
+                    .map_err(|_| Error::Deserialize("cannot deserialize key"))?;
+                let v = ByteStr::try_from(v)
+                    .map_err(|_| Error::Deserialize("cannot deserialize value"))?;
+                Ok((DigestId(k as i32), v))
+            })
+            .collect::<Result<BTreeMap<DigestId, ByteStr>, Error>>()?)
+    }
+}
+
 /// Represents an [Mso] object.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct Mso {
     /// The version of the Mso object.
     pub version: String,
@@ -63,6 +103,35 @@ pub struct Mso {
 
     /// Information about the validity of the Mso object.
     pub validity_info: ValidityInfo,
+}
+
+impl CborSerializable for Mso {}
+impl AsCborValue for Mso {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        todo!()
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let mut map = BTreeMap::new();
+        map.insert(Mso::version().into(), self.version.into());
+        map.insert(
+            Mso::digest_algorithm().into(),
+            match self.digest_algorithm {
+                DigestAlgorithm::SHA256 => 1.into(),
+                DigestAlgorithm::SHA384 => 2.into(),
+                DigestAlgorithm::SHA512 => 3.into(),
+            },
+        );
+        map.insert(
+            Mso::value_digests().into(),
+            CborValue::Map(
+                self.value_digests
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into()))
+                    .collect(),
+            ),
+        );
+    }
 }
 
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]

@@ -5,24 +5,25 @@
 //!
 //! The module also provides implementations for conversions between [DeviceEngagement] and [CborValue], as well as other utility functions.
 
-use crate::definitions::helpers::Tag24;
-use crate::definitions::helpers::{ByteStr, NonEmptyVec};
-use crate::definitions::CoseKey;
+use std::{collections::BTreeMap, vec};
+
 use anyhow::Result;
 use ciborium::Value;
 use coset::AsCborValue;
 use isomdl_macros::FieldsNames;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, vec};
 use uuid::Uuid;
 
-pub mod error;
 pub use error::Error;
-
-pub mod nfc_options;
-use crate::cbor::CborValue;
 pub use nfc_options::NfcOptions;
 
+use crate::cbor::CborValue;
+use crate::definitions::helpers::Tag24;
+use crate::definitions::helpers::{ByteStr, NonEmptyVec};
+use crate::definitions::CoseKey;
+
+pub mod error;
+pub mod nfc_options;
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
 
@@ -120,6 +121,7 @@ pub struct Security(pub u64, pub EDeviceKeyBytes);
 /// Represents the server retrieval methods for device engagement.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct ServerRetrievalMethods {
     /// The `web API retrieval method. This field is optional and will be skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -636,9 +638,7 @@ impl TryFrom<CborValue> for WifiOptions {
         }
 
         let map: BTreeMap<CborValue, CborValue> = match v {
-            CborValue(ciborium::Value::Map(map)) => {
-                Ok(map.into_iter().map(|(k, v)| (k.into(), v.into())).collect())
-            }
+            CborValue::Map(map) => Ok(map),
             _ => Err(Error::InvalidWifiOptions),
         }?;
 
@@ -720,12 +720,7 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
     type Error = Error;
 
     fn try_from(value: CborValue) -> std::result::Result<Self, Self::Error> {
-        let mut map = value
-            .into_map()
-            .map_err(|_| Error::Malformed)?
-            .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
-            .collect::<BTreeMap<CborValue, CborValue>>();
+        let mut map = value.into_map().map_err(|_| Error::Malformed)?;
         let mut web_api = map
             .remove(&"webApi".into())
             .map(|v| v.into_array())
@@ -734,25 +729,36 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
+        let mut oidc = map
+            .remove(&"oidc".into())
+            .map(|v| v.into_array())
+            .transpose()
+            .map_err(|_| Error::Malformed)?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         Ok(ServerRetrievalMethods {
             web_api: Some((
-                web_api.remove(0).clone().into(),
-                web_api.remove(0).into(),
-                web_api.remove(0).into(),
+                web_api.remove(0).try_into().map_err(|_| Error::Malformed)?,
+                web_api.remove(0).try_into().map_err(|_| Error::Malformed)?,
+                web_api.remove(0).try_into().map_err(|_| Error::Malformed)?,
             )),
-            oidc: map
-                .get(&"oidc".into())
-                .map(|arr| (arr[0].into(), arr[0].into(), arr[0].into()))
-                .transpose()?,
+            oidc: Some((
+                oidc.remove(0).try_into().map_err(|_| Error::Malformed)?,
+                oidc.remove(0).try_into().map_err(|_| Error::Malformed)?,
+                oidc.remove(0).try_into().map_err(|_| Error::Malformed)?,
+            )),
         })
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::definitions::session::create_p256_ephemeral_keys;
     use uuid::Uuid;
+
+    use crate::definitions::session::create_p256_ephemeral_keys;
+
+    use super::*;
 
     #[test]
     fn device_engagement_cbor_roundtrip() {

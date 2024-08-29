@@ -25,7 +25,9 @@ use crate::macros::{FromJson, ToCbor};
 
 /// `org.iso.18013.5.1.aamva` namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.2).
-#[derive(Debug, Clone, FromJson, ToCbor)]
+// todo: use ToCbor
+// #[derive(Debug, Clone, FromJson, ToCbor)]
+#[derive(Debug, Clone, FromJson)]
 #[isomdl(crate = "crate")]
 pub struct OrgIso1801351Aamva {
     pub domestic_driving_privileges: DomesticDrivingPrivileges,
@@ -34,25 +36,25 @@ pub struct OrgIso1801351Aamva {
     pub veteran: Option<Present>,
     pub family_name_truncation: NameTruncation,
     pub given_name_truncation: NameTruncation,
-    #[isomdl(rename = "aka_family_name.v2")]
+    #[isomdl(rename_field = "aka_family_name.v2")]
     pub aka_family_name_v2: Option<Latin1>,
-    #[isomdl(rename = "aka_given_name.v2")]
+    #[isomdl(rename_field = "aka_given_name.v2")]
     pub aka_given_name_v2: Option<Latin1>,
     pub aka_suffix: Option<NameSuffix>,
     pub weight_range: Option<WeightRange>,
     pub race_ethnicity: Option<RaceAndEthnicity>,
-    #[isomdl(rename = "EDL_credential")]
+    #[isomdl(rename_field = "EDL_credential")]
     pub edl_credential: Option<EDLIndicator>,
     pub sex: Sex,
-    #[isomdl(rename = "DHS_compliance")]
+    #[isomdl(rename_field = "DHS_compliance")]
     pub dhs_compliance: DHSCompliance,
     pub resident_county: Option<CountyCode>,
     pub hazmat_endorsement_expiration_date: Option<FullDate>,
-    #[isomdl(rename = "CDL_indicator")]
+    #[isomdl(rename_field = "CDL_indicator")]
     pub cdl_indicator: Option<Present>,
-    #[isomdl(rename = "DHS_compliance_text")]
+    #[isomdl(rename_field = "DHS_compliance_text")]
     pub dhs_compliance_text: Option<String>,
-    #[isomdl(rename = "DHS_temporary_lawful_status")]
+    #[isomdl(rename_field = "DHS_temporary_lawful_status")]
     pub dhs_temporary_lawful_status: Option<Present>,
 }
 

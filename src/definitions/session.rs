@@ -11,6 +11,8 @@ use crate::definitions::device_key::EC2Curve;
 use crate::definitions::helpers::bytestr::ByteStr;
 use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
 
+use crate::cbor::CborValue;
+use crate::cose::sign1::CoseSign1;
 use aes::cipher::{generic_array::GenericArray, typenum::U32};
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -18,6 +20,8 @@ use aes_gcm::{
     Nonce, // Or `Aes128Gcm`
 };
 use anyhow::Result;
+use ciborium::Value;
+use coset::{iana, AsCborValue, CborSerializable, TaggedCborSerializable};
 use ecdsa::EncodedPoint;
 use elliptic_curve::{
     ecdh::EphemeralSecret, ecdh::SharedSecret, generic_array::sequence::Concat,
@@ -39,6 +43,7 @@ pub type NfcHandover = (ByteStr, Option<ByteStr>);
 /// Represents the establishment of a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[isomdl_macros::rename_field_all("camelCase")]
 pub struct SessionEstablishment {
     /// The EReader key used for session establishment.
     pub e_reader_key: EReaderKeyBytes,
@@ -102,6 +107,21 @@ pub struct SessionTranscript180135(
     pub Handover,
 );
 
+impl CborSerializable for SessionTranscript180135 {}
+impl AsCborValue for SessionTranscript180135 {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        todo!()
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Array(vec![
+            self.0.to_cbor_value()?,
+            self.1.to_cbor_value()?,
+            self.2.to_cbor_value()?,
+        ]))
+    }
+}
+
 impl SessionTranscript for SessionTranscript180135 {}
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -122,6 +142,31 @@ pub enum Handover {
     QR,
     NFC(ByteStr, Option<ByteStr>),
     OID4VP(String, String),
+}
+
+impl CborSerializable for Handover {}
+impl AsCborValue for Handover {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        todo!()
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(match self {
+            Handover::QR => CborValue::Null.into(),
+            Handover::NFC(b, b2) => {
+                let mut arr = vec![b.into()];
+                if let Some(b2) = b2 {
+                    arr.push(b2.into());
+                }
+                CborValue::Array(arr).into()
+            }
+            Handover::OID4VP(s, s2) => {
+                let s: CborValue = s.into();
+                let s2: CborValue = s2.into();
+                CborValue::Array(vec![s.into(), s2.into()]).into()
+            }
+        })
+    }
 }
 
 pub enum EphemeralSecrets {

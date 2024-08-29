@@ -1,3 +1,4 @@
+use crate::cbor::CborValue;
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use anyhow::anyhow;
 use serde_cbor::Value as Cbor;
@@ -18,7 +19,7 @@ impl FromJson for Present {
 }
 
 impl ToCbor for Present {
-    fn to_cbor(self) -> Cbor {
-        Cbor::Integer(1)
+    fn to_cbor(self) -> CborValue {
+        CborValue::Integer(1)
     }
 }
