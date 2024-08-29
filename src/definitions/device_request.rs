@@ -1,3 +1,4 @@
+//! This module contains the definitions for the device request functionality.
 use crate::cose::sign1::CoseSign1;
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec, Tag24};
 use serde::{Deserialize, Serialize};
@@ -12,27 +13,42 @@ pub type DataElements = NonEmptyMap<DataElementIdentifier, IntentToRetain>;
 pub type Namespaces = NonEmptyMap<NameSpace, DataElements>;
 pub type ReaderAuth = CoseSign1;
 
+/// Represents a device request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+
 pub struct DeviceRequest {
+    /// The version of the device request.
     pub version: String,
+
+    /// A non-empty vector of document requests.
     pub doc_requests: NonEmptyVec<DocRequest>,
 }
 
+/// Represents a document request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocRequest {
+    /// The items request for the document.
     pub items_request: ItemsRequestBytes,
+
+    /// The reader authentication, if provided.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reader_auth: Option<ReaderAuth>,
 }
 
+/// Represents a request for items.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemsRequest {
+    /// The type of document.
     pub doc_type: DocType,
+
+    /// The namespaces associated with the request.
     #[serde(rename = "nameSpaces")]
     pub namespaces: Namespaces,
+
+    /// Additional information for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_info: Option<BTreeMap<String, serde_cbor::Value>>,
 }
