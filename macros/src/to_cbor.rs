@@ -89,7 +89,7 @@ fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenSt
             use super::*;
             use #isomdl_path::definitions::traits::{ToCbor, ToNamespaceMap};
             impl ToNamespaceMap for #ident {
-                fn to_ns_map(self) -> std::collections::BTreeMap<String, Value> {
+                fn to_ns_map(self) -> std::collections::BTreeMap<String, CborValue> {
                     let mut map = std::collections::BTreeMap::default();
 
                     #conversions
@@ -98,7 +98,7 @@ fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenSt
                 }
             }
             impl ToCbor for #ident {
-                fn to_cbor(self) -> Value {
+                fn to_cbor(self) -> CborValue {
                     let map = self.to_ns_map()
                         .into_iter()
                         .map(|(k, v)| (CborValue::Text(k), v))

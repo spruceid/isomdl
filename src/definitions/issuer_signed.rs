@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 
 use crate::cbor::CborValue;
-use crate::cose;
 use crate::cose::sign1::CoseSign1;
 use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::{
@@ -32,7 +31,7 @@ use serde::{Deserialize, Serialize};
 /// [IssuerSigned::issuer_auth] field is a [CoseSign1] object that represents the issuer authentication.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct IssuerSigned {
     #[serde(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
     pub namespaces: Option<IssuerNamespaces>,
@@ -45,7 +44,7 @@ pub type IssuerSignedItemBytes = Tag24<IssuerSignedItem>;
 /// Represents an item signed by the issuer.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct IssuerSignedItem {
     /// The ID of the digest used for signing.
     #[serde(rename = "digestID")]

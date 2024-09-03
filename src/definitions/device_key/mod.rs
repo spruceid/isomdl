@@ -42,22 +42,25 @@
 //! assert_eq!(result.unwrap_err(), Error::DoubleAuthorized("namespace1".to_string()));
 //! ```
 
-use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
+use std::collections::BTreeMap;
+
 use ciborium::Value;
 use coset::{AsCborValue, CborSerializable};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use isomdl_macros::FieldsNames;
+use serde::{Deserialize, Serialize};
 
-pub mod cose_key;
-use crate::cbor::CborValue;
 pub use cose_key::CoseKey;
 pub use cose_key::EC2Curve;
 
+use crate::cbor::CborValue;
+use crate::definitions::helpers::string_cbor::CborString;
+use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
+
+pub mod cose_key;
 /// Represents information about a device key.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct DeviceKeyInfo {
     /// The device key.
     pub device_key: CoseKey,
@@ -68,68 +71,130 @@ pub struct DeviceKeyInfo {
 
     /// Optional key information.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_info: Option<BTreeMap<i128, CborValue>>,
+    pub key_info: Option<BTreeMap<CborValue, CborValue>>,
 }
 
 impl CborSerializable for DeviceKeyInfo {}
 impl AsCborValue for DeviceKeyInfo {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let mut map: BTreeMap::<CborValue, CborValue> = value.into_map().map_err(|_| coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-            None,
-            "DeviceKeyInfo is not a map".to_string(),
-        ))
-        )?
+        let mut map: BTreeMap<CborValue, CborValue> = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "DeviceKeyInfo is not a map".to_string(),
+                ))
+            })?
             .into_iter()
-            .map(|(k, v)| {
-                Ok((k.try_into()?, v.try_into()?))
-            })
-            .collect()?;
-        Ok(
-            DeviceKeyInfo{
-                device_key: map.remove(&DeviceKeyInfo::device_key().into())
-                    .
-                    .try_into()?,
-                key_authorizations: None,
-                key_info: None,
-            }
-        )
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
+        Ok(DeviceKeyInfo {
+            device_key: map
+                .remove(&DeviceKeyInfo::device_key().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "device_key is missing".to_string()),
+                ))?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "device_key is not a CoseKey".to_string(),
+                    ))
+                })?,
+            key_authorizations: None,
+            key_info: None,
+        })
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
-        let mut map = BTreeMap::new();
-        map.insert(DeviceKeyInfo::device_key().into(), self.device_key.to_cbor_value());
+        let mut map = vec![];
+        map.push((
+            Value::Text(DeviceKeyInfo::device_key().to_string()),
+            self.device_key.to_cbor_value()?,
+        ));
         if let Some(key_authorizations) = self.key_authorizations {
-            map.insert(DeviceKeyInfo::key_authorizations().into(), key_authorizations.to_cbor_value());
+            map.push((
+                Value::Text(DeviceKeyInfo::key_authorizations().to_string()),
+                key_authorizations.to_cbor_value()?,
+            ));
         }
         if let Some(key_info) = self.key_info {
-            map.insert(DeviceKeyInfo::key_info().into(), key_info.into_iter()
-                .map(|(k, v)| (CborValue::Integer(k as i128), v)
-                .collect::<BTreeMap<CborValue, CborValue>>());
+            let key_info: NonEmptyMap<CborValue, CborValue> = key_info.into_iter().collect();
+            map.push((
+                Value::Text(DeviceKeyInfo::key_info().to_string()),
+                key_info.to_cbor_value()?,
+            ));
         }
         Ok(Value::Map(map))
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, FieldsNames, Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct KeyAuthorizations {
     /// The namespaces associated with the key. This field is optional and will
     /// be skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
-    pub namespaces: Option<NonEmptyVec<String>>,
+    #[isomdl(rename = "nameSpaces")]
+    pub namespaces: Option<NonEmptyVec<CborString>>,
 
     /// The data elements associated with the key. This field is optional and will
     /// be skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data_elements: Option<NonEmptyMap<String, NonEmptyVec<String>>>,
+    #[isomdl(skip_serializing_if = "Option::is_none")]
+    pub data_elements: Option<NonEmptyMap<CborString, NonEmptyVec<CborString>>>,
+}
+
+impl CborSerializable for KeyAuthorizations {}
+impl AsCborValue for KeyAuthorizations {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map: BTreeMap<CborValue, CborValue> = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "KeyAuthorizations is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(KeyAuthorizations {
+            namespaces: map
+                .remove(&KeyAuthorizations::namespaces().into())
+                .map(|v| NonEmptyVec::from_cbor_value(v.into()))
+                .transpose()?,
+            data_elements: map
+                .remove(&KeyAuthorizations::data_elements().into())
+                .map(|v| NonEmptyMap::from_cbor_value(v.into()))
+                .transpose()?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let mut map = vec![];
+        if let Some(namespaces) = self.namespaces {
+            map.push((
+                KeyAuthorizations::namespaces().into(),
+                namespaces.to_cbor_value()?,
+            ));
+        }
+        if let Some(data_elements) = self.data_elements {
+            map.push((
+                KeyAuthorizations::data_elements().into(),
+                data_elements.to_cbor_value()?,
+            ));
+        }
+        Ok(Value::Map(map))
+    }
 }
 
 impl KeyAuthorizations {
     /// If a namespace is present in authorized namespaces, then it cannot be present in
     /// authorized data elements.
     pub fn validate(&self) -> Result<(), Error> {
-        let authorized_data_elements: &NonEmptyMap<String, NonEmptyVec<String>>;
+        let authorized_data_elements: &NonEmptyMap<CborString, NonEmptyVec<CborString>>;
 
         if let Some(ds) = &self.data_elements {
             authorized_data_elements = ds;
@@ -139,9 +204,9 @@ impl KeyAuthorizations {
 
         if let Some(authorized_namespaces) = &self.namespaces {
             authorized_namespaces.iter().try_for_each(|namespace| {
-                authorized_data_elements
-                    .get(namespace)
-                    .map_or(Ok(()), |_| Err(Error::DoubleAuthorized(namespace.clone())))
+                authorized_data_elements.get(namespace).map_or(Ok(()), |_| {
+                    Err(Error::DoubleAuthorized(namespace.clone().into()))
+                })
             })
         } else {
             Ok(())
@@ -151,11 +216,11 @@ impl KeyAuthorizations {
     /// Determine whether the key is permitted to sign over the designated element.
     pub fn permitted(&self, namespace: &String, element_identifier: &String) -> bool {
         if let Some(namespaces) = self.namespaces.as_ref() {
-            return namespaces.contains(namespace);
+            return namespaces.contains(&namespace.into());
         }
         if let Some(namespaces) = self.data_elements.as_ref() {
-            if let Some(data_elements) = namespaces.get(namespace).as_ref() {
-                return data_elements.contains(element_identifier);
+            if let Some(data_elements) = namespaces.get(&namespace.into()).as_ref() {
+                return data_elements.contains(&element_identifier.into());
             }
         }
         false

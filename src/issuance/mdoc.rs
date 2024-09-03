@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;
-use coset::{iana, Label};
+use ciborium::Value;
+use coset::{iana, AsCborValue, CborSerializable, Label};
+use isomdl_macros::FieldsNames;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha384, Sha512};
@@ -23,15 +25,92 @@ use crate::{
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(FieldsNames, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 /// A signed mdoc.
 pub struct Mdoc {
     pub doc_type: String,
     pub mso: Mso,
     pub namespaces: IssuerNamespaces,
     pub issuer_auth: CoseSign1,
+}
+
+impl CborSerializable for Mdoc {}
+impl AsCborValue for Mdoc {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "Mdoc is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(Mdoc {
+            doc_type: map
+                .remove(&Mdoc::doc_type().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "doc_type is missing".to_string()),
+                ))?
+                .into_text()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "doc_type is not a string".to_string(),
+                    ))
+                })?,
+            mso: Mso::from_cbor_value(
+                map.remove(&Mdoc::mso().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "mso is missing".to_string()),
+                    ))?
+                    .into(),
+            )?,
+            namespaces: IssuerNamespaces::from_cbor_value(
+                map.remove(&Mdoc::namespaces().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "namespaces is missing".to_string()),
+                    ))?
+                    .into(),
+            )?,
+            issuer_auth: CoseSign1::from_cbor_value(
+                map.remove(&Mdoc::issuer_auth().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "issuer_auth is missing".to_string()),
+                    ))?
+                    .into(),
+            )?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(
+            vec![
+                (
+                    Value::Text(Mdoc::doc_type().to_string()),
+                    Value::Text(self.doc_type),
+                ),
+                (
+                    Value::Text(Mdoc::mso().to_string()),
+                    self.mso.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(Mdoc::namespaces().to_string()),
+                    self.namespaces.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(Mdoc::issuer_auth().to_string()),
+                    self.issuer_auth.to_cbor_value()?,
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +164,7 @@ impl Mdoc {
             validity_info,
         };
 
-        let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
+        let mso_bytes = serde_cbor::to_vec(&Tag24::new(mso.clone())?)?;
 
         let protected = coset::HeaderBuilder::new()
             .algorithm(signature_algorithm)
@@ -194,11 +273,10 @@ impl PreparedMdoc {
         } = self;
 
         let mut issuer_auth = prepared_sig.finalize(signature);
-        issuer_auth
-            .inner
-            .unprotected
-            .rest
-            .push((Label::Int(X5CHAIN_HEADER_LABEL as i64), x5chain.into_cbor()));
+        issuer_auth.inner.unprotected.rest.push((
+            Label::Int(X5CHAIN_HEADER_LABEL as i64),
+            x5chain.into_cbor().into(),
+        ));
 
         Mdoc {
             doc_type,

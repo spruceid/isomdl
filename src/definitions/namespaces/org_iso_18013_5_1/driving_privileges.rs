@@ -14,7 +14,7 @@ use crate::{
 use super::FullDate;
 
 #[derive(Debug, Error)]
-enum Error {
+pub enum Error {
     #[error("decode error: {0}")]
     Decode(&'static str),
 }

@@ -1,11 +1,14 @@
-use super::FullDate;
+use std::collections::BTreeMap;
+
+use isomdl_macros::FieldsNames;
+
 use crate::cbor::CborValue;
 use crate::{
     definitions::{helpers::NonEmptyVec, traits::ToCbor},
-    macros::{FromJson, ToCbor},
+    macros::FromJson,
 };
-use isomdl_macros::FieldsNames;
-use std::collections::BTreeMap;
+
+use super::FullDate;
 
 /// `domestic_driving_privileges` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.0).

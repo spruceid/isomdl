@@ -136,10 +136,10 @@ fn get_isomdl_attributes(attr: &Attribute) -> Option<syn::punctuated::IntoIter<N
 /// use serde::{Deserialize, Serialize};
 ///
 /// #[derive(CborSerializable, Serialize, Unserialize)]
-/// #[isomdl_macros::rename_field_all( "camelCase")]
+/// #[isomdl::rename_all( "camelCase")]
 /// struct MyStruct {
 ///     field_name: String,
-///     #[isomdl(rename_field = "field_name3")]
+///     #[isomdl(rename = "field_name3")]
 ///     field_name2: String,
 /// }
 ///
@@ -161,7 +161,7 @@ fn get_isomdl_attributes(attr: &Attribute) -> Option<syn::punctuated::IntoIter<N
 /// let bytes2 = b.to_vec().unwrap();
 /// assert_eq!(bytes, bytes2);
 /// ```
-#[proc_macro_derive(CborSerializable)]
+#[proc_macro_derive(CborSerializable, attributes(isomdl))]
 pub fn cbor_serializable_derive(input: TokenStream) -> TokenStream {
     cbor_serializable(input)
 }
@@ -176,29 +176,19 @@ pub fn cbor_serializable_derive(input: TokenStream) -> TokenStream {
 /// use serde::{Deserialize, Serialize};
 ///
 /// #[derive(FieldsNames, Serialize, Unserialize)]
-/// #[isomdl_macros::rename_field_all( "camelCase")]
+/// #[isomdl::rename_all( "camelCase")]
 /// struct MyStruct {
 ///     field_name: String,
-///     #[isomdl(rename_field = "field_name3")]
+///     #[isomdl(rename = "field_name3")]
 ///     field_name2: String,
 /// }
 ///
 /// assert!(MyStruct::field_name() == "fieldName");
 /// assert!(MyStruct::field_name2() == "field_name3");
 /// ```
-#[proc_macro_derive(FieldsNames, attributes(serde))]
+#[proc_macro_derive(FieldsNames, attributes(isomdl))]
 pub fn fields_names_derive(input: TokenStream) -> TokenStream {
     fields_names(input)
-}
-
-#[proc_macro_attribute]
-pub fn rename_field(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
-}
-
-#[proc_macro_attribute]
-pub fn rename_field_all(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
 }
 
 #[cfg(test)]
@@ -335,7 +325,7 @@ mod test {
         let input: DeriveInput = parse_str(
             r#"
             struct S {
-                #[isomdl(rename_field = "test")]
+                #[isomdl(rename = "test")]
                 field: String,
             }
         "#,

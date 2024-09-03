@@ -9,7 +9,6 @@ use digest::{Mac, MacError};
 use serde::{ser, Deserialize, Deserializer, Serialize};
 use sha2::Sha256;
 
-use crate::cose::serialize;
 use crate::cose::SignatureAlgorithm;
 
 /// Prepared `COSE_Mac0` for remote signing.
@@ -50,7 +49,7 @@ use crate::cose::SignatureAlgorithm;
 ///     mac.update(signature_payload);
 ///     Ok(mac.finalize().into_bytes().to_vec())
 ///  }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PreparedCoseMac0 {
     tagged: bool,
     cose_mac0: CoseMac0,
@@ -234,62 +233,6 @@ impl CoseMac0 {
     }
 }
 
-/// Serialize [CoseMac0] by serializing the [Value].
-/// If marked as tagged, then serialize as [Value::Tag]
-impl ser::Serialize for CoseMac0 {
-    #[inline]
-    fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let value = self
-            .inner
-            .clone()
-            .to_cbor_value()
-            .map_err(ser::Error::custom)?;
-        serialize::serialize(
-            &value,
-            if self.tagged {
-                Some(iana::CborTag::CoseMac0 as u64)
-            } else {
-                None
-            },
-            serializer,
-        )
-    }
-}
-
-/// Deserialize [CoseMac0] by first deserializing the [Value] and then using [coset::CoseMac0::from_cbor_value].
-impl<'de> Deserialize<'de> for CoseMac0 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Step 1: Deserialize the input as a generic `Value`
-        let value = Value::deserialize(deserializer)?;
-
-        // Step 2: Match against the value to check if it's a tagged value
-        if let Value::Tag(tag, boxed_value) = value {
-            // Step 3: Ensure the tag is for `CoseMac0` (tag 17)
-            if tag == coset::CoseMac0::TAG {
-                // Step 4: Try to convert the `Value` into a `CoseMac0`
-                if let Ok(cose_mac0) = coset::CoseMac0::from_cbor_value(*boxed_value) {
-                    Ok(CoseMac0 {
-                        tagged: true,
-                        inner: cose_mac0,
-                    })
-                } else {
-                    Err(serde::de::Error::custom("Invalid COSE_Mac0 format"))
-                }
-            } else {
-                Err(serde::de::Error::custom("Unexpected CBOR tag"))
-            }
-        } else {
-            Ok(CoseMac0 {
-                tagged: false,
-                inner: coset::CoseMac0::from_cbor_value(value).map_err(serde::de::Error::custom)?,
-            })
-        }
-    }
-}
-
 impl CborSerializable for CoseMac0 {}
 impl TaggedCborSerializable for CoseMac0 {
     const TAG: u64 = iana::CborTag::CoseMac0 as u64;
@@ -363,11 +306,12 @@ mod tests {
     #[test]
     fn roundtrip() {
         let bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let mut parsed: CoseMac0 =
-            serde_cbor::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
+        let mut parsed =
+            CoseMac0::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
         parsed.set_tagged();
-        let roundtripped =
-            serde_cbor::to_vec(&parsed).expect("failed to serialize COSE_MAC0 to bytes");
+        let roundtripped = parsed
+            .to_vec()
+            .expect("failed to serialize COSE_MAC0 to bytes");
         assert_eq!(
             bytes, roundtripped,
             "original bytes and roundtripped bytes do not match"
@@ -390,8 +334,9 @@ mod tests {
         let signature_payload = prepared.signature_payload();
         let signature = tag(signature_payload, &signer).unwrap();
         let cose_mac0 = prepared.finalize(signature);
-        let serialized =
-            serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
+        let serialized = cose_mac0
+            .to_vec()
+            .expect("failed to serialize COSE_MAC0 to bytes");
 
         let expected = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
         assert_eq!(
@@ -414,8 +359,8 @@ mod tests {
             Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC verifier");
 
         let cose_mac0_bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let cose_mac0: CoseMac0 =
-            serde_cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
+        let cose_mac0 =
+            CoseMac0::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
 
         cose_mac0
             .verify(&verifier, None, None)
@@ -440,8 +385,9 @@ mod tests {
         let signature = tag(signature_payload, &signer).unwrap();
         let cose_mac0 = prepared.finalize(signature);
 
-        let serialized =
-            serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
+        let serialized = cose_mac0
+            .to_vec()
+            .expect("failed to serialize COSE_MAC0 to bytes");
 
         let expected = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
         assert_eq!(
@@ -496,8 +442,9 @@ mod tests {
         let signature_payload = prepared.signature_payload();
         let signature = tag(signature_payload, &signer).expect("failed to sign CWT");
         let cose_mac0 = prepared.finalize(signature);
-        let serialized =
-            serde_cbor::to_vec(&cose_mac0).expect("failed to serialize COSE_MAC0 to bytes");
+        let serialized = cose_mac0
+            .to_vec()
+            .expect("failed to serialize COSE_MAC0 to bytes");
         let expected = hex::decode(RFC8392_MAC0).unwrap();
 
         assert_eq!(
@@ -509,8 +456,8 @@ mod tests {
     #[test]
     fn deserializing_tdeserializing_signed_cwtagged_cwt() {
         let cose_mac0_bytes = hex::decode(RFC8392_MAC0).unwrap();
-        let cose_mac0: CoseMac0 =
-            serde_cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
+        let cose_mac0 =
+            CoseMac0::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
         let parsed_claims_set = cose_mac0
             .claims_set()
             .expect("failed to parse claims set from payload")

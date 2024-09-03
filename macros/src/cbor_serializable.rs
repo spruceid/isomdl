@@ -1,7 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Fields, Lit, Meta, MetaList, NestedMeta, Type,
+    parse_macro_input, Attribute, Data, DeriveInput, Fields, Index, Lit, Meta, MetaList,
+    NestedMeta, Type,
 };
 
 pub(crate) fn cbor_serializable(input: TokenStream) -> TokenStream {
@@ -10,37 +11,14 @@ pub(crate) fn cbor_serializable(input: TokenStream) -> TokenStream {
 
     let methods: Vec<proc_macro2::TokenStream> = Vec::new();
 
-    let mut struct_rename_all_strategy: Option<String> = None;
+    let struct_rename_all_strategy = get_rename_all_strategy(&input);
 
-    // Check for serde(rename_all = "...") at the struct level
-    for attr in &input.attrs {
-        if attr.path.is_ident("isomdl") {
-            if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
-                for meta in nested {
-                    if let NestedMeta::Meta(Meta::NameValue(meta_name_value)) = meta {
-                        if meta_name_value.path.is_ident("rename_field_all") {
-                            if let Lit::Str(lit_str) = meta_name_value.lit {
-                                struct_rename_all_strategy = Some(lit_str.value());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // enum FieldHandling {
-    //     Named,
-    //     Unnamed,
-    // }
-    // let mut struct_type = FieldHandling::Named;
     let field_handling = match &input.data {
         Data::Struct(data_struct) => match &data_struct.fields {
             Fields::Named(fields_named) => {
                 let field_deserialization = fields_named.named.iter().map(|f| {
                     let field_name = f.ident.as_ref().unwrap();
                     let field_name_str = field_name.to_string();
-                    // let key = format!("{}::{}()", format_ident!("{struct_name}"), field_name_str);
                     let key = get_field_name(
                         field_name,
                         &f.attrs,
@@ -61,12 +39,22 @@ pub(crate) fn cbor_serializable(input: TokenStream) -> TokenStream {
                     let field_name = f.ident.as_ref().unwrap();
                     let field_type = &f.ty;
                     let field_name_ts = quote!(self.#field_name);
-                    let field_value = generate_field_serialization(field_type, field_name_ts);
-                    // let field_name_str = field_name.to_string();
-                    // let key = format!("{}::{}()", format_ident!("{struct_name}"), field_name_str);
+                    let skip_serializing_if_none =
+                        skip_serializing_if_none(Some(field_name), None, &f.attrs);
+                    if skip_serializing_if_none {
+                        panic!("{}", field_name);
+                    }
+                    let field_value =
+                        generate_field_serialization(field_type, field_name_ts.clone(), &f.attrs);
                     let key = get_field_name(field_name, &f.attrs, &struct_rename_all_strategy);
                     quote! {
-                        map.push((ciborium::Value::Text(#key.to_string()), #field_value));
+                        // if #skip_serializing_if_none {
+                        //     // if #field_name_ts.is_some() {
+                        //         // map.push((ciborium::Value::Text(#key.to_string()), #field_value));
+                        //     // }
+                        // } else {
+                            map.push((ciborium::Value::Text(#key.to_string()), #field_value));
+                        // }
                     }
                 });
 
@@ -76,7 +64,6 @@ pub(crate) fn cbor_serializable(input: TokenStream) -> TokenStream {
                 )
             }
             Fields::Unnamed(fields_unnamed) => {
-                // struct_type = FieldHandling::Unnamed;
                 let field_deserialization = fields_unnamed.unnamed.iter().enumerate().map(|(i, _f)| {
                     let index = syn::Index::from(i);
                     quote! {
@@ -94,11 +81,15 @@ pub(crate) fn cbor_serializable(input: TokenStream) -> TokenStream {
                     fields_unnamed.unnamed.iter().enumerate().map(|(i, f)| {
                         let index = syn::Index::from(i);
                         let field_type = &f.ty;
+                        let skip_serializing_if_none =
+                            skip_serializing_if_none(None, Some(index.clone()), &f.attrs);
                         let field_value =
-                            generate_field_serialization(field_type, quote!(self.#index));
-                        quote! {
-                            array.push(#field_value);
-                        }
+                            generate_field_serialization(field_type, quote!(self.#index), &f.attrs);
+                        Some(quote! {
+                            if #skip_serializing_if_none && self.#index.is_some() {
+                                array.push(#field_value);
+                            }
+                        })
                     });
 
                 (
@@ -144,14 +135,41 @@ pub(crate) fn cbor_serializable(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+pub(crate) fn get_rename_all_strategy(input: &DeriveInput) -> Option<String> {
+    let mut struct_rename_all_strategy: Option<String> = None;
+
+    // Check for serde(rename_all = "...") at the struct level
+    for attr in &input.attrs {
+        if attr.path.is_ident("isomdl") {
+            if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
+                for meta in nested {
+                    if let NestedMeta::Meta(Meta::NameValue(meta_name_value)) = meta {
+                        if meta_name_value.path.is_ident("rename_all") {
+                            if let Lit::Str(lit_str) = meta_name_value.lit {
+                                struct_rename_all_strategy = Some(lit_str.value());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    struct_rename_all_strategy
+}
+
 pub(crate) fn generate_field_serialization(
     field_type: &Type,
     field_access: proc_macro2::TokenStream,
+    _attrs: &[Attribute],
 ) -> proc_macro2::TokenStream {
     match field_type {
         // Handling ciborium::Value directly
         Type::Path(type_path) if type_path.path.is_ident("ciborium::Value") => {
             quote! { #field_access }
+        }
+        // Handling CborValue directly
+        Type::Path(type_path) if type_path.path.is_ident("CborValue") => {
+            quote! { #field_access.into() }
         }
 
         // Handling integer types
@@ -177,7 +195,6 @@ pub(crate) fn generate_field_serialization(
         Type::Path(type_path) if type_path.path.is_ident("f64") => {
             quote! { ciborium::Value::Float(#field_access) }
         }
-
         // Handling String
         Type::Path(type_path) if type_path.path.is_ident("String") => {
             quote! { ciborium::Value::Text(#field_access) }
@@ -190,22 +207,86 @@ pub(crate) fn generate_field_serialization(
 
         // Handling Option (Null)
         Type::Path(type_path) if type_path.path.is_ident("Option") => {
-            quote! { #field_access.map_or(ciborium::Value::Null, |v| v.to_cbor_value().unwrap()) }
+            quote! { #field_access.map_or(ciborium::Value::Null, |v| v.into().into()).unwrap() }
         }
 
         // Handling Array of Values
         Type::Path(type_path) if type_path.path.is_ident("Vec") => {
-            quote! { ciborium::Value::Array(#field_access.into_iter().map(|v| v.to_cbor_value().unwrap()).collect()) }
+            quote! { ciborium::Value::Array(#field_access.into_iter().map(|v| v.into().into()).collect()) }
         }
 
         // Handling Maps of Values
         Type::Path(type_path) if type_path.path.is_ident("std::collections::HashMap") => {
-            quote! { ciborium::Value::Map(#field_access.into_iter().map(|(k, v)| (k.to_cbor_value().unwrap(), v.to_cbor_value().unwrap())).collect()) }
+            quote! { ciborium::Value::Map(#field_access.into_iter().map(|(k, v)| (k.into().into(), v.into().into())).collect()) }
         }
 
         // Default case to handle custom types
-        _ => quote! { #field_access.to_cbor_value().unwrap() },
+        _ => {
+            quote! { ciborium::Value::Text("".to_string()) }
+        }
     }
+}
+
+pub(crate) fn _is_to_cbor(attrs: &[Attribute]) -> bool {
+    // Check for isomdl(is_to_cbor)
+    for attr in attrs {
+        if attr.path.is_ident("isomdl") {
+            if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
+                for meta in nested {
+                    if let NestedMeta::Meta(Meta::NameValue(meta_name_value)) = meta {
+                        if meta_name_value.path.is_ident("is_to_cbor") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn _is_as_cbor_value(attrs: &[Attribute]) -> bool {
+    // Check for isomdl(is_as_cbor_value)
+    for attr in attrs {
+        if attr.path.is_ident("isomdl") {
+            if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
+                for meta in nested {
+                    if let NestedMeta::Meta(Meta::NameValue(meta_name_value)) = meta {
+                        if meta_name_value.path.is_ident("is_as_cbor_value") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn skip_serializing_if_none(
+    _field_name: Option<&syn::Ident>,
+    _field_index: Option<Index>,
+    attrs: &[Attribute],
+) -> bool {
+    // Check for isomdl(skip_serializing_if = "Option::is_none")
+    for attr in attrs {
+        if attr.path.is_ident("isomdl") {
+            if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
+                for meta in nested {
+                    if let NestedMeta::Meta(Meta::NameValue(meta_name_value)) = meta {
+                        if meta_name_value.path.is_ident("skip_serializing_if") {
+                            if let Lit::Str(lit_str) = meta_name_value.lit {
+                                if lit_str.value() == "Option::is_none" {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 pub(crate) fn get_field_name(
@@ -217,7 +298,7 @@ pub(crate) fn get_field_name(
     let mut rename_value = field_name_str.clone();
     let mut field_rename_all_strategy = rename_all_strategy.clone();
 
-    // Check for serde(rename = "...") and serde(rename_all = "...") at the field level
+    // Check for isomdl(rename = "...") and isomdl(rename_all = "...") at the field level
     for attr in attrs {
         if attr.path.is_ident("isomdl") {
             if let Ok(Meta::List(MetaList { nested, .. })) = attr.parse_meta() {
@@ -227,7 +308,7 @@ pub(crate) fn get_field_name(
                             if let Lit::Str(lit_str) = meta_name_value.lit {
                                 rename_value = lit_str.value();
                             }
-                        } else if meta_name_value.path.is_ident("rename_field_all") {
+                        } else if meta_name_value.path.is_ident("rename_all") {
                             if let Lit::Str(lit_str) = meta_name_value.lit {
                                 field_rename_all_strategy = Some(lit_str.value());
                             }

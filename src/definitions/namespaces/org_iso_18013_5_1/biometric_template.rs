@@ -3,7 +3,6 @@ use crate::definitions::{
     helpers::ByteStr,
     traits::{FromJson, FromJsonError, FromJsonMap, ToNamespaceMap},
 };
-use serde_cbor::Value as Cbor;
 use serde_json::{Map, Value as Json};
 use std::collections::BTreeMap;
 

@@ -1,5 +1,5 @@
+use crate::cbor::CborValue;
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 
 /// `sex` in the org.iso.18013.5.1 namespace.
@@ -17,8 +17,8 @@ pub enum Error {
     Unrecognized(u32),
 }
 
-impl From<Sex> for Cbor {
-    fn from(s: Sex) -> Cbor {
+impl From<Sex> for CborValue {
+    fn from(s: Sex) -> CborValue {
         u8::from(s).into()
     }
 }

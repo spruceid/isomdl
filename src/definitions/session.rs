@@ -2,17 +2,7 @@
 //!
 //! The [get_initialization_vector] function generates an initialization vector for encryption/decryption
 //! based on a message count and a flag indicating whether the vector is for the reader or the device.
-use super::helpers::Tag24;
-use super::DeviceEngagement;
-use crate::definitions::device_engagement::EReaderKeyBytes;
-use crate::definitions::device_key::cose_key::EC2Y;
-use crate::definitions::device_key::CoseKey;
-use crate::definitions::device_key::EC2Curve;
-use crate::definitions::helpers::bytestr::ByteStr;
-use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
 
-use crate::cbor::CborValue;
-use crate::cose::sign1::CoseSign1;
 use aes::cipher::{generic_array::GenericArray, typenum::U32};
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -21,18 +11,31 @@ use aes_gcm::{
 };
 use anyhow::Result;
 use ciborium::Value;
-use coset::{iana, AsCborValue, CborSerializable, TaggedCborSerializable};
+use coset::{AsCborValue, CborSerializable};
 use ecdsa::EncodedPoint;
 use elliptic_curve::{
     ecdh::EphemeralSecret, ecdh::SharedSecret, generic_array::sequence::Concat,
     sec1::FromEncodedPoint,
 };
 use hkdf::Hkdf;
+use isomdl_macros::FieldsNames;
 use p256::NistP256;
 use p384::NistP384;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+
+use crate::cbor::CborValue;
+use crate::definitions::device_engagement::EReaderKeyBytes;
+use crate::definitions::device_key::cose_key::EC2Y;
+use crate::definitions::device_key::CoseKey;
+use crate::definitions::device_key::EC2Curve;
+use crate::definitions::helpers::bytestr::ByteStr;
+use crate::definitions::session::EncodedPoints::{Ep256, Ep384};
+
+use super::helpers::Tag24;
+use super::DeviceEngagement;
 
 pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
@@ -41,15 +44,67 @@ pub type SessionTranscriptBytes = Tag24<SessionTranscript180135>;
 pub type NfcHandover = (ByteStr, Option<ByteStr>);
 
 /// Represents the establishment of a session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct SessionEstablishment {
-    /// The EReader key used for session establishment.
+    /// The EReader key used for a session establishment.
     pub e_reader_key: EReaderKeyBytes,
 
     /// The data associated with the session establishment.
     pub data: ByteStr,
+}
+
+impl CborSerializable for SessionEstablishment {}
+impl AsCborValue for SessionEstablishment {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "doc_requests is missing".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(SessionEstablishment {
+            e_reader_key: EReaderKeyBytes::from_cbor_value(
+                map.remove(&SessionEstablishment::e_reader_key().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "e_reader_key is missing".to_string()),
+                    ))?
+                    .into(),
+            )?,
+            data: map
+                .remove(&SessionEstablishment::e_reader_key().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "data is missing".to_string()),
+                ))?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "data is not a byte string".to_string(),
+                    ))
+                })?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let map = vec![
+            (
+                Value::Text(SessionEstablishment::e_reader_key().to_string()),
+                self.e_reader_key.to_cbor_value()?,
+            ),
+            (
+                Value::Text(SessionEstablishment::data().to_string()),
+                self.data.into(),
+            ),
+        ];
+        Ok(Value::Map(map))
+    }
 }
 
 /// Represents session data.
@@ -69,9 +124,9 @@ pub struct SessionData {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u64", into = "u64")]
 pub enum Status {
-    SessionEncryptionError,
-    CborDecodingError,
-    SessionTermination,
+    SessionEncryptionError = 10,
+    CborDecodingError = 11,
+    SessionTermination = 20,
 }
 
 impl From<Status> for u64 {
@@ -97,7 +152,10 @@ impl TryFrom<u64> for Status {
     }
 }
 
-pub trait SessionTranscript: Serialize + for<'a> Deserialize<'a> {}
+pub trait SessionTranscript:
+    Serialize + for<'a> Deserialize<'a> + CborSerializable + AsCborValue
+{
+}
 
 /// Represents the device engagement bytes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +168,42 @@ pub struct SessionTranscript180135(
 impl CborSerializable for SessionTranscript180135 {}
 impl AsCborValue for SessionTranscript180135 {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        todo!()
+        let mut arr = value
+            .into_array()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "not an array".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|v| v.into())
+            .collect::<Vec<CborValue>>();
+        if arr.len() != 3 {
+            return Err(coset::CoseError::DecodeFailed(
+                ciborium::de::Error::Semantic(None, "wrong number of items".to_string()),
+            ));
+        }
+        Ok(SessionTranscript180135(
+            DeviceEngagementBytes::from_cbor_value(arr.remove(0).try_into().map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "device_engagement is not a tag 24".to_string(),
+                ))
+            })?)?,
+            Tag24::<EReaderKey>::from_cbor_value(arr.remove(0).try_into().map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "e_reader_key is not a tag 24".to_string(),
+                ))
+            })?)?,
+            Handover::from_cbor_value(arr.remove(0).try_into().map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "handover is not a tag 24".to_string(),
+                ))
+            })?)?,
+        ))
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
@@ -147,7 +240,49 @@ pub enum Handover {
 impl CborSerializable for Handover {}
 impl AsCborValue for Handover {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        todo!()
+        match value {
+            Value::Null => Ok(Handover::QR),
+            Value::Array(_) => {
+                let mut arr = value.into_array().map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "not an array".to_string(),
+                    ))
+                })?;
+                match arr.len() {
+                    1 => {
+                        let v = arr.remove(0);
+                        let cbor: CborValue = v.into();
+                        Ok(Handover::NFC(
+                            cbor.try_into().map_err(|_| {
+                                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                                    None,
+                                    "NFC is not a ByteStr".to_string(),
+                                ))
+                            })?,
+                            None,
+                        ))
+                    }
+                    2 => {
+                        let v1 = arr.remove(0);
+                        let v2 = arr.remove(0);
+                        match (v1, v2) {
+                            (Value::Bytes(b1), Value::Bytes(b2)) => {
+                                Ok(Handover::NFC(ByteStr::from(b1), Some(ByteStr::from(b2))))
+                            }
+                            (Value::Text(s1), Value::Text(s2)) => Ok(Handover::OID4VP(s1, s2)),
+                            _ => Err(coset::CoseError::DecodeFailed(
+                                ciborium::de::Error::Semantic(None, "not a handover".to_string()),
+                            )),
+                        }
+                    }
+                    _ => Err(coset::CoseError::ExtraneousData),
+                }
+            }
+            _ => Err(coset::CoseError::DecodeFailed(
+                ciborium::de::Error::Semantic(None, "not a handover".to_string()),
+            )),
+        }
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
@@ -163,7 +298,7 @@ impl AsCborValue for Handover {
             Handover::OID4VP(s, s2) => {
                 let s: CborValue = s.into();
                 let s2: CborValue = s2.into();
-                CborValue::Array(vec![s.into(), s2.into()]).into()
+                CborValue::Array(vec![s, s2]).into()
             }
         })
     }
@@ -328,9 +463,10 @@ pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use crate::definitions::device_engagement::Security;
     use crate::definitions::device_request::DeviceRequest;
+
+    use super::*;
 
     #[test]
     fn qr_handover() {

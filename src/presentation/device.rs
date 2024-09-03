@@ -24,7 +24,7 @@ use crate::{
     },
     issuance::Mdoc,
 };
-use coset::{CoseMac0Builder, CoseSign1Builder};
+use coset::{AsCborValue, CoseMac0Builder, CoseSign1Builder};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use session::SessionTranscript180135;
@@ -303,7 +303,7 @@ impl SessionManager {
             PreparedDeviceResponse::empty(Status::CborDecodingError, self.device_auth_type)
         })?;
 
-        serde_cbor::value::from_value(request).map_err(|_| {
+        DeviceRequest::from_cbor_value(request.into()).map_err(|_| {
             // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborValidationError, self.device_auth_type)
         })

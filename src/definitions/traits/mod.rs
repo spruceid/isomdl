@@ -1,5 +1,4 @@
 mod from_json;
-mod to_cbor;
 
+pub use crate::cbor::to_cbor::{ToCbor, ToCborError, ToCborMap, ToNamespaceMap};
 pub use from_json::{FromJson, FromJsonError, FromJsonMap};
-pub use to_cbor::{ToCbor, ToCborError, ToCborMap, ToNamespaceMap};

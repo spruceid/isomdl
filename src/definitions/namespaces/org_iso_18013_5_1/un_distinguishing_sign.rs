@@ -1,5 +1,5 @@
+use crate::cbor::CborValue;
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 
 /// United Nations Distinguishing Sign, as per ISO/IEC 18013-1:2018 Annex F.
@@ -189,8 +189,8 @@ pub enum UNDistinguishingSign {
     NoneApplicable(String),
 }
 
-impl From<UNDistinguishingSign> for Cbor {
-    fn from(s: UNDistinguishingSign) -> Cbor {
+impl From<UNDistinguishingSign> for CborValue {
+    fn from(s: UNDistinguishingSign) -> CborValue {
         String::from(s).into()
     }
 }

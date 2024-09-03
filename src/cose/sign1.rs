@@ -1,5 +1,4 @@
-use crate::cbor::CborValue;
-use crate::cose::{serialize, SignatureAlgorithm};
+use crate::cose::SignatureAlgorithm;
 use ciborium::Value;
 use coset::cwt::ClaimsSet;
 use coset::{
@@ -53,7 +52,7 @@ use signature::Verifier;
 ///         .map_err(Error::Signing)?
 ///         .to_vec())
 /// }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PreparedCoseSign1 {
     tagged: bool,
     cose_sign1: CoseSign1,
@@ -247,63 +246,6 @@ impl CoseSign1 {
     }
 }
 
-/// Serialize [CoseSign1] by serializing the [Value].
-/// If marked as tagged, then serialize as [Value::Tag]
-impl ser::Serialize for CoseSign1 {
-    #[inline]
-    fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let value = self
-            .inner
-            .clone()
-            .to_cbor_value()
-            .map_err(ser::Error::custom)?;
-        serialize::serialize(
-            &value,
-            if self.tagged {
-                Some(iana::CborTag::CoseSign1 as u64)
-            } else {
-                None
-            },
-            serializer,
-        )
-    }
-}
-
-/// Deserialize [CoseSign1] by first deserializing the [Value] and then using [coset::CoseSign1::from_cbor_value].
-impl<'de> Deserialize<'de> for CoseSign1 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Step 1: Deserialize the input as a generic `Value`
-        let value = Value::deserialize(deserializer)?;
-
-        // Step 2: Match against the value to check if it's a tagged value
-        if let Value::Tag(tag, boxed_value) = value {
-            // Step 3: Ensure the tag is for `CoseSign1` (tag 18)
-            if tag == coset::CoseSign1::TAG {
-                // Step 4: Try to convert the `Value` into a `CoseSign1`
-                if let Ok(cose_sign1) = coset::CoseSign1::from_cbor_value(*boxed_value) {
-                    Ok(CoseSign1 {
-                        tagged: true,
-                        inner: cose_sign1,
-                    })
-                } else {
-                    Err(serde::de::Error::custom("Invalid COSE_Sign1 format"))
-                }
-            } else {
-                Err(serde::de::Error::custom("Unexpected CBOR tag"))
-            }
-        } else {
-            Ok(CoseSign1 {
-                tagged: false,
-                inner: coset::CoseSign1::from_cbor_value(value.into())
-                    .map_err(serde::de::Error::custom)?,
-            })
-        }
-    }
-}
-
 impl CborSerializable for CoseSign1 {}
 impl TaggedCborSerializable for CoseSign1 {
     const TAG: u64 = iana::CborTag::CoseSign1 as u64;
@@ -405,11 +347,12 @@ mod tests {
     #[test]
     fn roundtrip() {
         let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let mut parsed: CoseSign1 =
-            serde_cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
+        let mut parsed =
+            CoseSign1::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
         parsed.set_tagged();
-        let roundtripped =
-            serde_cbor::to_vec(&parsed).expect("failed to serialize COSE_Sign1 to bytes");
+        let roundtripped = parsed
+            .to_vec()
+            .expect("failed to serialize COSE_Sign1 to bytes");
         println!("bytes: {:?}", hex::encode(&bytes));
         println!("roundtripped: {:?}", hex::encode(&roundtripped));
         assert_eq!(
@@ -451,8 +394,9 @@ mod tests {
         let signature_payload = prepared.signature_payload();
         let signature = sign::<SigningKey, Signature>(signature_payload, &signer).unwrap();
         let cose_sign1 = prepared.finalize(signature);
-        let serialized =
-            serde_cbor::to_vec(&cose_sign1).expect("failed to serialize COSE_Sign1 to bytes");
+        let serialized = cose_sign1
+            .to_vec()
+            .expect("failed to serialize COSE_Sign1 to bytes");
 
         let expected = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
         assert_eq!(
@@ -478,7 +422,7 @@ mod tests {
         let verifier: VerifyingKey = (&signer).into();
 
         let cose_sign1_bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let cose_sign1: CoseSign1 = serde_cbor::from_slice(&cose_sign1_bytes)
+        let cose_sign1 = CoseSign1::from_slice(&cose_sign1_bytes)
             .expect("failed to parse COSE_Sign1 from bytes");
 
         cose_sign1
@@ -504,8 +448,10 @@ mod tests {
         let signature = sign::<SigningKey, Signature>(signature_payload, &signer).unwrap();
         let cose_sign1 = prepared.finalize(signature);
 
-        let serialized =
-            serde_cbor::to_vec(&cose_sign1).expect("failed to serialize COSE_Sign1 to bytes");
+        let serialized = cose_sign1
+            .clone()
+            .to_vec()
+            .expect("failed to serialize COSE_Sign1 to bytes");
 
         let expected = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
         assert_eq!(
@@ -560,8 +506,9 @@ mod tests {
         let signature =
             sign::<SigningKey, Signature>(signature_payload, &signer).expect("failed to sign CWT");
         let cose_sign1 = prepared.finalize(signature);
-        let serialized =
-            serde_cbor::to_vec(&cose_sign1).expect("failed to serialize COSE_Sign1 to bytes");
+        let serialized = cose_sign1
+            .to_vec()
+            .expect("failed to serialize COSE_Sign1 to bytes");
         let expected = hex::decode(RFC8392_COSE_SIGN1).unwrap();
         assert_eq!(
             expected, serialized,
@@ -572,7 +519,7 @@ mod tests {
     #[test]
     fn deserializing_signed_cwt() {
         let cose_sign1_bytes = hex::decode(RFC8392_COSE_SIGN1).unwrap();
-        let cose_sign1: CoseSign1 = serde_cbor::from_slice(&cose_sign1_bytes)
+        let cose_sign1 = CoseSign1::from_slice(&cose_sign1_bytes)
             .expect("failed to parse COSE_Sign1 from bytes");
         let parsed_claims_set = cose_sign1
             .claims_set()

@@ -121,14 +121,16 @@ pub struct Security(pub u64, pub EDeviceKeyBytes);
 /// Represents the server retrieval methods for device engagement.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct ServerRetrievalMethods {
     /// The `web API retrieval method. This field is optional and will be skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     web_api: Option<WebApi>,
 
     /// The `OIDC`` retrieval method. This field is optional and will be skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     oidc: Option<Oidc>,
 }
 
@@ -245,48 +247,46 @@ impl AsCborValue for WifiOptions {
 impl coset::CborSerializable for Security {}
 impl AsCborValue for Security {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        Ok(value
-            .into_array()
-            .map(|mut array| {
-                let security = Security(
-                    array
-                        .remove(0)
-                        .into_integer()
-                        .map_err(|_| {
-                            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                                None,
-                                "invalid integer".to_string(),
-                            ))
-                        })?
-                        .try_into()
-                        .map_err(|_| {
-                            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                                None,
-                                "invalid integer".to_string(),
-                            ))
-                        })?,
-                    EDeviceKeyBytes::new(CoseKey::from_cbor_value(array.remove(0)).map_err(
-                        |_| {
-                            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                                None,
-                                "invalid bytes".to_string(),
-                            ))
-                        },
-                    )?)
-                    .map_err(|_| {
-                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                            None,
-                            "missing elements".to_string(),
-                        ))
-                    })?,
-                );
-                Ok(security)
-            })
-            .unwrap_or_else(|_| {
-                Err(coset::CoseError::DecodeFailed(
-                    ciborium::de::Error::Semantic(None, "missing elements".to_string()),
+        let mut arr = value.into_array().map_err(|_| {
+            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "missing elements".to_string(),
+            ))
+        })?;
+        if arr.len() != 2 {
+            return Err(coset::CoseError::DecodeFailed(
+                ciborium::de::Error::Semantic(None, "wrong number of items".to_string()),
+            ));
+        }
+        Ok(Security(
+            arr.remove(0)
+                .into_integer()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "invalid integer".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "invalid integer".to_string(),
+                    ))
+                })?,
+            EDeviceKeyBytes::new(CoseKey::from_cbor_value(arr.remove(0)).map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "invalid bytes".to_string(),
                 ))
             })?)
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "missing elements".to_string(),
+                ))
+            })?,
+        ))
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
@@ -722,7 +722,7 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
     fn try_from(value: CborValue) -> std::result::Result<Self, Self::Error> {
         let mut map = value.into_map().map_err(|_| Error::Malformed)?;
         let mut web_api = map
-            .remove(&"webApi".into())
+            .remove(&ServerRetrievalMethods::web_api().into())
             .map(|v| v.into_array())
             .transpose()
             .map_err(|_| Error::Malformed)?
@@ -730,7 +730,7 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
             .flatten()
             .collect::<Vec<_>>();
         let mut oidc = map
-            .remove(&"oidc".into())
+            .remove(&ServerRetrievalMethods::oidc().into())
             .map(|v| v.into_array())
             .transpose()
             .map_err(|_| Error::Malformed)?

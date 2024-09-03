@@ -30,6 +30,7 @@
 
 use crate::cbor::CborValue;
 use ciborium::Value;
+use coset::{AsCborValue, CborSerializable};
 use serde::de::Error as SerdeError;
 use serde::{
     ser::{Error as SerError, Serializer},
@@ -43,13 +44,32 @@ use time::{
 };
 
 #[derive(Clone, Debug)]
-#[isomdl_macros::rename_field_all("camelCase")]
 pub struct ValidityInfo {
     /// Deserialize [CoseSign1] by first deserializing the [Value] and then using [coset::CoseSign1::from_cbor_value].
     pub signed: OffsetDateTime,
     pub valid_from: OffsetDateTime,
     pub valid_until: OffsetDateTime,
     pub expected_update: Option<OffsetDateTime>,
+}
+
+impl CborSerializable for ValidityInfo {}
+impl AsCborValue for ValidityInfo {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let cbor_value: CborValue = value.into();
+        cbor_value.try_into().map_err(|_| {
+            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "cannot decode ValidityInfo".to_string(),
+            ))
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let cbor_value: CborValue = self
+            .try_into()
+            .map_err(|_| coset::CoseError::EncodeFailed)?;
+        Ok(cbor_value.into())
+    }
 }
 
 impl<'de> Deserialize<'de> for ValidityInfo {

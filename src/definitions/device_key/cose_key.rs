@@ -4,6 +4,7 @@ use crate::cbor::CborValue;
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
 use ciborium::Value;
 use coset::iana::{Algorithm, EllipticCurve};
+use coset::{AsCborValue, CborSerializable};
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use ssi_jwk::JWK;
@@ -33,8 +34,8 @@ pub enum EC2Curve {
     P256K,
 }
 
-impl coset::CborSerializable for CoseKey {}
-impl coset::AsCborValue for CoseKey {
+impl CborSerializable for CoseKey {}
+impl AsCborValue for CoseKey {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
         let v: CborValue = value.into();
         Ok(v.try_into().map_err(|_| {
@@ -186,7 +187,7 @@ impl From<CoseKey> for CborValue {
                     },
                 );
                 // x: -2
-                map.insert(CborValue::Integer((-2)), CborValue::Bytes(x));
+                map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
             }
         }
         CborValue::Map(map)
@@ -385,7 +386,7 @@ impl TryFrom<JWK> for CoseKey {
             }
             ssi_jwk::Params::OKP(params) => Ok(CoseKey::OKP {
                 crv: (&params).try_into()?,
-                x: params.public_key.0,
+                x: params.public_key.0.clone(),
             }),
             _ => Err(Error::UnsupportedKeyType),
         }
@@ -514,8 +515,8 @@ mod test {
             x: vec![0x01, 0x02, 0x03],
             y: EC2Y::Value(vec![0x04, 0x05, 0x06]),
         };
-        let cbor = serde_cbor::to_vec(&key).unwrap();
-        println!("{:?}", hex::encode(cbor));
+        let cbor = key.clone().to_vec().unwrap();
+        println!("{:?}", hex::encode(&cbor));
         let key2: CoseKey = serde_cbor::from_slice(&cbor).unwrap();
         assert_eq!(key, key2);
     }

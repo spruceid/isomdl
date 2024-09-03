@@ -15,7 +15,7 @@ use crate::definitions::{
 /// Represents a device response.
 #[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct DeviceResponse {
     /// The version of the response.
     pub version: String,
@@ -39,7 +39,7 @@ pub type Documents = NonEmptyVec<Document>;
 /// This struct is used to store information about a document.
 #[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct Document {
     /// A string representing the type of the document.
     pub doc_type: String,
@@ -559,7 +559,7 @@ mod test {
     fn macro_test() {
         #[derive(CborSerializable, Serialize, Deserialize)]
         #[serde(rename_all = "camelCase")]
-        #[isomdl_macros::rename_field_all("camelCase")]
+        #[isomdl(rename_all = "camelCase")]
         struct Test {
             a: ciborium::Value,
             #[serde(rename = "c")]

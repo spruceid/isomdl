@@ -1,8 +1,7 @@
-use serde_cbor::Value as Cbor;
+use crate::cbor::CborValue;
+use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value as Json;
 use std::{ops::Deref, str::FromStr};
-
-use crate::definitions::traits::{FromJson, FromJsonError};
 
 /// A string of up to 150 characters from ISO/IEC 8859-1 Latin alphabet 1.
 ///
@@ -27,8 +26,8 @@ impl Deref for Latin1 {
     }
 }
 
-impl From<Latin1> for Cbor {
-    fn from(l: Latin1) -> Cbor {
+impl From<Latin1> for CborValue {
+    fn from(l: Latin1) -> CborValue {
         l.0.into()
     }
 }

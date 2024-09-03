@@ -22,6 +22,12 @@ impl From<String> for CborString {
     }
 }
 
+impl From<&String> for CborString {
+    fn from(s: &String) -> CborString {
+        CborString(s.clone())
+    }
+}
+
 impl From<&str> for CborString {
     fn from(s: &str) -> CborString {
         CborString(s.to_string())
@@ -61,7 +67,7 @@ impl TryFrom<Value> for CborString {
 impl CborSerializable for CborString {}
 impl AsCborValue for CborString {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        Ok(value.into_text().map(CborString).map_err(|_| {
+        Ok(value.try_into().map_err(|_| {
             coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                 None,
                 "not a string".to_string(),
@@ -70,16 +76,18 @@ impl AsCborValue for CborString {
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
-        Ok(Value::Text(self.0))
+        Ok(self.0.into())
     }
 }
 
+// todo: remove
 impl Serialize for CborString {
     fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
         unimplemented!()
     }
 }
 
+// todo: remove
 impl<'de> Deserialize<'de> for CborString {
     fn deserialize<D>(_d: D) -> Result<CborString, D::Error>
     where

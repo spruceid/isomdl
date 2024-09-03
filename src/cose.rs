@@ -1,11 +1,6 @@
-use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
-
-use coset::{iana, CborSerializable};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use coset::iana;
 
 pub mod mac0;
-mod serialize;
 pub mod sign1;
 
 /// Tag constants

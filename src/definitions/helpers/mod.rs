@@ -4,9 +4,8 @@ pub mod non_empty_map;
 pub mod non_empty_vec;
 pub mod string_cbor;
 pub mod tag24;
-pub mod tag24_ciborium;
 
 pub use bytestr::ByteStr;
 pub use non_empty_map::NonEmptyMap;
 pub use non_empty_vec::NonEmptyVec;
-pub use tag24_ciborium::Tag24;
+pub use tag24::Tag24;

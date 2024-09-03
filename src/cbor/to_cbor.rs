@@ -9,7 +9,7 @@ pub type Bytes = Vec<u8>;
 pub trait ToCbor: Sized {
     fn to_cbor(self) -> CborValue;
     fn to_cbor_bytes(self) -> Result<Bytes, ToCborError> {
-        serde_cbor::to_vec(&self.to_cbor()).map_err(Into::into)
+        coset::CborSerializable::to_vec(self.to_cbor()).map_err(Into::into)
     }
 }
 
@@ -24,7 +24,7 @@ pub trait ToNamespaceMap {
 #[derive(Debug, thiserror::Error)]
 pub enum ToCborError {
     #[error("cbor serialization: {0}")]
-    Serde(#[from] serde_cbor::Error),
+    Serde(#[from] coset::CoseError),
 }
 
 impl<T> ToCbor for T

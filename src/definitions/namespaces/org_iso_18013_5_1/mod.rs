@@ -1,3 +1,19 @@
+pub use age_over::AgeOver;
+pub use alpha2::Alpha2;
+pub use biometric_template::BiometricTemplate;
+pub use driving_privileges::*;
+pub use eye_colour::EyeColour;
+pub use hair_colour::HairColour;
+use isomdl_macros::ToCbor;
+pub use issuing_jurisdiction::IssuingJurisdiction;
+pub use sex::Sex;
+pub use tdate::{TDate, TDateOrFullDate};
+pub use un_distinguishing_sign::UNDistinguishingSign;
+
+use crate::{cbor::CborValue, definitions::helpers::ByteStr, macros::FromJson};
+
+pub use super::{fulldate::FullDate, latin1::Latin1};
+
 mod age_over;
 mod alpha2;
 mod biometric_template;
@@ -9,28 +25,9 @@ mod sex;
 mod tdate;
 mod un_distinguishing_sign;
 
-pub use super::{fulldate::FullDate, latin1::Latin1};
-
-pub use age_over::AgeOver;
-pub use alpha2::Alpha2;
-pub use biometric_template::BiometricTemplate;
-pub use driving_privileges::*;
-pub use eye_colour::EyeColour;
-pub use hair_colour::HairColour;
-pub use issuing_jurisdiction::IssuingJurisdiction;
-pub use sex::Sex;
-pub use tdate::{TDate, TDateOrFullDate};
-pub use un_distinguishing_sign::UNDistinguishingSign;
-
-use crate::{
-    definitions::helpers::ByteStr,
-    macros::{FromJson, ToCbor},
-};
-
 /// The `org.iso.18013.5.1` namespace.
-// todo: use ToCbor
-// #[derive(Debug, Clone, FromJson, ToCbor)]
-#[derive(Debug, Clone, FromJson)]
+#[derive(Debug, Clone, FromJson, ToCbor)]
+// #[derive(Debug, Clone, FromJson)]
 #[isomdl(crate = "crate")]
 pub struct OrgIso1801351 {
     pub family_name: Latin1,
@@ -73,8 +70,9 @@ pub struct OrgIso1801351 {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use crate::definitions::traits::FromJson;
+
+    use super::*;
 
     #[test]
     fn all() {

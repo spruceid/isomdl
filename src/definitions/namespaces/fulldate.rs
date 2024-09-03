@@ -1,22 +1,14 @@
+use crate::definitions::traits::{FromJson, FromJsonError};
 use anyhow::Error;
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::{fmt, str::FromStr};
 use time::{format_description::FormatItem, macros::format_description, Date};
-
-use crate::definitions::traits::{FromJson, FromJsonError};
 
 const FORMAT: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]");
 
 /// `full-date` as defined in RFC3339.
 #[derive(Clone, Debug)]
 pub struct FullDate(Date);
-
-impl From<FullDate> for Cbor {
-    fn from(d: FullDate) -> Cbor {
-        Cbor::Tag(1004, Box::new(Cbor::Text(d.to_string())))
-    }
-}
 
 impl fmt::Display for FullDate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

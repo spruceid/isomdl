@@ -1,17 +1,15 @@
 //! Support for embedded
 //! [CBOR Data Items](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item),
 //! also known as a tagged data item with tag number 24.
-use coset::{AsCborValue, CborSerializable};
-use serde::{
-    de::{self, Error as DeError},
-    ser, Deserialize, Serialize,
-};
-use serde_cbor::{from_slice, to_vec, Error as CborError, Value as CborValue};
+
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable, CoseError};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A wrapper for a struct that is to be encoded as a CBOR tagged item, with tag number 24.
 ///
 /// If this struct is created through deserializing CBOR, then the original byte representation is
-/// preserved for future serialising.
+/// preserved for future serializing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag24<T> {
     inner: T,
@@ -23,13 +21,13 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Expected a CBOR byte string, received: '{0:?}'")]
-    InvalidTag24(Box<CborValue>),
+    InvalidTag24(Box<Value>),
     #[error("Expected a CBOR tagged data item with tag number 24, received: '{0:?}'")]
-    NotATag24(CborValue),
+    NotATag24(Value),
     #[error("Unable to encode value as CBOR: {0}")]
-    UnableToEncode(CborError),
+    UnableToEncode(CoseError),
     #[error("Unable to decode bytes to inner type: {0}")]
-    UnableToDecode(CborError),
+    UnableToDecode(CoseError),
 }
 
 impl<T> Tag24<T> {
@@ -38,28 +36,29 @@ impl<T> Tag24<T> {
     }
 }
 
-impl<T: Serialize> Tag24<T> {
+impl<T: CborSerializable> Tag24<T> {
     pub fn new(inner: T) -> Result<Tag24<T>> {
-        let inner_bytes = to_vec(&inner).map_err(Error::UnableToEncode)?;
+        let inner_bytes = inner.to_vec().map_err(Error::UnableToEncode)?;
+        let inner = T::from_slice(&inner_bytes).map_err(Error::UnableToDecode)?;
         Ok(Self { inner, inner_bytes })
     }
 }
 
-impl<T: de::DeserializeOwned> Tag24<T> {
-    pub fn from_bytes(inner_bytes: Vec<u8>) -> Result<Tag24<T>> {
-        let inner = from_slice(&inner_bytes).map_err(Error::UnableToDecode)?;
+impl<T: CborSerializable> Tag24<T> {
+    pub fn from_bytes(inner_bytes: Vec<u8>) -> coset::Result<Tag24<T>> {
+        let inner = T::from_slice(&inner_bytes)?;
         Ok(Self { inner, inner_bytes })
     }
 }
 
-impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
+impl<T: CborSerializable> TryFrom<Value> for Tag24<T> {
     type Error = Error;
 
-    fn try_from(v: CborValue) -> Result<Tag24<T>> {
+    fn try_from(v: Value) -> Result<Tag24<T>> {
         match v {
-            CborValue::Tag(24, inner_value) => match inner_value.as_ref() {
-                CborValue::Bytes(inner_bytes) => {
-                    let inner: T = from_slice(inner_bytes).map_err(Error::UnableToDecode)?;
+            Value::Tag(24, inner_value) => match inner_value.as_ref() {
+                Value::Bytes(inner_bytes) => {
+                    let inner = T::from_slice(inner_bytes).map_err(Error::UnableToDecode)?;
                     Ok(Tag24 {
                         inner,
                         inner_bytes: inner_bytes.to_vec(),
@@ -72,9 +71,9 @@ impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
     }
 }
 
-impl<T> From<Tag24<T>> for CborValue {
-    fn from(Tag24 { inner_bytes, .. }: Tag24<T>) -> CborValue {
-        CborValue::Tag(24, Box::new(CborValue::Bytes(inner_bytes)))
+impl<T> From<Tag24<T>> for Value {
+    fn from(Tag24 { inner_bytes, .. }: Tag24<T>) -> Value {
+        Value::Tag(24, Box::new(Value::Bytes(inner_bytes)))
     }
 }
 
@@ -84,64 +83,62 @@ impl<T> AsRef<T> for Tag24<T> {
     }
 }
 
-impl<T> Serialize for Tag24<T> {
-    fn serialize<S: ser::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        CborValue::Tag(24, Box::new(CborValue::Bytes(self.inner_bytes.clone()))).serialize(s)
-    }
-}
-
-impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
-    fn deserialize<D>(d: D) -> Result<Tag24<T>, D::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
-        CborValue::deserialize(d)?
-            .try_into()
-            .map_err(D::Error::custom)
-    }
-}
-
 impl<T: CborSerializable> CborSerializable for Tag24<T> {}
 impl<T: CborSerializable> AsCborValue for Tag24<T> {
-    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
-        if let ciborium::Value::Tag(24, inner_value) = value {
-            if let ciborium::Value::Bytes(inner_bytes) = *inner_value {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        if let Value::Tag(24, inner_value) = value {
+            if let Value::Bytes(inner_bytes) = *inner_value {
                 let inner: T = CborSerializable::from_slice(&inner_bytes)?;
                 Ok(Tag24 {
                     inner,
                     inner_bytes: inner_bytes.to_vec(),
                 })
             } else {
-                Err(coset::CoseError::DecodeFailed(
-                    ciborium::de::Error::Semantic(None, "invalid inner bytes".to_string()),
-                ))
+                Err(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "invalid inner bytes".to_string(),
+                )))
             }
         } else {
-            Err(coset::CoseError::DecodeFailed(
-                ciborium::de::Error::Semantic(None, "not tag 24".to_string()),
-            ))
+            Err(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "not tag 24".to_string(),
+            )))
         }
     }
 
-    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
-        Ok(ciborium::Value::Tag(
-            24,
-            Box::new(ciborium::Value::Bytes(self.inner_bytes)),
-        ))
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Tag(24, Box::new(Value::Bytes(self.inner_bytes))))
+    }
+}
+
+impl<T> Serialize for Tag24<T> {
+    fn serialize<S: Serializer>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        unimplemented!()
+    }
+}
+
+impl<'de, T> Deserialize<'de> for Tag24<T> {
+    fn deserialize<D>(_d: D) -> std::result::Result<Tag24<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        unimplemented!()
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::Tag24;
+    use crate::definitions::helpers::string_cbor::CborString;
+    use coset::CborSerializable;
 
     #[test]
-    #[should_panic]
-    // A Tag24 cannot be serialised directly into a non-cbor format as it will lose the tag.
+    // A Tag24 cannot be serialized directly into a non-cbor format as it will lose the tag.
     fn non_cbor_roundtrip() {
-        let original = Tag24::new(String::from("some data")).unwrap();
-        let json = serde_json::to_vec(&original).unwrap();
-        let roundtripped = serde_json::from_slice(&json).unwrap();
+        let original = Tag24::new(CborString::from("some data")).unwrap();
+        let cbor = original.clone().to_vec().unwrap();
+        let roundtripped = Tag24::<CborString>::from_slice(&cbor).unwrap();
         assert_eq!(original, roundtripped)
     }
 }

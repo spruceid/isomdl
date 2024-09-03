@@ -1,6 +1,5 @@
 use crate::definitions::device_key::cose_key::Error as CoseKeyError;
 use crate::definitions::helpers::tag24::Error as Tag24Error;
-use serde_cbor::Error as SerdeCborError;
 
 /// Errors that can occur when deserialising a DeviceEngagement.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -43,8 +42,8 @@ impl From<Tag24Error> for Error {
     }
 }
 
-impl From<SerdeCborError> for Error {
-    fn from(_: SerdeCborError) -> Self {
+impl From<coset::CoseError> for Error {
+    fn from(_: coset::CoseError) -> Self {
         Error::SerdeCborError
     }
 }

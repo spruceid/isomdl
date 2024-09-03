@@ -1,17 +1,24 @@
-use ciborium::value::Integer;
-use ciborium::Value;
-use coset::CborSerializable;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-enum Error {
+use ciborium::value::Integer;
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::cose::tag::{BIGNEG, BIGPOS};
+
+pub mod to_cbor;
+
+pub enum Error {
     Deserialize(&'static str),
     Seserialize(&'static str),
 }
 
-/// Wrapper for [chromium::Value] that implements [PartialEq], [Eq], [PartialOrd] and [Ord]
-/// so we can use it in maps.
+/// Wraps [chromium::Value] that implements [PartialEq], [Eq], [PartialOrd] and [Ord]
+/// so it can be used in maps and sets.
+///
+/// Useful if in future we want to change the CBOR library.
 #[derive(Debug, Clone)]
 pub enum CborValue {
     /// Represents the absence of a value or the value undefined.
@@ -759,17 +766,17 @@ impl From<Value> for CborValue {
 }
 
 impl Serialize for CborValue {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.serialize(serializer)
+    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+        unimplemented!();
     }
 }
 
 impl<'de> Deserialize<'de> for CborValue {
-    fn deserialize<D>(d: D) -> Result<CborValue, D::Error>
+    fn deserialize<D>(_d: D) -> Result<CborValue, D::Error>
     where
         D: Deserializer<'de>,
     {
-        CborValue::deserialize(d)
+        unimplemented!();
     }
 }
 
@@ -791,7 +798,7 @@ impl From<u128> for CborValue {
             bytes = &bytes[1..];
         }
 
-        CborValue::from(Value::Tag(tag::BIGPOS, Value::Bytes(bytes.into()).into()))
+        CborValue::from(Value::Tag(BIGPOS, Value::Bytes(bytes.into()).into()))
     }
 }
 
@@ -803,8 +810,8 @@ impl From<i128> for CborValue {
         }
 
         let (tag, raw) = match value.is_negative() {
-            true => (tag::BIGNEG, value as u128 ^ !0),
-            false => (tag::BIGPOS, value as u128),
+            true => (BIGNEG, value as u128 ^ !0),
+            false => (BIGPOS, value as u128),
         };
 
         let mut bytes = &raw.to_be_bytes()[..];
@@ -1003,7 +1010,7 @@ impl TryFrom<CborValue> for String {
     fn try_from(value: CborValue) -> Result<Self, Self::Error> {
         value
             .into_text()
-            .map_err(|_| Error::Deserialize("not a bool"))
+            .map_err(|_| Error::Deserialize("not a string"))
     }
 }
 
@@ -1024,5 +1031,16 @@ impl TryFrom<CborValue> for BTreeMap<CborValue, CborValue> {
         value
             .into_map()
             .map_err(|_| Error::Deserialize("not bytes"))
+    }
+}
+
+impl CborSerializable for CborValue {}
+impl AsCborValue for CborValue {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        Ok(value.into())
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(self.into())
     }
 }

@@ -44,7 +44,7 @@ pub enum Error {
 }
 
 /// DigestId is a unsigned integer between `0` and `(2^31 - 1)` inclusive.
-/// Therefore, the most straightforward way to represent it is as a i32 that is enforced to be
+/// Therefore, the most straightforward way to represent it is as an i32 that is enforced to be
 /// positive.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, Ord, PartialEq, PartialOrd, Copy, Hash)]
 pub struct DigestId(pub(crate) i32);
@@ -84,7 +84,7 @@ impl TryFrom<CborValue> for DigestIds {
 /// Represents an [Mso] object.
 #[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct Mso {
     /// The version of the Mso object.
     pub version: String,
@@ -108,33 +108,199 @@ pub struct Mso {
 impl CborSerializable for Mso {}
 impl AsCborValue for Mso {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        todo!()
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "Mso is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(Mso {
+            version: map
+                .remove(&Mso::version().into())
+                .ok_or_else(|| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "version not found".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "version cannot be converted".to_string(),
+                    ))
+                })?,
+            digest_algorithm: match map
+                .remove(&Mso::digest_algorithm().into())
+                .ok_or_else(|| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "digest_algorithm not found".to_string(),
+                    ))
+                })?
+                .into_integer()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "digest_algorithm is not an integer".to_string(),
+                    ))
+                })? {
+                1 => DigestAlgorithm::SHA256,
+                2 => DigestAlgorithm::SHA384,
+                3 => DigestAlgorithm::SHA512,
+                _ => {
+                    return Err(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "digest_algorithm is not an integer".to_string(),
+                        ),
+                    ))
+                }
+            },
+            value_digests: map
+                .remove(&Mso::value_digests().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "value_digests is missing".to_string()),
+                ))?
+                .into_map()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "value_digests is not a map".to_string(),
+                    ))
+                })?
+                .into_iter()
+                .map(|(k, v)| {
+                    Ok((
+                        k.into_text().map_err(|_| {
+                            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                                None,
+                                "value_digests key is not a string".to_string(),
+                            ))
+                        })?,
+                        v.into_map()
+                            .map_err(|_| {
+                                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                                    None,
+                                    "value_digests is not an map".to_string(),
+                                ))
+                            })?
+                            .into_iter()
+                            .map(|(k, v)| {
+                                Ok((
+                                    DigestId(k.into_integer().map_err(|_| {
+                                        coset::CoseError::DecodeFailed(
+                                            ciborium::de::Error::Semantic(
+                                                None,
+                                                "value_digests DigestIds is not an integer"
+                                                    .to_string(),
+                                            ),
+                                        )
+                                    })? as i32),
+                                    v.try_into().map_err(|_| {
+                                        coset::CoseError::DecodeFailed(
+                                            ciborium::de::Error::Semantic(
+                                                None,
+                                                "value_digests DigestIds is not an ByteStr"
+                                                    .to_string(),
+                                            ),
+                                        )
+                                    })?,
+                                ))
+                            })
+                            .collect::<coset::Result<DigestIds>>()?,
+                    ))
+                })
+                .collect::<coset::Result<BTreeMap<String, DigestIds>>>()?,
+            device_key_info: DeviceKeyInfo::from_cbor_value(
+                map.remove(&Mso::device_key_info().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "device_key_info not found".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            doc_type: map
+                .remove(&Mso::doc_type().into())
+                .ok_or_else(|| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "doc_type not found".to_string(),
+                    ))
+                })?
+                .into_text()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "doc_type cannot be converted".to_string(),
+                    ))
+                })?,
+            validity_info: ValidityInfo::from_cbor_value(
+                map.remove(&Mso::validity_info().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "validity_info not found".to_string()),
+                    ))?
+                    .into(),
+            )?,
+        })
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
-        let mut map = BTreeMap::new();
-        map.insert(Mso::version().into(), self.version.into());
-        map.insert(
+        let mut map = vec![];
+        map.push((
+            Value::Text(Mso::version().to_string()),
+            Value::Text(self.version),
+        ));
+        map.push((
             Mso::digest_algorithm().into(),
             match self.digest_algorithm {
                 DigestAlgorithm::SHA256 => 1.into(),
                 DigestAlgorithm::SHA384 => 2.into(),
                 DigestAlgorithm::SHA512 => 3.into(),
             },
-        );
-        map.insert(
+        ));
+        map.push((
             Mso::value_digests().into(),
-            CborValue::Map(
+            Value::Map(
                 self.value_digests
                     .into_iter()
-                    .map(|(k, v)| (k.into(), v.into()))
+                    .map(|(k, v)| {
+                        (
+                            Value::Text(k),
+                            Value::Map(
+                                v.into_iter()
+                                    .map(|(k, v)| (Value::Integer(k.0.into()), v.into()))
+                                    .collect(),
+                            ),
+                        )
+                    })
                     .collect(),
             ),
-        );
+        ));
+        map.push((
+            Value::Text(Mso::device_key_info().to_string()),
+            self.device_key_info.to_cbor_value()?,
+        ));
+        map.push((
+            Value::Text(Mso::doc_type().to_string()),
+            Value::Text(self.doc_type),
+        ));
+        map.push((
+            Value::Text(Mso::validity_info().to_string()),
+            self.validity_info.to_cbor_value()?,
+        ));
+        Ok(Value::Map(map))
     }
 }
 
-#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
+#[derive(Clone, Debug, Copy, FieldsNames, Deserialize, Serialize)]
 pub enum DigestAlgorithm {
     #[serde(rename = "SHA-256")]
     SHA256,

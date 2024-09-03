@@ -1,4 +1,5 @@
 use isomdl::{
+    cbor::CborValue,
     definitions::traits::FromJson,
     macros::{FromJson, ToCbor},
 };

@@ -6,13 +6,6 @@
 //! - [Error::UnableToEncode]: Indicates an error when encoding a value as CBOR.
 use std::collections::HashMap;
 
-use ciborium::Value;
-use coset::{AsCborValue, CborSerializable};
-use isomdl_macros::FieldsNames;
-use serde::{Deserialize, Serialize};
-use serde_cbor::Error as CborError;
-use strum_macros::AsRefStr;
-
 use crate::cose::mac0::CoseMac0;
 use crate::cose::sign1::CoseSign1;
 use crate::definitions::helpers::b_tree_map_string_cbor::BTreeMapCbor;
@@ -21,11 +14,16 @@ use crate::definitions::{
     helpers::{NonEmptyMap, Tag24},
     session::SessionTranscript,
 };
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable};
+use isomdl_macros::FieldsNames;
+use serde::{Deserialize, Serialize};
+use strum_macros::AsRefStr;
 
 /// Represents a device-signed structure.
 #[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[isomdl(rename_all = "camelCase")]
 pub struct DeviceSigned {
     #[serde(rename = "nameSpaces")]
     /// A [DeviceNamespacesBytes] struct representing the namespaces.
@@ -43,19 +41,17 @@ pub type DeviceSignedItems = NonEmptyMap<CborString, Value>;
 ///
 /// This struct contains the device signature in the form of a [CoseSign1] object.
 /// The [CoseSign1] object represents a `COSE (CBOR Object Signing and Encryption) signature.
-#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize, AsRefStr)]
-#[serde(untagged)]
-#[isomdl_macros::rename_field_all("camelCase")]
+#[derive(Clone, Debug, FieldsNames, AsRefStr)]
+#[isomdl(rename_all = "camelCase")]
 pub enum DeviceAuth {
-    #[serde(rename_all = "camelCase")]
+    #[isomdl(rename_all = "camelCase")]
     Signature { device_signature: CoseSign1 },
-    #[serde(rename_all = "camelCase")]
+    #[isomdl(rename_all = "camelCase")]
     Mac { device_mac: CoseMac0 },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(untagged)]
-#[isomdl_macros::rename_field_all("camelCase")]
 pub enum DeviceAuthType {
     #[serde(rename_all = "camelCase")]
     Sign1,
@@ -67,17 +63,59 @@ pub type DeviceAuthenticationBytes<S> = Tag24<DeviceAuthentication<S>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeviceAuthentication<S: SessionTranscript>(
-    &'static str,
+    String,
     // See https://github.com/serde-rs/serde/issues/1296.
     #[serde(bound = "")] S,
     String,
     DeviceNamespacesBytes,
 );
 
+impl<S: SessionTranscript> CborSerializable for DeviceAuthentication<S> {}
+impl<S: SessionTranscript> AsCborValue for DeviceAuthentication<S> {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut arr = value.into_array().map_err(|_| {
+            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "not an array".to_string(),
+            ))
+        })?;
+        if arr.len() != 4 {
+            return Err(coset::CoseError::DecodeFailed(
+                ciborium::de::Error::Semantic(None, "wrong number of items".to_string()),
+            ));
+        }
+        Ok(DeviceAuthentication(
+            arr.remove(0).into_text().map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "not a text".to_string(),
+                ))
+            })?,
+            S::from_cbor_value(arr.remove(0))?,
+            arr.remove(0).into_text().map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "not a text".to_string(),
+                ))
+            })?,
+            DeviceNamespacesBytes::from_cbor_value(arr.remove(0).into())?,
+        ))
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Array(vec![
+            Value::Text(self.0),
+            self.1.to_cbor_value()?,
+            Value::Text(self.2),
+            self.3.to_cbor_value()?,
+        ]))
+    }
+}
+
 impl<S: SessionTranscript> DeviceAuthentication<S> {
     pub fn new(transcript: S, doc_type: String, namespaces_bytes: DeviceNamespacesBytes) -> Self {
         Self(
-            "DeviceAuthentication",
+            "DeviceAuthentication".to_string(),
             transcript,
             doc_type,
             namespaces_bytes,
@@ -88,7 +126,7 @@ impl<S: SessionTranscript> DeviceAuthentication<S> {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Unable to encode value as CBOR: {0}")]
-    UnableToEncode(CborError),
+    UnableToEncode(coset::CoseError),
 }
 
 impl CborSerializable for DeviceAuth {}
