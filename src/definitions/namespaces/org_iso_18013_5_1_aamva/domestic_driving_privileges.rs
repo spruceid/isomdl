@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use isomdl_macros::FieldsNames;
+use isomdl_macros::{FieldsNames, ToCbor};
 
 use crate::cbor::CborValue;
 use crate::{
@@ -22,9 +22,7 @@ impl ToCbor for DomesticDrivingPrivileges {
     }
 }
 
-// todo: use ToCbor
-// #[derive(Clone, Debug, FromJson, ToCbor)]
-#[derive(Clone, Debug, FieldsNames, FromJson)]
+#[derive(Clone, Debug, FromJson, FieldsNames)]
 #[isomdl(crate = "crate")]
 pub struct DomesticDrivingPrivilege {
     pub domestic_vehicle_class: Option<DomesticVehicleClass>,
@@ -57,9 +55,7 @@ impl ToCbor for DomesticDrivingPrivilege {
     }
 }
 
-// todo: use ToCbor
-// #[derive(Clone, Debug, FromJson, ToCbor)]
-#[derive(Clone, Debug, FieldsNames, FromJson)]
+#[derive(Clone, Debug, FromJson, FieldsNames)]
 #[isomdl(crate = "crate")]
 pub struct DomesticVehicleClass {
     pub domestic_vehicle_class_code: String,
@@ -153,28 +149,9 @@ impl ToCbor for DomesticVehicleEndorsements {
     }
 }
 
-// todo: use ToCbor
-// #[derive(Clone, Debug, FromJson, ToCbor)]
-#[derive(Clone, Debug, FieldsNames, FromJson)]
+#[derive(Clone, Debug, FromJson, ToCbor)]
 #[isomdl(crate = "crate")]
 pub struct DomesticVehicleEndorsement {
     pub domestic_vehicle_endorsement_code: Option<String>,
     pub domestic_vehicle_endorsement_description: String,
-}
-
-impl ToCbor for DomesticVehicleEndorsement {
-    fn to_cbor(self) -> CborValue {
-        let mut map = BTreeMap::new();
-        if let Some(domestic_vehicle_endorsement_code) = self.domestic_vehicle_endorsement_code {
-            map.insert(
-                DomesticVehicleEndorsement::fn_domestic_vehicle_endorsement_code().into(),
-                domestic_vehicle_endorsement_code.into(),
-            );
-        }
-        map.insert(
-            DomesticVehicleEndorsement::fn_domestic_vehicle_endorsement_description().into(),
-            self.domestic_vehicle_endorsement_description.into(),
-        );
-        CborValue::Map(map)
-    }
 }

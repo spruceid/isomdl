@@ -731,7 +731,6 @@ impl_from!(CborValue::Float, f32);
 impl_from!(CborValue::Float, f64);
 impl_from!(CborValue::Bytes, Vec<u8>);
 impl_from!(CborValue::Text, String);
-// TODO: figure out if these impls should be more generic or removed.
 impl_from!(CborValue::Array, Vec<CborValue>);
 impl_from!(CborValue::Map, BTreeMap<CborValue, CborValue>);
 

@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
+use std::str::FromStr;
+
 use ciborium::Value;
 use coset::{AsCborValue, CborSerializable};
 use isomdl_macros::FieldsNames;
-use std::collections::BTreeMap;
-use std::str::FromStr;
 use thiserror::Error;
 
 use crate::cbor::CborValue;
@@ -30,8 +31,6 @@ impl From<DrivingPrivileges> for CborValue {
     }
 }
 
-// todo: use ToCbor
-// #[derive(Clone, Debug, FromJson, ToCbor)]
 #[derive(Clone, Debug, FieldsNames, FromJson)]
 #[isomdl(crate = "crate")]
 pub struct DrivingPrivilege {
