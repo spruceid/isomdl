@@ -1,31 +1,31 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use ciborium::Value;
-use coset::AsCborValue;
+use coset::{AsCborValue, CborSerializable};
 use isomdl_macros::FieldsNames;
-use serde::{Deserialize, Serialize};
 use strum_macros::{AsRefStr, EnumString};
 use thiserror::Error;
 
+use crate::definitions::helpers::b_tree_map_string_cbor::BTreeMapCbor;
+use crate::definitions::helpers::string_cbor::CborString;
 use crate::definitions::{
     helpers::{NonEmptyMap, NonEmptyVec},
     DeviceSigned, IssuerSigned,
 };
 
 /// Represents a device response.
-#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct DeviceResponse {
     /// The version of the response.
     pub version: String,
 
     /// The documents associated with the response, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     pub documents: Option<Documents>,
 
     /// The errors associated with the documents, if any.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     pub document_errors: Option<DocumentErrors>,
 
     /// The status of the response.
@@ -37,8 +37,7 @@ pub type Documents = NonEmptyVec<Document>;
 /// Represents a document.
 ///
 /// This struct is used to store information about a document.
-#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct Document {
     /// A string representing the type of the document.
@@ -51,7 +50,7 @@ pub struct Document {
     pub device_signed: DeviceSigned,
 
     /// An optional instance of the [Errors] struct representing any errors associated with the document.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     pub errors: Option<Errors>,
 }
 
@@ -76,7 +75,7 @@ impl AsCborValue for Document {
             })
             .collect::<HashMap<String, Value>>();
         Ok(Document {
-            doc_type: if let Some(Value::Text(s)) = fields.remove(Document::doc_type()) {
+            doc_type: if let Some(Value::Text(s)) = fields.remove(Document::fn_doc_type()) {
                 s
             } else {
                 return Err(coset::CoseError::UnexpectedItem(
@@ -85,21 +84,23 @@ impl AsCborValue for Document {
                 ));
             },
             issuer_signed: IssuerSigned::from_cbor_value(
-                fields
-                    .remove(Document::issuer_signed())
-                    .ok_or(coset::CoseError::DecodeFailed(
-                        ciborium::de::Error::Semantic(None, "issuer_signed is missing".to_string()),
-                    ))?,
+                fields.remove(Document::fn_issuer_signed()).ok_or(
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "issuer_signed is missing".to_string(),
+                    )),
+                )?,
             )?,
             device_signed: DeviceSigned::from_cbor_value(
-                fields
-                    .remove(Document::device_signed())
-                    .ok_or(coset::CoseError::DecodeFailed(
-                        ciborium::de::Error::Semantic(None, "device_signed is missing".to_string()),
-                    ))?,
+                fields.remove(Document::fn_device_signed()).ok_or(
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "device_signed is missing".to_string(),
+                    )),
+                )?,
             )?,
 
-            errors: if let Some(errors) = fields.remove(Document::errors()) {
+            errors: if let Some(errors) = fields.remove(Document::fn_errors()) {
                 Some(cbor_value_to_errors(errors)?)
             } else {
                 None
@@ -110,21 +111,21 @@ impl AsCborValue for Document {
     fn to_cbor_value(self) -> coset::Result<Value> {
         let mut map = vec![
             (
-                Value::Text(Document::doc_type().to_string()),
+                Value::Text(Document::fn_doc_type().to_string()),
                 Value::Text(self.doc_type),
             ),
             (
-                Value::Text(Document::issuer_signed().to_string()),
+                Value::Text(Document::fn_issuer_signed().to_string()),
                 self.issuer_signed.to_cbor_value()?,
             ),
             (
-                Value::Text(Document::device_signed().to_string()),
+                Value::Text(Document::fn_device_signed().to_string()),
                 self.device_signed.to_cbor_value()?,
             ),
         ];
         if let Some(errors) = self.errors {
             map.push((
-                Value::Text(Document::errors().to_string()),
+                Value::Text(Document::fn_errors().to_string()),
                 errors_to_cbor_value(errors)?,
             ));
         }
@@ -138,13 +139,13 @@ fn errors_to_cbor_value(val: Errors) -> coset::Result<Value> {
             .into_iter()
             .map(|(k, v)| {
                 (
-                    Value::Text(k),
+                    Value::Text(k.to_string()),
                     Value::Map(
                         v.into_inner()
                             .into_iter()
                             .flat_map(|(k, v)| {
                                 Ok::<(Value, Value), coset::CoseError>((
-                                    Value::Text(k),
+                                    Value::Text(k.to_string()),
                                     Value::Integer(
                                         match v {
                                             DocumentErrorCode::DataNotReturned => 0_i128,
@@ -170,18 +171,20 @@ fn cbor_value_to_errors(val: Value) -> coset::Result<Errors> {
         .into_iter()
         .flat_map(|(k, v)| {
             // NonEmptyMap<String, NonEmptyMap<String, DocumentErrorCode>>
-            let key = k
+            let key: CborString = k
                 .into_text()
-                .map_err(|_| coset::CoseError::UnexpectedItem("value", "text"))?;
+                .map_err(|_| coset::CoseError::UnexpectedItem("value", "text"))?
+                .into();
             let value = v
                 .into_map()
                 .map_err(|_| coset::CoseError::UnexpectedItem("value", "map"))?
                 .into_iter()
                 .flat_map(|(k, v)| {
                     // NonEmptyMap<String, DocumentErrorCode>>
-                    let key = k
+                    let key: CborString = k
                         .into_text()
-                        .map_err(|_| coset::CoseError::UnexpectedItem("value", "text"))?;
+                        .map_err(|_| coset::CoseError::UnexpectedItem("value", "text"))?
+                        .into();
                     let value = v
                         .into_integer()
                         .map_err(|_| coset::CoseError::UnexpectedItem("value", "integer"))?
@@ -191,31 +194,62 @@ fn cbor_value_to_errors(val: Value) -> coset::Result<Errors> {
                         0 => DocumentErrorCode::DataNotReturned,
                         i => DocumentErrorCode::ApplicationSpecific(i),
                     };
-                    Ok::<(String, DocumentErrorCode), coset::CoseError>((key, value))
+                    Ok::<(CborString, DocumentErrorCode), coset::CoseError>((key, value))
                 })
-                .collect::<NonEmptyMap<String, DocumentErrorCode>>();
-            Ok::<(String, NonEmptyMap<String, DocumentErrorCode>), coset::CoseError>((key, value))
+                .collect::<NonEmptyMap<CborString, DocumentErrorCode>>();
+            Ok::<(CborString, NonEmptyMap<CborString, DocumentErrorCode>), coset::CoseError>((
+                key, value,
+            ))
         })
         .collect::<Errors>())
 }
 
 /// Errors mapped by namespace and element identifier.
-pub type Errors = NonEmptyMap<String, NonEmptyMap<String, DocumentErrorCode>>;
+pub type Errors = NonEmptyMap<CborString, NonEmptyMap<CborString, DocumentErrorCode>>;
 /// A list of document errors.
 pub type DocumentErrors = NonEmptyVec<DocumentError>;
 /// A map of document type to document error for them.
-pub type DocumentError = BTreeMap<String, DocumentErrorCode>;
-
+pub type DocumentError = BTreeMapCbor<CborString, DocumentErrorCode>;
 /// Document specific errors.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "i128", into = "i128")]
+#[derive(Clone, Debug)]
 pub enum DocumentErrorCode {
     DataNotReturned,
     ApplicationSpecific(i128),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, EnumString, AsRefStr)]
-#[serde(try_from = "u64", into = "u64")]
+impl CborSerializable for DocumentErrorCode {}
+impl AsCborValue for DocumentErrorCode {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let map = value.into_integer().map_err(|_| {
+            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "not an integer".to_string(),
+            ))
+        })?;
+        let v = map.try_into().map_err(|_| {
+            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                None,
+                "not an integer".to_string(),
+            ))
+        })?;
+        Ok(match v {
+            0 => DocumentErrorCode::DataNotReturned,
+            i => DocumentErrorCode::ApplicationSpecific(i),
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let v = match self {
+            DocumentErrorCode::DataNotReturned => 0,
+            DocumentErrorCode::ApplicationSpecific(v) => v,
+        };
+        Ok(Value::Integer(
+            v.try_into().map_err(|_| coset::CoseError::EncodeFailed)?,
+        ))
+    }
+}
+
+#[derive(Clone, Debug, EnumString, AsRefStr)]
 pub enum Status {
     OK = 0,
     GeneralError = 1,
@@ -281,7 +315,7 @@ impl AsCborValue for DeviceResponse {
             })
             .collect::<HashMap<String, Value>>();
         Ok(DeviceResponse {
-            version: if let Some(Value::Text(s)) = fields.remove(DeviceResponse::version()) {
+            version: if let Some(Value::Text(s)) = fields.remove(DeviceResponse::fn_version()) {
                 s
             } else {
                 return Err(coset::CoseError::UnexpectedItem(
@@ -289,13 +323,13 @@ impl AsCborValue for DeviceResponse {
                     "text for version",
                 ));
             },
-            documents: if let Some(documents) = fields.remove(DeviceResponse::documents()) {
+            documents: if let Some(documents) = fields.remove(DeviceResponse::fn_documents()) {
                 Some(Documents::from_cbor_value(documents)?)
             } else {
                 None
             },
             document_errors: if let Some(document_errors) =
-                fields.remove(DeviceResponse::document_errors())
+                fields.remove(DeviceResponse::fn_document_errors())
             {
                 Some(cbor_value_to_document_errors(document_errors)?)
             } else {
@@ -303,7 +337,7 @@ impl AsCborValue for DeviceResponse {
             },
             status: {
                 let status: u64 = fields
-                    .remove(DeviceResponse::status())
+                    .remove(DeviceResponse::fn_status())
                     .ok_or(coset::CoseError::UnexpectedItem(
                         "value",
                         "integer for status",
@@ -325,23 +359,23 @@ impl AsCborValue for DeviceResponse {
     fn to_cbor_value(self) -> coset::Result<Value> {
         let mut map = vec![];
         map.push((
-            Value::Text(DeviceResponse::version().to_string()),
+            Value::Text(DeviceResponse::fn_version().to_string()),
             Value::Text(self.version),
         ));
         if let Some(documents) = self.documents {
             map.push((
-                Value::Text(DeviceResponse::documents().to_string()),
+                Value::Text(DeviceResponse::fn_documents().to_string()),
                 documents.to_cbor_value()?,
             ));
         }
         if let Some(document_errors) = self.document_errors {
             map.push((
-                Value::Text(DeviceResponse::document_errors().to_string()),
+                Value::Text(DeviceResponse::fn_document_errors().to_string()),
                 document_errors_to_cbor_value(document_errors)?,
             ));
         }
         map.push((
-            Value::Text(DeviceResponse::status().to_string()),
+            Value::Text(DeviceResponse::fn_status().to_string()),
             Value::Integer((self.status as u64).into()),
         ));
         Ok(Value::Map(map))
@@ -387,12 +421,13 @@ fn document_errors_to_cbor_value(docs: DocumentErrors) -> coset::Result<Value> {
         docs.into_inner()
             .into_iter()
             .map(|doc_err| {
-                Value::Map(
+                Ok::<Value, coset::CoseError>(Value::Map(
                     doc_err
+                        .into_inner()
                         .into_iter()
-                        .flat_map(|(k, v)| {
+                        .map(|(k, v)| {
                             Ok::<(Value, Value), coset::CoseError>((
-                                Value::Text(k),
+                                Value::Text(k.to_string()),
                                 Value::Integer(
                                     match v {
                                         DocumentErrorCode::DataNotReturned => 0_i128,
@@ -403,10 +438,10 @@ fn document_errors_to_cbor_value(docs: DocumentErrors) -> coset::Result<Value> {
                                 ),
                             ))
                         })
-                        .collect(),
-                )
+                        .collect::<coset::Result<Vec<(Value, Value)>>>()?,
+                ))
             })
-            .collect(),
+            .collect::<coset::Result<Vec<Value>>>()?,
     ))
 }
 
@@ -417,7 +452,7 @@ fn cbor_value_to_document_errors(val: Value) -> coset::Result<DocumentErrors> {
             "not an array".to_string(),
         ))
     })?;
-    let mut docs = vec![];
+    let mut docs = Vec::<DocumentError>::new();
     for doc_err in arr {
         let doc_err = doc_err.into_map().map_err(|_| {
             coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
@@ -425,7 +460,7 @@ fn cbor_value_to_document_errors(val: Value) -> coset::Result<DocumentErrors> {
                 "not a map".to_string(),
             ))
         })?;
-        let mut doc_err_map = BTreeMap::new();
+        let mut doc_err_map = DocumentError::new();
         for (k, v) in doc_err {
             let k = k
                 .as_text()
@@ -450,7 +485,7 @@ fn cbor_value_to_document_errors(val: Value) -> coset::Result<DocumentErrors> {
             } else {
                 DocumentErrorCode::ApplicationSpecific(code)
             };
-            doc_err_map.insert(k, v);
+            doc_err_map.insert(k.into(), v);
         }
         docs.push(doc_err_map);
     }
@@ -487,10 +522,11 @@ mod test {
     fn serde_device_response() {
         let cbor_bytes =
             <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");
-        let response: DeviceResponse =
-            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as a DeviceResponse");
-        let roundtripped_bytes =
-            serde_cbor::to_vec(&response).expect("unable to encode DeviceResponse as cbor bytes");
+        let response = DeviceResponse::from_slice(&cbor_bytes)
+            .expect("unable to decode cbor as a DeviceResponse");
+        let roundtripped_bytes = response
+            .to_vec()
+            .expect("unable to encode DeviceResponse as cbor bytes");
         assert_eq!(
             cbor_bytes, roundtripped_bytes,
             "original cbor and re-serialized DeviceResponse do not match"

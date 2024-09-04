@@ -38,7 +38,7 @@ impl<T: Clone> NonEmptyVec<T> {
             .map(Into::into)
             .collect::<Vec<T2>>()
             .try_into()
-            // Originally was a NonEmptyVec so there is at least one element
+            // Originally was a NonEmptyVec, so there is at least one element,
             // and therefore we can safely unwrap.
             .unwrap()
     }
@@ -53,7 +53,7 @@ impl<T: Clone> NonEmptyVec<T> {
             .map(T2::try_from)
             .collect::<Result<Vec<T2>, E>>()?
             .try_into()
-            // Originally was a NonEmptyVec so there is at least one element
+            // Originally was a NonEmptyVec, so there is at least one element,
             // and therefore we can safely unwrap.
             .unwrap())
     }

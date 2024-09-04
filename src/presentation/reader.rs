@@ -27,9 +27,11 @@ use crate::definitions::{
     DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
 };
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable};
+use isomdl_macros::FieldsNames;
 use serde_json::json;
-use serde_json::Value;
+use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -39,13 +41,161 @@ use uuid::Uuid;
 /// for handling the session with the device.
 ///
 /// The transition to this state is made by [SessionManager::establish_session].
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, FieldsNames)]
 pub struct SessionManager {
     session_transcript: SessionTranscript180135,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
+}
+
+impl CborSerializable for SessionManager {}
+impl AsCborValue for SessionManager {
+    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "Mdoc is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(SessionManager {
+            session_transcript: SessionTranscript180135::from_cbor_value(
+                map.remove(&SessionManager::fn_session_transcript().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "session_transcript not found".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            sk_device: map
+                .remove(&SessionManager::fn_sk_device().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "sk_device not found".to_string()),
+                ))?
+                .into_bytes()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "sk_device not a byte array".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "sk_device not a byte array".to_string(),
+                    ))
+                })?,
+            device_message_counter: map
+                .remove(&SessionManager::fn_device_message_counter().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "device_message_counter not found".to_string(),
+                    ),
+                ))?
+                .into_integer()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "device_message_counter not an integer".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "device_message_counter not an integer".to_string(),
+                    ))
+                })?,
+            sk_reader: map
+                .remove(&SessionManager::fn_sk_reader().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "sk_reader not found".to_string()),
+                ))?
+                .into_bytes()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "sk_reader not a byte array".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "sk_reader not a byte array".to_string(),
+                    ))
+                })?,
+            reader_message_counter: map
+                .remove(&SessionManager::fn_reader_message_counter().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "reader_message_counter not found".to_string(),
+                    ),
+                ))?
+                .into_integer()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "reader_message_counter not an integer".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "reader_message_counter not an integer".to_string(),
+                    ))
+                })?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
+        Ok(Value::Map(
+            vec![
+                (
+                    Value::Text(SessionManager::fn_session_transcript().to_string()),
+                    self.session_transcript.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(SessionManager::fn_sk_device().to_string()),
+                    self.sk_device.to_vec().into(),
+                ),
+                (
+                    Value::Text(SessionManager::fn_device_message_counter().to_string()),
+                    Value::Integer(
+                        self.device_message_counter
+                            .try_into()
+                            .map_err(|_| coset::CoseError::EncodeFailed)?,
+                    ),
+                ),
+                (
+                    Value::Text(SessionManager::fn_sk_reader().to_string()),
+                    self.sk_reader.to_vec().into(),
+                ),
+                (
+                    Value::Text(SessionManager::fn_reader_message_counter().to_string()),
+                    Value::Integer(
+                        self.reader_message_counter
+                            .try_into()
+                            .map_err(|_| coset::CoseError::EncodeFailed)?,
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+    }
 }
 
 /// Various errors that can occur during the interaction with the device.
@@ -86,8 +236,8 @@ pub enum Error {
     InvalidRequest,
 }
 
-impl From<serde_cbor::Error> for Error {
-    fn from(_: serde_cbor::Error) -> Self {
+impl From<coset::CoseError> for Error {
+    fn from(_: coset::CoseError) -> Self {
         Error::CborDecodingError
     }
 }
@@ -155,7 +305,7 @@ impl SessionManager {
             data: request.into(),
             e_reader_key: e_reader_key_public,
         };
-        let session_request = serde_cbor::to_vec(&session)?;
+        let session_request = session.to_vec()?;
 
         Ok((session_manager, session_request, ble_ident))
     }
@@ -186,7 +336,7 @@ impl SessionManager {
             data: Some(request.into()),
             status: None,
         };
-        serde_cbor::to_vec(&session).map_err(Into::into)
+        session.to_vec().map_err(Into::into)
     }
 
     fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
@@ -208,7 +358,7 @@ impl SessionManager {
             version: DeviceRequest::VERSION.to_string(),
             doc_requests: NonEmptyVec::new(doc_request),
         };
-        let device_request_bytes = serde_cbor::to_vec(&device_request)?;
+        let device_request_bytes = device_request.to_vec()?;
         session::encrypt_reader_data(
             &self.sk_reader.into(),
             &device_request_bytes,
@@ -226,8 +376,8 @@ impl SessionManager {
     pub fn handle_response(
         &mut self,
         response: &[u8],
-    ) -> Result<BTreeMap<String, BTreeMap<String, Value>>, Error> {
-        let session_data: SessionData = serde_cbor::from_slice(response)?;
+    ) -> Result<BTreeMap<String, BTreeMap<String, JsonValue>>, Error> {
+        let session_data = SessionData::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
             Some(r) => r,
@@ -238,7 +388,7 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
-        let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
+        let response = DeviceResponse::from_slice(&decrypted_response)?;
         let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
         let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
         let mut parsed_response = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
@@ -291,18 +441,18 @@ impl SessionManager {
     }
 }
 
-fn parse_response(value: CborValue) -> Result<Value, Error> {
+fn parse_response(value: CborValue) -> Result<JsonValue, Error> {
     match value {
-        CborValue::Text(s) => Ok(Value::String(s)),
+        CborValue::Text(s) => Ok(JsonValue::String(s)),
         CborValue::Tag(_t, v) => {
             if let CborValue::Text(d) = *v {
-                Ok(Value::String(d))
+                Ok(JsonValue::String(d))
             } else {
                 Err(Error::ParsingError)
             }
         }
         CborValue::Array(v) => {
-            let mut array_response = Vec::<Value>::new();
+            let mut array_response = Vec::<JsonValue>::new();
             for a in v {
                 let r = parse_response(a)?;
                 array_response.push(r);
@@ -310,7 +460,7 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             Ok(json!(array_response))
         }
         CborValue::Map(m) => {
-            let mut map_response = serde_json::Map::<String, Value>::new();
+            let mut map_response = serde_json::Map::<String, JsonValue>::new();
             for (key, value) in m {
                 if let CborValue::Text(k) = key {
                     let parsed = parse_response(value)?;
@@ -353,7 +503,7 @@ mod test {
 
     #[test]
     fn nested_response_values() {
-        let domestic_driving_privileges = serde_cbor::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
+        let domestic_driving_privileges = CborValue::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
         let json = parse_response(domestic_driving_privileges).unwrap();
         let expected = serde_json::json!(
           [

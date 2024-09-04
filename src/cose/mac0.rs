@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ::hmac::Hmac;
 use coset::cbor::Value;
 use coset::cwt::ClaimsSet;
@@ -6,9 +8,10 @@ use coset::{
     RegisteredLabelWithPrivate, TaggedCborSerializable,
 };
 use digest::{Mac, MacError};
-use serde::{ser, Deserialize, Deserializer, Serialize};
+use isomdl_macros::FieldsNames;
 use sha2::Sha256;
 
+use crate::cbor::CborValue;
 use crate::cose::SignatureAlgorithm;
 
 /// Prepared `COSE_Mac0` for remote signing.
@@ -49,11 +52,85 @@ use crate::cose::SignatureAlgorithm;
 ///     mac.update(signature_payload);
 ///     Ok(mac.finalize().into_bytes().to_vec())
 ///  }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, FieldsNames)]
 pub struct PreparedCoseMac0 {
     tagged: bool,
     cose_mac0: CoseMac0,
     tag_payload: Vec<u8>,
+}
+
+impl CborSerializable for PreparedCoseMac0 {}
+impl AsCborValue for PreparedCoseMac0 {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "PreparedCoseSign1 is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(PreparedCoseMac0 {
+            tagged: map
+                .remove(&CborValue::Text(PreparedCoseMac0::fn_tagged().to_string()))
+                .ok_or(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "tagged not found".to_string(),
+                )))?
+                .into_bool()
+                .map_err(|_| {
+                    CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "tagged is not a bool".to_string(),
+                    ))
+                })?,
+            cose_mac0: CoseMac0::from_cbor_value(
+                map.remove(&CborValue::Text(
+                    PreparedCoseMac0::fn_cose_mac0().to_string(),
+                ))
+                .ok_or(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "cose_sign1 not found".to_string(),
+                )))?
+                .into(),
+            )?,
+            tag_payload: map
+                .remove(&CborValue::Text(
+                    PreparedCoseMac0::fn_tag_payload().to_string(),
+                ))
+                .ok_or(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "signature_payload not found".to_string(),
+                )))?
+                .into_bytes()
+                .map_err(|_| {
+                    CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "signature_payload is not bytes".to_string(),
+                    ))
+                })?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(vec![
+            (
+                Value::Text(PreparedCoseMac0::fn_tagged().to_string()),
+                Value::Bool(self.tagged),
+            ),
+            (
+                Value::Text(PreparedCoseMac0::fn_cose_mac0().to_string()),
+                self.cose_mac0.to_cbor_value()?,
+            ),
+            (
+                Value::Text(PreparedCoseMac0::fn_tag_payload().to_string()),
+                Value::Bytes(self.tag_payload),
+            ),
+        ]))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -386,6 +463,7 @@ mod tests {
         let cose_mac0 = prepared.finalize(signature);
 
         let serialized = cose_mac0
+            .clone()
             .to_vec()
             .expect("failed to serialize COSE_MAC0 to bytes");
 

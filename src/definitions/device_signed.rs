@@ -21,11 +21,10 @@ use serde::{Deserialize, Serialize};
 use strum_macros::AsRefStr;
 
 /// Represents a device-signed structure.
-#[derive(Clone, Debug, FieldsNames, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct DeviceSigned {
-    #[serde(rename = "nameSpaces")]
+    #[isomdl(rename = "nameSpaces")]
     /// A [DeviceNamespacesBytes] struct representing the namespaces.
     pub namespaces: DeviceNamespacesBytes,
 
@@ -41,22 +40,45 @@ pub type DeviceSignedItems = NonEmptyMap<CborString, Value>;
 ///
 /// This struct contains the device signature in the form of a [CoseSign1] object.
 /// The [CoseSign1] object represents a `COSE (CBOR Object Signing and Encryption) signature.
-#[derive(Clone, Debug, FieldsNames, AsRefStr)]
-#[isomdl(rename_all = "camelCase")]
+#[derive(Clone, Debug, AsRefStr)]
 pub enum DeviceAuth {
-    #[isomdl(rename_all = "camelCase")]
     Signature { device_signature: CoseSign1 },
-    #[isomdl(rename_all = "camelCase")]
     Mac { device_mac: CoseMac0 },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Copy, FieldsNames)]
 pub enum DeviceAuthType {
-    #[serde(rename_all = "camelCase")]
     Sign1,
-    #[serde(rename_all = "camelCase")]
     Mac0,
+}
+
+impl CborSerializable for DeviceAuthType {}
+impl AsCborValue for DeviceAuthType {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        Ok(match value {
+            Value::Text(s) => match s.as_str() {
+                "sign1" => DeviceAuthType::Sign1,
+                "mac0" => DeviceAuthType::Mac0,
+                _ => {
+                    return Err(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "unknown device auth type".to_string()),
+                    ))
+                }
+            },
+            _ => {
+                return Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(None, "not a text".to_string()),
+                ))
+            }
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(match self {
+            DeviceAuthType::Sign1 => Value::Text(DeviceAuthType::fn_sign1().to_string()),
+            DeviceAuthType::Mac0 => Value::Text(DeviceAuthType::fn_mac0().to_string()),
+        })
+    }
 }
 
 pub type DeviceAuthenticationBytes<S> = Tag24<DeviceAuthentication<S>>;
@@ -212,17 +234,15 @@ impl AsCborValue for DeviceSigned {
             .collect::<HashMap<String, Value>>();
         Ok(DeviceSigned {
             namespaces: DeviceNamespacesBytes::from_cbor_value(
-                fields
-                    .remove(DeviceSigned::namespaces())
-                    .ok_or(coset::CoseError::DecodeFailed(
-                        ciborium::de::Error::Semantic(
-                            None,
-                            "DeviceSigned::namespaces is missing".to_string(),
-                        ),
-                    ))?,
+                fields.remove(DeviceSigned::fn_namespaces()).ok_or(
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "DeviceSigned::namespaces is missing".to_string(),
+                    )),
+                )?,
             )?,
             device_auth: DeviceAuth::from_cbor_value(
-                fields.remove(DeviceSigned::device_auth()).ok_or(
+                fields.remove(DeviceSigned::fn_device_auth()).ok_or(
                     coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                         None,
                         "DeviceSigned::device_auth is missing".to_string(),
@@ -236,11 +256,11 @@ impl AsCborValue for DeviceSigned {
         Ok(Value::Map(
             vec![
                 (
-                    Value::Text(DeviceSigned::namespaces().to_string()),
+                    Value::Text(DeviceSigned::fn_namespaces().to_string()),
                     self.namespaces.to_cbor_value()?,
                 ),
                 (
-                    Value::Text(DeviceSigned::device_auth().to_string()),
+                    Value::Text(DeviceSigned::fn_device_auth().to_string()),
                     self.device_auth.to_cbor_value()?,
                 ),
             ]

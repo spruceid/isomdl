@@ -404,7 +404,7 @@ impl TryFrom<CborValue> for DeviceEngagement {
 impl Tag24<DeviceEngagement> {
     const BASE64_CONFIG: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
 
-    pub fn to_qr_code_uri(&self) -> Result<String, serde_cbor::Error> {
+    pub fn to_qr_code_uri(&self) -> Result<String, coset::CoseError> {
         let mut qr_code_uri = String::from("mdoc:");
         base64::encode_config_buf(&self.inner_bytes, Self::BASE64_CONFIG, &mut qr_code_uri);
         Ok(qr_code_uri)
@@ -722,7 +722,7 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
     fn try_from(value: CborValue) -> std::result::Result<Self, Self::Error> {
         let mut map = value.into_map().map_err(|_| Error::Malformed)?;
         let mut web_api = map
-            .remove(&ServerRetrievalMethods::web_api().into())
+            .remove(&ServerRetrievalMethods::fn_web_api().into())
             .map(|v| v.into_array())
             .transpose()
             .map_err(|_| Error::Malformed)?
@@ -730,7 +730,7 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
             .flatten()
             .collect::<Vec<_>>();
         let mut oidc = map
-            .remove(&ServerRetrievalMethods::oidc().into())
+            .remove(&ServerRetrievalMethods::fn_oidc().into())
             .map(|v| v.into_array())
             .transpose()
             .map_err(|_| Error::Malformed)?
@@ -754,6 +754,7 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
 
 #[cfg(test)]
 mod test {
+    use coset::CborSerializable;
     use uuid::Uuid;
 
     use crate::definitions::session::create_p256_ephemeral_keys;
@@ -783,8 +784,8 @@ mod test {
             protocol_info: None,
         };
 
-        let bytes = serde_cbor::to_vec(&device_engagement).unwrap();
-        let roundtripped = serde_cbor::from_slice(&bytes).unwrap();
+        let bytes = device_engagement.clone().to_vec().unwrap();
+        let roundtripped = DeviceEngagement::from_slice(&bytes).unwrap();
 
         assert_eq!(device_engagement, roundtripped)
     }
@@ -798,8 +799,8 @@ mod test {
     }
 
     fn wifi_options_cbor_roundtrip_test(wifi_options: WifiOptions) {
-        let bytes: Vec<u8> = serde_cbor::to_vec(&wifi_options).unwrap();
-        let deserialized: WifiOptions = serde_cbor::from_slice(&bytes).unwrap();
+        let bytes: Vec<u8> = wifi_options.clone().to_vec().unwrap();
+        let deserialized = WifiOptions::from_slice(&bytes).unwrap();
         assert_eq!(wifi_options, deserialized);
     }
 

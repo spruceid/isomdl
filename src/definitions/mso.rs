@@ -82,8 +82,7 @@ impl TryFrom<CborValue> for DigestIds {
 }
 
 /// Represents an [Mso] object.
-#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct Mso {
     /// The version of the Mso object.
@@ -121,7 +120,7 @@ impl AsCborValue for Mso {
             .collect::<BTreeMap<CborValue, CborValue>>();
         Ok(Mso {
             version: map
-                .remove(&Mso::version().into())
+                .remove(&Mso::fn_version().into())
                 .ok_or_else(|| {
                     coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                         None,
@@ -136,7 +135,7 @@ impl AsCborValue for Mso {
                     ))
                 })?,
             digest_algorithm: match map
-                .remove(&Mso::digest_algorithm().into())
+                .remove(&Mso::fn_digest_algorithm().into())
                 .ok_or_else(|| {
                     coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                         None,
@@ -163,7 +162,7 @@ impl AsCborValue for Mso {
                 }
             },
             value_digests: map
-                .remove(&Mso::value_digests().into())
+                .remove(&Mso::fn_value_digests().into())
                 .ok_or(coset::CoseError::DecodeFailed(
                     ciborium::de::Error::Semantic(None, "value_digests is missing".to_string()),
                 ))?
@@ -218,7 +217,7 @@ impl AsCborValue for Mso {
                 })
                 .collect::<coset::Result<BTreeMap<String, DigestIds>>>()?,
             device_key_info: DeviceKeyInfo::from_cbor_value(
-                map.remove(&Mso::device_key_info().into())
+                map.remove(&Mso::fn_device_key_info().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(
                             None,
@@ -228,7 +227,7 @@ impl AsCborValue for Mso {
                     .into(),
             )?,
             doc_type: map
-                .remove(&Mso::doc_type().into())
+                .remove(&Mso::fn_doc_type().into())
                 .ok_or_else(|| {
                     coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                         None,
@@ -243,7 +242,7 @@ impl AsCborValue for Mso {
                     ))
                 })?,
             validity_info: ValidityInfo::from_cbor_value(
-                map.remove(&Mso::validity_info().into())
+                map.remove(&Mso::fn_validity_info().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(None, "validity_info not found".to_string()),
                     ))?
@@ -255,11 +254,11 @@ impl AsCborValue for Mso {
     fn to_cbor_value(self) -> coset::Result<Value> {
         let mut map = vec![];
         map.push((
-            Value::Text(Mso::version().to_string()),
+            Value::Text(Mso::fn_version().to_string()),
             Value::Text(self.version),
         ));
         map.push((
-            Mso::digest_algorithm().into(),
+            Mso::fn_digest_algorithm().into(),
             match self.digest_algorithm {
                 DigestAlgorithm::SHA256 => 1.into(),
                 DigestAlgorithm::SHA384 => 2.into(),
@@ -267,7 +266,7 @@ impl AsCborValue for Mso {
             },
         ));
         map.push((
-            Mso::value_digests().into(),
+            Mso::fn_value_digests().into(),
             Value::Map(
                 self.value_digests
                     .into_iter()
@@ -285,28 +284,25 @@ impl AsCborValue for Mso {
             ),
         ));
         map.push((
-            Value::Text(Mso::device_key_info().to_string()),
+            Value::Text(Mso::fn_device_key_info().to_string()),
             self.device_key_info.to_cbor_value()?,
         ));
         map.push((
-            Value::Text(Mso::doc_type().to_string()),
+            Value::Text(Mso::fn_doc_type().to_string()),
             Value::Text(self.doc_type),
         ));
         map.push((
-            Value::Text(Mso::validity_info().to_string()),
+            Value::Text(Mso::fn_validity_info().to_string()),
             self.validity_info.to_cbor_value()?,
         ));
         Ok(Value::Map(map))
     }
 }
 
-#[derive(Clone, Debug, Copy, FieldsNames, Deserialize, Serialize)]
+#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
 pub enum DigestAlgorithm {
-    #[serde(rename = "SHA-256")]
     SHA256,
-    #[serde(rename = "SHA-384")]
     SHA384,
-    #[serde(rename = "SHA-512")]
     SHA512,
 }
 
@@ -319,6 +315,7 @@ impl DigestId {
 #[cfg(test)]
 mod test {
     use crate::definitions::{helpers::Tag24, IssuerSigned, Mso};
+    use coset::CborSerializable;
     use hex::FromHex;
 
     static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/definitions/issuer_signed.cbor");
@@ -327,18 +324,16 @@ mod test {
     fn serde_mso() {
         let cbor_bytes =
             <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
-        let signed: IssuerSigned =
-            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
+        let signed = IssuerSigned::from_slice(&cbor_bytes)
+            .expect("unable to decode cbor as an IssuerSigned");
         let mso_bytes = signed
             .issuer_auth
             .inner
             .payload
             .as_ref()
             .expect("expected a COSE_Sign1 with attached payload, found detached payload");
-        let mso: Tag24<Mso> =
-            serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");
-        let roundtripped_bytes =
-            serde_cbor::to_vec(&mso).expect("unable to encode Mso as cbor bytes");
+        let mso = Tag24::<Mso>::from_slice(mso_bytes).expect("unable to parse payload as Mso");
+        let roundtripped_bytes = mso.to_vec().expect("unable to encode Mso as cbor bytes");
         assert_eq!(
             mso_bytes, &roundtripped_bytes,
             "original cbor and re-serialized Mso do not match"

@@ -47,7 +47,6 @@ use std::collections::BTreeMap;
 use ciborium::Value;
 use coset::{AsCborValue, CborSerializable};
 use isomdl_macros::FieldsNames;
-use serde::{Deserialize, Serialize};
 
 pub use cose_key::CoseKey;
 pub use cose_key::EC2Curve;
@@ -58,19 +57,18 @@ use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
 
 pub mod cose_key;
 /// Represents information about a device key.
-#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct DeviceKeyInfo {
     /// The device key.
     pub device_key: CoseKey,
 
     /// Optional key authorizations.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     pub key_authorizations: Option<KeyAuthorizations>,
 
     /// Optional key information.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     pub key_info: Option<BTreeMap<CborValue, CborValue>>,
 }
 
@@ -90,7 +88,7 @@ impl AsCborValue for DeviceKeyInfo {
             .collect();
         Ok(DeviceKeyInfo {
             device_key: map
-                .remove(&DeviceKeyInfo::device_key().into())
+                .remove(&DeviceKeyInfo::fn_device_key().into())
                 .ok_or(coset::CoseError::DecodeFailed(
                     ciborium::de::Error::Semantic(None, "device_key is missing".to_string()),
                 ))?
@@ -109,19 +107,19 @@ impl AsCborValue for DeviceKeyInfo {
     fn to_cbor_value(self) -> coset::Result<Value> {
         let mut map = vec![];
         map.push((
-            Value::Text(DeviceKeyInfo::device_key().to_string()),
+            Value::Text(DeviceKeyInfo::fn_device_key().to_string()),
             self.device_key.to_cbor_value()?,
         ));
         if let Some(key_authorizations) = self.key_authorizations {
             map.push((
-                Value::Text(DeviceKeyInfo::key_authorizations().to_string()),
+                Value::Text(DeviceKeyInfo::fn_key_authorizations().to_string()),
                 key_authorizations.to_cbor_value()?,
             ));
         }
         if let Some(key_info) = self.key_info {
             let key_info: NonEmptyMap<CborValue, CborValue> = key_info.into_iter().collect();
             map.push((
-                Value::Text(DeviceKeyInfo::key_info().to_string()),
+                Value::Text(DeviceKeyInfo::fn_key_info().to_string()),
                 key_info.to_cbor_value()?,
             ));
         }
@@ -129,19 +127,16 @@ impl AsCborValue for DeviceKeyInfo {
     }
 }
 
-#[derive(Clone, FieldsNames, Serialize, Deserialize, Debug, Default)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, FieldsNames, Debug, Default)]
 #[isomdl(rename_all = "camelCase")]
 pub struct KeyAuthorizations {
     /// The namespaces associated with the key. This field is optional and will
     /// be skipped during serialization if it is [None].
-    #[serde(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
-    #[isomdl(rename = "nameSpaces")]
+    #[isomdl(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
     pub namespaces: Option<NonEmptyVec<CborString>>,
 
     /// The data elements associated with the key. This field is optional and will
     /// be skipped during serialization if it is [None].
-    #[serde(skip_serializing_if = "Option::is_none")]
     #[isomdl(skip_serializing_if = "Option::is_none")]
     pub data_elements: Option<NonEmptyMap<CborString, NonEmptyVec<CborString>>>,
 }
@@ -162,11 +157,11 @@ impl AsCborValue for KeyAuthorizations {
             .collect::<BTreeMap<CborValue, CborValue>>();
         Ok(KeyAuthorizations {
             namespaces: map
-                .remove(&KeyAuthorizations::namespaces().into())
+                .remove(&KeyAuthorizations::fn_namespaces().into())
                 .map(|v| NonEmptyVec::from_cbor_value(v.into()))
                 .transpose()?,
             data_elements: map
-                .remove(&KeyAuthorizations::data_elements().into())
+                .remove(&KeyAuthorizations::fn_data_elements().into())
                 .map(|v| NonEmptyMap::from_cbor_value(v.into()))
                 .transpose()?,
         })
@@ -176,13 +171,13 @@ impl AsCborValue for KeyAuthorizations {
         let mut map = vec![];
         if let Some(namespaces) = self.namespaces {
             map.push((
-                KeyAuthorizations::namespaces().into(),
+                KeyAuthorizations::fn_namespaces().into(),
                 namespaces.to_cbor_value()?,
             ));
         }
         if let Some(data_elements) = self.data_elements {
             map.push((
-                KeyAuthorizations::data_elements().into(),
+                KeyAuthorizations::fn_data_elements().into(),
                 data_elements.to_cbor_value()?,
             ));
         }

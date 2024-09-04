@@ -17,8 +17,7 @@ pub type Namespaces = NonEmptyMap<NameSpace, DataElements>;
 pub type ReaderAuth = CoseSign1;
 
 /// Represents a device request.
-#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct DeviceRequest {
     /// The version of the device request.
@@ -44,7 +43,7 @@ impl AsCborValue for DeviceRequest {
             .collect::<BTreeMap<CborValue, CborValue>>();
         Ok(DeviceRequest {
             version: map
-                .remove(&DeviceRequest::version().into())
+                .remove(&DeviceRequest::fn_version().into())
                 .ok_or(coset::CoseError::DecodeFailed(
                     ciborium::de::Error::Semantic(None, "version is missing".to_string()),
                 ))?
@@ -56,7 +55,7 @@ impl AsCborValue for DeviceRequest {
                     ))
                 })?,
             doc_requests: NonEmptyVec::from_cbor_value(
-                map.remove(&DeviceRequest::doc_requests().into())
+                map.remove(&DeviceRequest::fn_doc_requests().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(None, "doc_requests is missing".to_string()),
                     ))?
@@ -67,9 +66,12 @@ impl AsCborValue for DeviceRequest {
 
     fn to_cbor_value(self) -> coset::Result<Value> {
         let mut map = vec![];
-        map.push((DeviceRequest::version().into(), Value::Text(self.version)));
         map.push((
-            Value::Text(DeviceRequest::doc_requests().to_string()),
+            DeviceRequest::fn_version().into(),
+            Value::Text(self.version),
+        ));
+        map.push((
+            Value::Text(DeviceRequest::fn_doc_requests().to_string()),
             self.doc_requests.to_cbor_value()?,
         ));
         Ok(Value::Map(map))
@@ -77,15 +79,13 @@ impl AsCborValue for DeviceRequest {
 }
 
 /// Represents a document request.
-#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct DocRequest {
     /// The items request for the document.
     pub items_request: ItemsRequestBytes,
 
     /// The reader authentication, if provided.
-    #[serde(skip_serializing_if = "Option::is_none")]
     #[isomdl(skip_serializing_if = "Option::is_none")]
     pub reader_auth: Option<ReaderAuth>,
 }
@@ -108,7 +108,7 @@ impl AsCborValue for DocRequest {
             items_request: {
                 ItemsRequestBytes::from_cbor_value(
                     value
-                        .remove(&DocRequest::items_request().into())
+                        .remove(&DocRequest::fn_items_request().into())
                         .ok_or(coset::CoseError::DecodeFailed(
                             ciborium::de::Error::Semantic(
                                 None,
@@ -119,7 +119,7 @@ impl AsCborValue for DocRequest {
                 )?
             },
             reader_auth: value
-                .remove(&DocRequest::reader_auth().into())
+                .remove(&DocRequest::fn_reader_auth().into())
                 .map(|v| {
                     ReaderAuth::from_cbor_value(v.into()).map_err(|_| {
                         coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
@@ -135,12 +135,12 @@ impl AsCborValue for DocRequest {
     fn to_cbor_value(self) -> coset::Result<Value> {
         let mut map = vec![];
         map.push((
-            DocRequest::items_request().into(),
+            DocRequest::fn_items_request().into(),
             self.items_request.to_cbor_value()?,
         ));
         if let Some(reader_auth) = self.reader_auth {
             map.push((
-                DocRequest::reader_auth().into(),
+                DocRequest::fn_reader_auth().into(),
                 reader_auth.to_cbor_value()?,
             ));
         }
@@ -183,7 +183,7 @@ impl AsCborValue for ItemsRequest {
             .collect();
         Ok(ItemsRequest {
             doc_type: map
-                .remove(&ItemsRequest::doc_type().into())
+                .remove(&ItemsRequest::fn_doc_type().into())
                 .ok_or(coset::CoseError::DecodeFailed(
                     ciborium::de::Error::Semantic(None, "doc_type is missing".to_string()),
                 ))?
@@ -195,7 +195,7 @@ impl AsCborValue for ItemsRequest {
                     ))
                 })?,
             namespaces: {
-                map.remove(&ItemsRequest::namespaces().into())
+                map.remove(&ItemsRequest::fn_namespaces().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(None, "namespaces is missing".to_string()),
                     ))?
@@ -254,7 +254,7 @@ impl AsCborValue for ItemsRequest {
                     .collect::<coset::Result<Namespaces>>()?
             },
             request_info: map
-                .remove(&ItemsRequest::request_info().into())
+                .remove(&ItemsRequest::fn_request_info().into())
                 .map(|v| {
                     v.into_map()
                         .map_err(|_| {
@@ -284,10 +284,10 @@ impl AsCborValue for ItemsRequest {
     fn to_cbor_value(self) -> coset::Result<Value> {
         let mut map = vec![];
         map.push((
-            Value::Text(ItemsRequest::doc_type().to_string()),
+            Value::Text(ItemsRequest::fn_doc_type().to_string()),
             Value::Text(self.doc_type),
         ));
-        map.push((Value::Text(ItemsRequest::namespaces().to_string()), {
+        map.push((Value::Text(ItemsRequest::fn_namespaces().to_string()), {
             let mut map = vec![];
             for (k, v) in self.namespaces.into_inner() {
                 let mut map2 = vec![];
@@ -304,7 +304,7 @@ impl AsCborValue for ItemsRequest {
                 map2.push((Value::Text(k), v.into()));
             }
             map.push((
-                Value::Text(ItemsRequest::request_info().to_string()),
+                Value::Text(ItemsRequest::fn_request_info().to_string()),
                 Value::Map(map2),
             ));
         }
@@ -324,8 +324,8 @@ mod test {
     fn items_request() {
         const HEX: &str = "D8185868A267646F6354797065756F72672E69736F2E31383031332E352E312E6D444C6A6E616D65537061636573A1716F72672E69736F2E31383031332E352E31A36B66616D696C795F6E616D65F46A676976656E5F6E616D65F46F646F63756D656E745F6E756D626572F4";
         let bytes: Vec<u8> = hex::decode(HEX).unwrap();
-        let req: Tag24<ItemsRequest> = serde_cbor::from_slice(&bytes).unwrap();
-        let roundtripped = serde_cbor::to_vec(&req).unwrap();
+        let req = Tag24::<ItemsRequest>::from_slice(&bytes).unwrap();
+        let roundtripped = req.to_vec().unwrap();
         assert_eq!(bytes, roundtripped);
     }
 
@@ -333,8 +333,8 @@ mod test {
     fn doc_request() {
         const HEX: &str = "A16C6974656D7352657175657374D8185868A267646F6354797065756F72672E69736F2E31383031332E352E312E6D444C6A6E616D65537061636573A1716F72672E69736F2E31383031332E352E31A36B66616D696C795F6E616D65F46A676976656E5F6E616D65F46F646F63756D656E745F6E756D626572F4";
         let bytes: Vec<u8> = hex::decode(HEX).unwrap();
-        let req: DocRequest = serde_cbor::from_slice(&bytes).unwrap();
-        let roundtripped = serde_cbor::to_vec(&req).unwrap();
+        let req = DocRequest::from_slice(&bytes).unwrap();
+        let roundtripped = req.to_vec().unwrap();
         assert_eq!(bytes, roundtripped);
     }
 
@@ -342,8 +342,8 @@ mod test {
     fn device_request() {
         const HEX: &str = "A26776657273696F6E63312E306B646F63526571756573747381A16C6974656D7352657175657374D8185868A267646F6354797065756F72672E69736F2E31383031332E352E312E6D444C6A6E616D65537061636573A1716F72672E69736F2E31383031332E352E31A36B66616D696C795F6E616D65F46A676976656E5F6E616D65F46F646F63756D656E745F6E756D626572F4";
         let bytes: Vec<u8> = hex::decode(HEX).unwrap();
-        let req: DeviceRequest = serde_cbor::from_slice(&bytes).unwrap();
-        let roundtripped = serde_cbor::to_vec(&req).unwrap();
+        let req = DeviceRequest::from_slice(&bytes).unwrap();
+        let roundtripped = req.to_vec().unwrap();
         assert_eq!(bytes, roundtripped);
     }
 }

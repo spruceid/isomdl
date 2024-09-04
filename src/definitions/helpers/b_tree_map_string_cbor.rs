@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::ops::{Deref, DerefMut};
 
 use crate::definitions::helpers::NonEmptyMap;
 use ciborium::Value;
@@ -36,27 +35,25 @@ where
     pub fn new() -> Self {
         Self(BTreeMap::<K, V>::new())
     }
-}
 
-impl<K, V> Deref for BTreeMapCbor<K, V>
-where
-    K: Ord + Eq + Clone + Into<Value> + TryFrom<Value>,
-    V: Clone + AsCborValue,
-{
-    type Target = BTreeMap<K, V>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    pub fn into_inner(self) -> BTreeMap<K, V> {
+        self.0
     }
-}
 
-impl<K, V> DerefMut for BTreeMapCbor<K, V>
-where
-    K: Ord + Eq + Clone + Into<Value> + TryFrom<Value>,
-    V: Clone + AsCborValue,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        self.0.insert(key, value)
+    }
+
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.0.get(key)
+    }
+
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        self.0.get_mut(key)
+    }
+
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.0.remove(key)
     }
 }
 

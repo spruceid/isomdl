@@ -71,14 +71,14 @@ impl AsCborValue for SessionEstablishment {
             .collect::<BTreeMap<CborValue, CborValue>>();
         Ok(SessionEstablishment {
             e_reader_key: EReaderKeyBytes::from_cbor_value(
-                map.remove(&SessionEstablishment::e_reader_key().into())
+                map.remove(&SessionEstablishment::fn_e_reader_key().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(None, "e_reader_key is missing".to_string()),
                     ))?
                     .into(),
             )?,
             data: map
-                .remove(&SessionEstablishment::e_reader_key().into())
+                .remove(&SessionEstablishment::fn_e_reader_key().into())
                 .ok_or(coset::CoseError::DecodeFailed(
                     ciborium::de::Error::Semantic(None, "data is missing".to_string()),
                 ))?
@@ -95,11 +95,11 @@ impl AsCborValue for SessionEstablishment {
     fn to_cbor_value(self) -> coset::Result<Value> {
         let map = vec![
             (
-                Value::Text(SessionEstablishment::e_reader_key().to_string()),
+                Value::Text(SessionEstablishment::fn_e_reader_key().to_string()),
                 self.e_reader_key.to_cbor_value()?,
             ),
             (
-                Value::Text(SessionEstablishment::data().to_string()),
+                Value::Text(SessionEstablishment::fn_data().to_string()),
                 self.data.into(),
             ),
         ];
@@ -108,21 +108,65 @@ impl AsCborValue for SessionEstablishment {
 }
 
 /// Represents session data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, FieldsNames)]
 pub struct SessionData {
     /// An optional [ByteStr] that represents the data associated with the session.  
     /// The field is skipped during serialization if it is [None].
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     pub data: Option<ByteStr>,
 
     /// An optional [Status] that represents the status of the session.  
     /// Similarly, the field is skipped during serialization if it is [None].
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[isomdl(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "u64", into = "u64")]
+impl CborSerializable for SessionData {}
+impl AsCborValue for SessionData {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "SessionData is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(SessionData {
+            data: map
+                .remove(&SessionData::fn_data().into())
+                .map(|v| {
+                    v.try_into().map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "data is not a byte string".to_string(),
+                        ))
+                    })
+                })
+                .transpose()?,
+            status: None,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let mut map = vec![];
+        if let Some(data) = self.data {
+            map.push((Value::Text(SessionData::fn_data().to_string()), data.into()));
+        }
+        if let Some(status) = self.status {
+            map.push((
+                Value::Text(SessionData::fn_status().to_string()),
+                Value::Integer((status as u64).into()),
+            ));
+        }
+        Ok(Value::Map(map))
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Status {
     SessionEncryptionError = 10,
     CborDecodingError = 11,
@@ -379,7 +423,7 @@ pub fn derive_session_key(
     session_transcript: &SessionTranscriptBytes,
     reader: bool,
 ) -> Result<GenericArray<u8, U32>> {
-    let salt = Sha256::digest(serde_cbor::to_vec(session_transcript)?);
+    let salt = Sha256::digest(session_transcript.clone().to_vec()?);
     let hkdf = shared_secret.extract::<Sha256>(Some(salt.as_ref()));
     let mut okm = [0u8; 32];
     let sk_device = "SKDevice".as_bytes();
@@ -472,13 +516,13 @@ mod test {
     fn qr_handover() {
         // null
         let cbor = hex::decode("F6").expect("failed to decode hex");
-        let handover: Handover =
-            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        let handover = Handover::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
-            let roundtripped =
-                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            let roundtripped = handover
+                .to_vec()
+                .expect("failed to serialize handover as cbor");
             assert_eq!(
                 cbor, roundtripped,
                 "re-serialized handover did not match initial bytes"
@@ -491,13 +535,13 @@ mod test {
     fn qr_handover_empty_array() {
         // []
         let cbor = hex::decode("80").expect("failed to decode hex");
-        let handover: Handover =
-            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        let handover = Handover::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
-            let roundtripped =
-                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            let roundtripped = handover
+                .to_vec()
+                .expect("failed to serialize handover as cbor");
             assert_eq!(
                 cbor, roundtripped,
                 "re-serialized handover did not match initial bytes"
@@ -510,13 +554,13 @@ mod test {
     fn qr_handover_empty_object() {
         // {}
         let cbor = hex::decode("A0").expect("failed to decode hex");
-        let handover: Handover =
-            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        let handover = Handover::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
-            let roundtripped =
-                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            let roundtripped = handover
+                .to_vec()
+                .expect("failed to serialize handover as cbor");
             assert_eq!(
                 cbor, roundtripped,
                 "re-serialized handover did not match initial bytes"
@@ -528,13 +572,13 @@ mod test {
     fn nfc_static_handover() {
         // ['hello', null]
         let cbor = hex::decode("824568656C6C6FF6").expect("failed to decode hex");
-        let handover: Handover =
-            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        let handover = Handover::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::NFC(..)) {
             panic!("expected 'Handover::NFC(..)', received {handover:?}")
         } else {
-            let roundtripped =
-                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            let roundtripped = handover
+                .to_vec()
+                .expect("failed to serialize handover as cbor");
             assert_eq!(
                 cbor, roundtripped,
                 "re-serialized handover did not match initial bytes"
@@ -546,13 +590,13 @@ mod test {
     fn nfc_negotiated_handover() {
         // ['hello', 'world']
         let cbor = hex::decode("824568656C6C6F45776F726C64").expect("failed to decode hex");
-        let handover: Handover =
-            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        let handover = Handover::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::NFC(..)) {
             panic!("expected 'Handover::NFC(..)', received {handover:?}")
         } else {
-            let roundtripped =
-                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            let roundtripped = handover
+                .to_vec()
+                .expect("failed to serialize handover as cbor");
             assert_eq!(
                 cbor, roundtripped,
                 "re-serialized handover did not match initial bytes"
@@ -564,16 +608,16 @@ mod test {
     fn oid4vp_handover() {
         // ["aud", "nonce"]
         let cbor = hex::decode("8263617564656E6F6E6365").expect("failed to decode hex");
-        let handover: Handover =
-            serde_cbor::from_slice(&cbor).expect("failed to deserialize as handover");
+        let handover = Handover::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::OID4VP(..)) {
             panic!(
                 "expected '{}', received {:?}",
                 "Handover::OID4VP(..)", handover
             )
         } else {
-            let roundtripped =
-                serde_cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
+            let roundtripped = handover
+                .to_vec()
+                .expect("failed to serialize handover as cbor");
             assert_eq!(
                 cbor, roundtripped,
                 "re-serialized handover did not match initial bytes"
@@ -657,8 +701,8 @@ mod test {
         let e_device_key_inner = e_device_key.to_nonzero_scalar();
 
         let session_establishment_bytes = hex::decode(SESSION_ESTABLISHMENT).unwrap();
-        let session_establishment: SessionEstablishment =
-            serde_cbor::from_slice(&session_establishment_bytes).unwrap();
+        let session_establishment =
+            SessionEstablishment::from_slice(&session_establishment_bytes).unwrap();
 
         let e_reader_key = session_establishment.e_reader_key;
         let encrypted_request = session_establishment.data;
@@ -669,8 +713,8 @@ mod test {
         assert_eq!(shared_secret_hex, SHARED_SECRET);
 
         let session_transcript_bytes = hex::decode(SESSION_TRANSCRIPT).unwrap();
-        let session_transcript: SessionTranscriptBytes =
-            serde_cbor::from_slice(&session_transcript_bytes).unwrap();
+        let session_transcript =
+            SessionTranscriptBytes::from_slice(&session_transcript_bytes).unwrap();
 
         let session_key = derive_session_key(&shared_secret, &session_transcript, true).unwrap();
         let session_key_hex = hex::encode(session_key);
@@ -678,6 +722,6 @@ mod test {
 
         let plaintext =
             decrypt_reader_data(&session_key, encrypted_request.as_ref(), &mut 0).unwrap();
-        let _device_request: DeviceRequest = serde_cbor::from_slice(&plaintext).unwrap();
+        let _device_request = DeviceRequest::from_slice(&plaintext).unwrap();
     }
 }

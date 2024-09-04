@@ -6,7 +6,6 @@ use ciborium::Value;
 use coset::{iana, AsCborValue, CborSerializable, Label};
 use isomdl_macros::FieldsNames;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 
@@ -25,8 +24,7 @@ use crate::{
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
 
-#[derive(FieldsNames, Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(FieldsNames, Debug, Clone)]
 #[isomdl(rename_all = "camelCase")]
 /// A signed mdoc.
 pub struct Mdoc {
@@ -52,7 +50,7 @@ impl AsCborValue for Mdoc {
             .collect::<BTreeMap<CborValue, CborValue>>();
         Ok(Mdoc {
             doc_type: map
-                .remove(&Mdoc::doc_type().into())
+                .remove(&Mdoc::fn_doc_type().into())
                 .ok_or(coset::CoseError::DecodeFailed(
                     ciborium::de::Error::Semantic(None, "doc_type is missing".to_string()),
                 ))?
@@ -64,21 +62,21 @@ impl AsCborValue for Mdoc {
                     ))
                 })?,
             mso: Mso::from_cbor_value(
-                map.remove(&Mdoc::mso().into())
+                map.remove(&Mdoc::fn_mso().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(None, "mso is missing".to_string()),
                     ))?
                     .into(),
             )?,
             namespaces: IssuerNamespaces::from_cbor_value(
-                map.remove(&Mdoc::namespaces().into())
+                map.remove(&Mdoc::fn_namespaces().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(None, "namespaces is missing".to_string()),
                     ))?
                     .into(),
             )?,
             issuer_auth: CoseSign1::from_cbor_value(
-                map.remove(&Mdoc::issuer_auth().into())
+                map.remove(&Mdoc::fn_issuer_auth().into())
                     .ok_or(coset::CoseError::DecodeFailed(
                         ciborium::de::Error::Semantic(None, "issuer_auth is missing".to_string()),
                     ))?
@@ -91,19 +89,19 @@ impl AsCborValue for Mdoc {
         Ok(Value::Map(
             vec![
                 (
-                    Value::Text(Mdoc::doc_type().to_string()),
+                    Value::Text(Mdoc::fn_doc_type().to_string()),
                     Value::Text(self.doc_type),
                 ),
                 (
-                    Value::Text(Mdoc::mso().to_string()),
+                    Value::Text(Mdoc::fn_mso().to_string()),
                     self.mso.to_cbor_value()?,
                 ),
                 (
-                    Value::Text(Mdoc::namespaces().to_string()),
+                    Value::Text(Mdoc::fn_namespaces().to_string()),
                     self.namespaces.to_cbor_value()?,
                 ),
                 (
-                    Value::Text(Mdoc::issuer_auth().to_string()),
+                    Value::Text(Mdoc::fn_issuer_auth().to_string()),
                     self.issuer_auth.to_cbor_value()?,
                 ),
             ]
@@ -113,7 +111,7 @@ impl AsCborValue for Mdoc {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 /// An incomplete mdoc, requiring a remotely signed signature to be completed.
 pub struct PreparedMdoc {
     doc_type: String,
@@ -164,7 +162,7 @@ impl Mdoc {
             validity_info,
         };
 
-        let mso_bytes = serde_cbor::to_vec(&Tag24::new(mso.clone())?)?;
+        let mso_bytes = Tag24::new(mso.clone())?.to_vec()?;
 
         let protected = coset::HeaderBuilder::new()
             .algorithm(signature_algorithm)
@@ -510,7 +508,7 @@ fn digest_namespace(
 
     elements
         .iter()
-        .map(|item| Ok((item.as_ref().digest_id, serde_cbor::to_vec(item)?)))
+        .map(|item| Ok((item.as_ref().digest_id, item.clone().to_vec()?)))
         .chain(random_digests)
         .map(|result| {
             let (digest_id, bytes) = result?;

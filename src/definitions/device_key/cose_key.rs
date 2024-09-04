@@ -496,13 +496,13 @@ mod test {
     #[test]
     fn ec_p256() {
         let key_bytes = <Vec<u8>>::from_hex(EC_P256).expect("unable to convert cbor hex to bytes");
-        let key = serde_cbor::from_slice(&key_bytes).unwrap();
+        let key = CoseKey::from_slice(&key_bytes).unwrap();
         match &key {
             CoseKey::EC2 { crv, .. } => assert_eq!(crv, &EC2Curve::P256),
             _ => panic!("expected an EC2 cose key"),
         };
         assert_eq!(
-            serde_cbor::to_vec(&key).unwrap(),
+            key.to_vec().unwrap(),
             key_bytes,
             "cbor encoding roundtrip failed"
         );
@@ -517,7 +517,7 @@ mod test {
         };
         let cbor = key.clone().to_vec().unwrap();
         println!("{:?}", hex::encode(&cbor));
-        let key2: CoseKey = serde_cbor::from_slice(&cbor).unwrap();
+        let key2 = CoseKey::from_slice(&cbor).unwrap();
         assert_eq!(key, key2);
     }
 }

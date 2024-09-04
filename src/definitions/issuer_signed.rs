@@ -29,11 +29,10 @@ use serde::{Deserialize, Serialize};
 /// This struct is used to store information about an issuer-signed object, which includes namespaces and issuer authentication.
 /// [IssuerSigned::namespaces] field is an optional [IssuerNamespaces] object that contains namespaces associated with the issuer.
 /// [IssuerSigned::issuer_auth] field is a [CoseSign1] object that represents the issuer authentication.
-#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, FieldsNames)]
 #[isomdl(rename_all = "camelCase")]
 pub struct IssuerSigned {
-    #[serde(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
+    #[isomdl(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
     pub namespaces: Option<IssuerNamespaces>,
     pub issuer_auth: CoseSign1,
 }
@@ -82,7 +81,7 @@ impl AsCborValue for IssuerSignedItem {
             .collect::<HashMap<String, Value>>();
         Ok(IssuerSignedItem {
             digest_id: DigestId::new(
-                if let Some(Value::Integer(i)) = fields.remove(IssuerSignedItem::digest_id()) {
+                if let Some(Value::Integer(i)) = fields.remove(IssuerSignedItem::fn_digest_id()) {
                     i.try_into()?
                 } else {
                     return Err(coset::CoseError::UnexpectedItem(
@@ -92,7 +91,7 @@ impl AsCborValue for IssuerSignedItem {
                 },
             ),
             random: ByteStr::from(
-                if let Some(Value::Bytes(b)) = fields.remove(IssuerSignedItem::random()) {
+                if let Some(Value::Bytes(b)) = fields.remove(IssuerSignedItem::fn_random()) {
                     b
                 } else {
                     return Err(coset::CoseError::UnexpectedItem(
@@ -102,7 +101,7 @@ impl AsCborValue for IssuerSignedItem {
                 },
             ),
             element_identifier: if let Some(Value::Text(s)) =
-                fields.remove(IssuerSignedItem::element_identifier())
+                fields.remove(IssuerSignedItem::fn_element_identifier())
             {
                 s.clone()
             } else {
@@ -112,7 +111,7 @@ impl AsCborValue for IssuerSignedItem {
                 ));
             },
             element_value: if let Some(element_value) =
-                fields.remove(IssuerSignedItem::element_value())
+                fields.remove(IssuerSignedItem::fn_element_value())
             {
                 element_value.into()
             } else {
@@ -127,19 +126,19 @@ impl AsCborValue for IssuerSignedItem {
     fn to_cbor_value(self) -> coset::Result<Value> {
         Ok(Value::Map(vec![
             (
-                Value::Text(IssuerSignedItem::digest_id().to_string()),
+                Value::Text(IssuerSignedItem::fn_digest_id().to_string()),
                 Value::Integer(self.digest_id.0.into()),
             ),
             (
-                Value::Text(IssuerSignedItem::random().to_string()),
+                Value::Text(IssuerSignedItem::fn_random().to_string()),
                 Value::Bytes(self.random.into()),
             ),
             (
-                Value::Text(IssuerSignedItem::element_identifier().to_string()),
+                Value::Text(IssuerSignedItem::fn_element_identifier().to_string()),
                 Value::Text(self.element_identifier),
             ),
             (
-                Value::Text(IssuerSignedItem::element_value().to_string()),
+                Value::Text(IssuerSignedItem::fn_element_value().to_string()),
                 self.element_value.into(),
             ),
         ]))
@@ -168,14 +167,14 @@ impl AsCborValue for IssuerSigned {
             .collect::<HashMap<CborString, Value>>();
         Ok(IssuerSigned {
             namespaces: if let Some(Value::Map(namespaces)) =
-                fields.remove(&IssuerSigned::namespaces().into())
+                fields.remove(&IssuerSigned::fn_namespaces().into())
             {
                 Some(NonEmptyMap::from_cbor_value(Value::Map(namespaces))?)
             } else {
                 None
             },
             issuer_auth: CoseSign1::from_cbor_value(
-                if let Some(issuer_auth) = fields.remove(&IssuerSigned::issuer_auth().into()) {
+                if let Some(issuer_auth) = fields.remove(&IssuerSigned::fn_issuer_auth().into()) {
                     issuer_auth
                 } else {
                     return Err(coset::CoseError::UnexpectedItem(
@@ -191,12 +190,12 @@ impl AsCborValue for IssuerSigned {
         let mut values = vec![];
         if let Some(namespaces) = self.namespaces {
             values.push((
-                Value::Text(IssuerSigned::namespaces().to_string()),
+                Value::Text(IssuerSigned::fn_namespaces().to_string()),
                 namespaces.to_cbor_value()?,
             ))
         }
         values.push((
-            Value::Text(IssuerSigned::issuer_auth().to_string()),
+            Value::Text(IssuerSigned::fn_issuer_auth().to_string()),
             self.issuer_auth.to_cbor_value()?,
         ));
         Ok(Value::Map(values))
@@ -223,10 +222,11 @@ mod test {
     fn serde_issuer_signed_roundtrip() {
         let cbor_bytes =
             <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
-        let signed: IssuerSigned =
-            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
-        let roundtripped_bytes =
-            serde_cbor::to_vec(&signed).expect("unable to encode IssuerSigned as cbor bytes");
+        let signed = IssuerSigned::from_slice(&cbor_bytes)
+            .expect("unable to decode cbor as an IssuerSigned");
+        let roundtripped_bytes = signed
+            .to_vec()
+            .expect("unable to encode IssuerSigned as cbor bytes");
         assert_eq!(
             cbor_bytes, roundtripped_bytes,
             "original cbor and re-serialized IssuerSigned do not match"

@@ -37,19 +37,19 @@ impl ToCbor for DomesticDrivingPrivilege {
         let mut map = BTreeMap::new();
         if let Some(domestic_vehicle_class) = self.domestic_vehicle_class {
             map.insert(
-                DomesticDrivingPrivilege::domestic_vehicle_class().into(),
+                DomesticDrivingPrivilege::fn_domestic_vehicle_class().into(),
                 domestic_vehicle_class.to_cbor(),
             );
         }
         if let Some(domestic_vehicle_restrictions) = self.domestic_vehicle_restrictions {
             map.insert(
-                DomesticDrivingPrivilege::domestic_vehicle_restrictions().into(),
+                DomesticDrivingPrivilege::fn_domestic_vehicle_restrictions().into(),
                 domestic_vehicle_restrictions.to_cbor(),
             );
         }
         if let Some(domestic_vehicle_endorsements) = self.domestic_vehicle_endorsements {
             map.insert(
-                DomesticDrivingPrivilege::domestic_vehicle_endorsements().into(),
+                DomesticDrivingPrivilege::fn_domestic_vehicle_endorsements().into(),
                 domestic_vehicle_endorsements.to_cbor(),
             );
         }
@@ -72,19 +72,22 @@ impl ToCbor for DomesticVehicleClass {
     fn to_cbor(self) -> CborValue {
         let mut map = BTreeMap::new();
         map.insert(
-            DomesticVehicleClass::domestic_vehicle_class_code().into(),
+            DomesticVehicleClass::fn_domestic_vehicle_class_code().into(),
             self.domestic_vehicle_class_code.into(),
         );
         map.insert(
-            DomesticVehicleClass::domestic_vehicle_class_description().into(),
+            DomesticVehicleClass::fn_domestic_vehicle_class_description().into(),
             self.domestic_vehicle_class_description.into(),
         );
         if let Some(issue_date) = self.issue_date {
-            map.insert(DomesticVehicleClass::issue_date().into(), issue_date.into());
+            map.insert(
+                DomesticVehicleClass::fn_issue_date().into(),
+                issue_date.into(),
+            );
         }
         if let Some(expiry_date) = self.expiry_date {
             map.insert(
-                DomesticVehicleClass::expiry_date().into(),
+                DomesticVehicleClass::fn_expiry_date().into(),
                 expiry_date.into(),
             );
         }
@@ -122,12 +125,12 @@ impl ToCbor for DomesticVehicleRestriction {
         let mut map = BTreeMap::new();
         if let Some(domestic_vehicle_restriction_code) = self.domestic_vehicle_restriction_code {
             map.insert(
-                DomesticVehicleRestriction::domestic_vehicle_restriction_code().into(),
+                DomesticVehicleRestriction::fn_domestic_vehicle_restriction_code().into(),
                 domestic_vehicle_restriction_code.into(),
             );
         }
         map.insert(
-            DomesticVehicleRestriction::domestic_vehicle_restriction_description().into(),
+            DomesticVehicleRestriction::fn_domestic_vehicle_restriction_description().into(),
             self.domestic_vehicle_restriction_description.into(),
         );
         CborValue::Map(map)
@@ -164,12 +167,12 @@ impl ToCbor for DomesticVehicleEndorsement {
         let mut map = BTreeMap::new();
         if let Some(domestic_vehicle_endorsement_code) = self.domestic_vehicle_endorsement_code {
             map.insert(
-                DomesticVehicleEndorsement::domestic_vehicle_endorsement_code().into(),
+                DomesticVehicleEndorsement::fn_domestic_vehicle_endorsement_code().into(),
                 domestic_vehicle_endorsement_code.into(),
             );
         }
         map.insert(
-            DomesticVehicleEndorsement::domestic_vehicle_endorsement_description().into(),
+            DomesticVehicleEndorsement::fn_domestic_vehicle_endorsement_description().into(),
             self.domestic_vehicle_endorsement_description.into(),
         );
         CborValue::Map(map)

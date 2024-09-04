@@ -44,11 +44,11 @@ pub mod reader;
 
 use anyhow::Result;
 use base64::{decode, encode};
-use serde::{Deserialize, Serialize};
+use coset::CborSerializable;
 
 /// Trait that handles serialization of [CBOR](https://cbor.io) objects to/from [String].
 /// It is an auto trait.
-pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
+pub trait Stringify: CborSerializable + Clone {
     /// Serialize to [CBOR](https://cbor.io) representation.
     ///
     /// Operation may fail, so it returns a [Result].
@@ -67,7 +67,7 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
     /// assert_eq!(serialized, Document::parse(serialized.clone()).unwrap().stringify().unwrap());
     /// ```
     fn stringify(&self) -> Result<String> {
-        let data = serde_cbor::to_vec(self)?;
+        let data = CborSerializable::to_vec(self.clone())?;
         let encoded = encode(data);
         Ok(encoded)
     }
@@ -92,7 +92,7 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
     /// ```
     fn parse(encoded: String) -> Result<Self> {
         let data = decode(encoded)?;
-        let this = serde_cbor::from_slice(&data)?;
+        let this = Self::from_slice(&data)?;
         Ok(this)
     }
 }
@@ -108,7 +108,7 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 
 fn calculate_ble_ident(e_device_key: &Tag24<CoseKey>) -> Result<[u8; 16]> {
-    let e_device_key_bytes = serde_cbor::to_vec(e_device_key)?;
+    let e_device_key_bytes = e_device_key.clone().to_vec()?;
     let mut ble_ident = [0u8; 16];
 
     Hkdf::<Sha256>::new(None, &e_device_key_bytes)

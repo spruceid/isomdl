@@ -80,19 +80,23 @@ impl AsCborValue for CborString {
     }
 }
 
-// todo: remove
 impl Serialize for CborString {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        unimplemented!()
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Serialize the inner String directly as a string
+        serializer.serialize_str(&self.0)
     }
 }
 
-// todo: remove
 impl<'de> Deserialize<'de> for CborString {
-    fn deserialize<D>(_d: D) -> Result<CborString, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        unimplemented!()
+        // Deserialize a string and wrap it in CborString
+        let s = String::deserialize(deserializer)?;
+        Ok(CborString(s))
     }
 }

@@ -222,7 +222,7 @@ pub(crate) fn generate_field_serialization(
 
         // Default case to handle custom types
         _ => {
-            quote! { ciborium::Value::Text("".to_string()) }
+            quote! { #field_access.to_cbor_value()? }
         }
     }
 }
@@ -322,19 +322,47 @@ pub(crate) fn get_field_name(
     // Apply the rename_all strategy if no specific rename is found
     if rename_value == field_name_str {
         if let Some(strategy) = &field_rename_all_strategy {
-            rename_value = apply_rename_all_strategy(&field_name_str, strategy);
+            rename_value = apply_rename_all_strategy(&field_name_str, strategy.into());
         }
     }
     rename_value
 }
 
+pub(crate) enum Case {
+    CamelCase,
+    SnakeCase,
+    PascalCase,
+}
+
+impl From<String> for Case {
+    fn from(value: String) -> Self {
+        value.as_str().into()
+    }
+}
+
+impl From<&String> for Case {
+    fn from(value: &String) -> Self {
+        value.as_str().into()
+    }
+}
+
+impl From<&str> for Case {
+    fn from(value: &str) -> Self {
+        match value {
+            "camelCase" => Case::CamelCase,
+            "snakeCase" => Case::SnakeCase,
+            "pascalCase" => Case::PascalCase,
+            _ => panic!("Invalid rename_all strategy"),
+        }
+    }
+}
+
 // Helper function to apply rename_all strategies
-pub(crate) fn apply_rename_all_strategy(field_name: &str, strategy: &str) -> String {
+pub(crate) fn apply_rename_all_strategy(field_name: &str, strategy: Case) -> String {
     match strategy {
-        "camelCase" => to_camel_case(field_name),
-        "snake_case" => to_snake_case(field_name),
-        "PascalCase" => to_pascal_case(field_name),
-        _ => field_name.to_string(),
+        Case::CamelCase => to_camel_case(field_name),
+        Case::SnakeCase => to_snake_case(field_name),
+        Case::PascalCase => to_pascal_case(field_name),
     }
 }
 
@@ -355,9 +383,23 @@ pub(crate) fn to_camel_case(field_name: &str) -> String {
     s
 }
 
-// Convert to snake_case (field names are typically already in snake_case)
-pub(crate) fn to_snake_case(field_name: &str) -> String {
-    field_name.to_string()
+// Convert to snake_case
+pub(crate) fn to_snake_case(input: &str) -> String {
+    let mut snake_case = String::with_capacity(input.len());
+    for (i, c) in input.chars().enumerate() {
+        // If the character is uppercase, add an underscore (except at the start)
+        if c.is_uppercase() {
+            if i != 0 {
+                snake_case.push('_');
+            }
+            // Add the lowercase version of the character
+            snake_case.push(c.to_ascii_lowercase());
+        } else {
+            // If the character is not uppercase, just add it as is
+            snake_case.push(c);
+        }
+    }
+    snake_case
 }
 
 // Convert to PascalCase

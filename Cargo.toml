@@ -17,7 +17,6 @@ p256 = { version = "0.13.0", features = ["serde", "ecdh"] }
 p384 = { version = "0.13.0", features = ["serde", "ecdh"] }
 rand = { version = "0.8.5", features = ["getrandom"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_cbor = { version = "0.11.2", features = ["tags"] }
 serde_json = "1.0"
 sha2 = "0.10.6"
 thiserror = "1.0"

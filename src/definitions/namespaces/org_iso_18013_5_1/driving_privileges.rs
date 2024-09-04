@@ -62,17 +62,20 @@ impl From<DrivingPrivilege> for CborValue {
     fn from(d: DrivingPrivilege) -> CborValue {
         let mut map = BTreeMap::new();
         map.insert(
-            DrivingPrivilege::vehicle_category_code().into(),
+            DrivingPrivilege::fn_vehicle_category_code().into(),
             d.vehicle_category_code.into(),
         );
         if let Some(issue_date) = d.issue_date {
-            map.insert(DrivingPrivilege::issue_date().into(), issue_date.into());
+            map.insert(DrivingPrivilege::fn_issue_date().into(), issue_date.into());
         }
         if let Some(expiry_date) = d.expiry_date {
-            map.insert(DrivingPrivilege::expiry_date().into(), expiry_date.into());
+            map.insert(
+                DrivingPrivilege::fn_expiry_date().into(),
+                expiry_date.into(),
+            );
         }
         if let Some(codes) = d.codes {
-            map.insert(DrivingPrivilege::expiry_date().into(), codes.to_cbor());
+            map.insert(DrivingPrivilege::fn_expiry_date().into(), codes.to_cbor());
         }
         CborValue::Map(map)
     }
@@ -87,26 +90,26 @@ impl TryFrom<CborValue> for DrivingPrivilege {
             .map_err(|_| Error::Decode("DrivingPrivilege is not a map"))?;
 
         let vehicle_category_code = map
-            .remove(&DrivingPrivilege::vehicle_category_code().into())
+            .remove(&DrivingPrivilege::fn_vehicle_category_code().into())
             .ok_or(Error::Decode("vehicle_category_code is missing"))?
             .try_into()
             .map_err(|_| Error::Decode("vehicle_category_code is not a string"))?;
         let issue_date: Option<FullDate> = map
-            .remove(&DrivingPrivilege::issue_date().into())
+            .remove(&DrivingPrivilege::fn_issue_date().into())
             .map(|v| {
                 v.try_into()
                     .map_err(|_| Error::Decode("issue_date is not a FullDate"))
             })
             .transpose()?;
         let expiry_date: Option<FullDate> = map
-            .remove(&DrivingPrivilege::expiry_date().into())
+            .remove(&DrivingPrivilege::fn_expiry_date().into())
             .map(|v| {
                 v.try_into()
                     .map_err(|_| Error::Decode("expiry_date is not a FullDate"))
             })
             .transpose()?;
         let codes: Option<Codes> = map
-            .remove(&DrivingPrivilege::codes().into())
+            .remove(&DrivingPrivilege::fn_codes().into())
             .map(|v| {
                 v.try_into()
                     .map_err(|_| Error::Decode("codes is not a Codes"))
@@ -166,12 +169,12 @@ pub struct Code {
 impl From<Code> for CborValue {
     fn from(c: Code) -> CborValue {
         let mut map = BTreeMap::new();
-        map.insert(Code::code().into(), c.code.into());
+        map.insert(Code::fn_code().into(), c.code.into());
         if let Some(sign) = c.sign {
-            map.insert(Code::sign().into(), sign.into());
+            map.insert(Code::fn_sign().into(), sign.into());
         }
         if let Some(value) = c.value {
-            map.insert(Code::value().into(), value.into());
+            map.insert(Code::fn_value().into(), value.into());
         }
         CborValue::Map(map)
     }
@@ -185,19 +188,19 @@ impl TryFrom<CborValue> for Code {
             .into_map()
             .map_err(|_| Error::Decode("Code is not a map"))?;
         let code = map
-            .remove(&Code::code().into())
+            .remove(&Code::fn_code().into())
             .ok_or(Error::Decode("code is missing code"))?
             .try_into()
             .map_err(|_| Error::Decode("code is not a string"))?;
         let sign: Option<String> = map
-            .remove(&Code::sign().into())
+            .remove(&Code::fn_sign().into())
             .map(|v| {
                 v.try_into()
                     .map_err(|_| Error::Decode("sign is not a string"))
             })
             .transpose()?;
         let value: Option<String> = map
-            .remove(&Code::value().into())
+            .remove(&Code::fn_value().into())
             .map(|v| {
                 v.try_into()
                     .map_err(|_| Error::Decode("value is not a string"))

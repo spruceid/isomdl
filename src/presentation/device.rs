@@ -1,7 +1,17 @@
-use crate::cose::mac0::PreparedCoseMac0;
-use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use std::collections::BTreeMap;
+use std::num::ParseIntError;
+
+use ciborium::Value;
+use coset::{AsCborValue, CborSerializable, CoseMac0Builder, CoseSign1Builder};
+use isomdl_macros::FieldsNames;
+use p256::FieldBytes;
+use uuid::Uuid;
+
+use session::SessionTranscript180135;
 
 use crate::cbor::CborValue;
+use crate::cose::mac0::PreparedCoseMac0;
+use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
 use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::helpers::b_tree_map_string_cbor::BTreeMapCbor;
 use crate::definitions::helpers::string_cbor::CborString;
@@ -24,13 +34,6 @@ use crate::{
     },
     issuance::Mdoc,
 };
-use coset::{AsCborValue, CoseMac0Builder, CoseSign1Builder};
-use p256::FieldBytes;
-use serde::{Deserialize, Serialize};
-use session::SessionTranscript180135;
-use std::collections::BTreeMap;
-use std::num::ParseIntError;
-use uuid::Uuid;
 
 /// Initialisation state.
 ///
@@ -44,23 +47,188 @@ use uuid::Uuid;
 ///
 /// For convenience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
 /// to provide the BLE identification string for the device.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, FieldsNames)]
 pub struct SessionManagerInit {
     documents: Documents,
     e_device_key: Vec<u8>,
     device_engagement: Tag24<DeviceEngagement>,
 }
 
+impl CborSerializable for SessionManagerInit {}
+impl AsCborValue for SessionManagerInit {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "SessionManagerInit is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+
+        Ok(SessionManagerInit {
+            documents: Documents::from_cbor_value(
+                map.remove(&SessionManagerInit::fn_documents().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManagerInit documents is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            e_device_key: map
+                .remove(&SessionManagerInit::fn_e_device_key().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManagerInit e_device_key is missing".to_string(),
+                    ),
+                ))?
+                .into_bytes()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManagerInit e_device_key is not a byte string".to_string(),
+                    ))
+                })?,
+            device_engagement: Tag24::<DeviceEngagement>::from_cbor_value(
+                map.remove(&SessionManagerInit::fn_documents().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManagerInit documents is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(
+            vec![
+                (
+                    Value::Text(SessionManagerInit::fn_documents().to_string()),
+                    self.documents.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(SessionManagerInit::fn_e_device_key().to_string()),
+                    Value::Bytes(self.e_device_key),
+                ),
+                (
+                    Value::Text(SessionManagerInit::fn_device_engagement().to_string()),
+                    self.device_engagement.to_cbor_value()?,
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+    }
+}
 /// Engaged state.
 ///
 /// Transition to this state is made with [SessionManagerInit::qr_engagement].
 /// That creates the `QR code` that the reader will use to establish the session.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, FieldsNames)]
 pub struct SessionManagerEngaged {
     documents: Documents,
     e_device_key: Vec<u8>,
     device_engagement: Tag24<DeviceEngagement>,
     handover: Handover,
+}
+
+impl CborSerializable for SessionManagerEngaged {}
+impl AsCborValue for SessionManagerEngaged {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "SessionManagerEngaged is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(SessionManagerEngaged {
+            documents: Documents::from_cbor_value(
+                map.remove(&SessionManagerEngaged::fn_documents().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManagerEngaged documents is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            e_device_key: map
+                .remove(&SessionManagerEngaged::fn_e_device_key().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManagerEngaged e_device_key is missing".to_string(),
+                    ),
+                ))?
+                .into_bytes()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManagerEngaged e_device_key is not a byte string".to_string(),
+                    ))
+                })?,
+            device_engagement: Tag24::<DeviceEngagement>::from_cbor_value(
+                map.remove(&SessionManagerEngaged::fn_device_engagement().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManagerEngaged device_engagement is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            handover: Handover::from_cbor_value(
+                map.remove(&SessionManagerEngaged::fn_handover().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManagerEngaged handover is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(
+            vec![
+                (
+                    Value::Text(SessionManagerEngaged::fn_documents().to_string()),
+                    self.documents.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(SessionManagerEngaged::fn_e_device_key().to_string()),
+                    Value::Bytes(self.e_device_key),
+                ),
+                (
+                    Value::Text(SessionManagerEngaged::fn_device_engagement().to_string()),
+                    self.device_engagement.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(SessionManagerEngaged::fn_handover().to_string()),
+                    self.handover.to_cbor_value()?,
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .into())
+    }
 }
 
 /// The initial state of the Session Manager.
@@ -77,7 +245,7 @@ pub struct SessionManagerEngaged {
 ///
 /// For convience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
 /// to provide the BLE identification string for the device.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, FieldsNames)]
 pub struct SessionManager {
     documents: Documents,
     session_transcript: SessionTranscript180135,
@@ -89,8 +257,192 @@ pub struct SessionManager {
     device_auth_type: DeviceAuthType,
 }
 
+impl CborSerializable for SessionManager {}
+impl AsCborValue for SessionManager {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "SessionManager is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(SessionManager {
+            documents: Documents::from_cbor_value(
+                map.remove(&SessionManager::fn_documents().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManager documents is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            session_transcript: SessionTranscript180135::from_cbor_value(
+                map.remove(&SessionManager::fn_session_transcript().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManager session_transcript is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            sk_device: map
+                .remove(&SessionManager::fn_sk_device().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager sk_device is missing".to_string(),
+                    ),
+                ))?
+                .into_bytes()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager sk_device is not a byte string".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager sk_device has an invalid size".to_string(),
+                    ))
+                })?,
+            device_message_counter: map
+                .remove(&SessionManager::fn_device_message_counter().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager device_message_counter is missing".to_string(),
+                    ),
+                ))?
+                .into_integer()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager device_message_counter is not an integer".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager device_message_counter has an invalid size".to_string(),
+                    ))
+                })?,
+            sk_reader: map
+                .remove(&SessionManager::fn_sk_reader().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager sk_reader is missing".to_string(),
+                    ),
+                ))?
+                .into_bytes()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager sk_reader is not a byte string".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager sk_reader has an invalid size".to_string(),
+                    ))
+                })?,
+            reader_message_counter: map
+                .remove(&SessionManager::fn_reader_message_counter().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager reader_message_counter is missing".to_string(),
+                    ),
+                ))?
+                .into_integer()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager reader_message_counter is not an integer".to_string(),
+                    ))
+                })?
+                .try_into()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "SessionManager reader_message_counter has an invalid size".to_string(),
+                    ))
+                })?,
+            state: State::from_cbor_value(
+                map.remove(&SessionManager::fn_state().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManager state is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            device_auth_type: DeviceAuthType::from_cbor_value(
+                map.remove(&SessionManager::fn_device_auth_type().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "SessionManager device_auth_type is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(vec![
+            (
+                Value::Text(SessionManager::fn_documents().to_string()),
+                self.documents.to_cbor_value()?,
+            ),
+            (
+                Value::Text(SessionManager::fn_session_transcript().to_string()),
+                self.session_transcript.to_cbor_value()?,
+            ),
+            (
+                Value::Text(SessionManager::fn_sk_device().to_string()),
+                Value::Bytes(self.sk_device.to_vec()),
+            ),
+            (
+                Value::Text(SessionManager::fn_device_message_counter().to_string()),
+                Value::Integer(self.device_message_counter.into()),
+            ),
+            (
+                Value::Text(SessionManager::fn_sk_reader().to_string()),
+                Value::Bytes(self.sk_reader.to_vec()),
+            ),
+            (
+                Value::Text(SessionManager::fn_reader_message_counter().to_string()),
+                Value::Integer(self.reader_message_counter.into()),
+            ),
+            (
+                Value::Text(SessionManager::fn_state().to_string()),
+                self.state.to_cbor_value()?,
+            ),
+            (
+                Value::Text(SessionManager::fn_device_auth_type().to_string()),
+                self.device_auth_type.to_cbor_value()?,
+            ),
+        ]))
+    }
+}
+
 /// The internal states of the [SessionManager].
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default)]
 pub enum State {
     /// This is the default one where the device is waiting for a request from the reader.
     #[default]
@@ -99,6 +451,53 @@ pub enum State {
     Signing(PreparedDeviceResponse),
     /// The device is ready to respond to the reader with a signed response.
     ReadyToRespond(Vec<u8>),
+}
+
+impl CborSerializable for State {}
+impl AsCborValue for State {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        match value {
+            Value::Text(t) if t == *"AwaitingRequest" => Ok(State::AwaitingRequest),
+            Value::Map(mut map) if map.len() == 1 => match map.remove(0) {
+                (k, v) if k == Value::Text("Signing".to_string()) => {
+                    Ok(State::Signing(PreparedDeviceResponse::from_cbor_value(v)?))
+                }
+                (k, v) if k == Value::Text("ReadyToRespond".to_string()) => {
+                    Ok(State::ReadyToRespond(v.into_bytes().map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "State ReadyToRespond is not a byte string".to_string(),
+                        ))
+                    })?))
+                }
+                _ => Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "State is not a text or an array".to_string(),
+                    ),
+                )),
+            },
+            _ => Err(coset::CoseError::DecodeFailed(
+                ciborium::de::Error::Semantic(None, "State is not a text or an array".to_string()),
+            )),
+        }
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(match self {
+            State::AwaitingRequest => Value::Text("AwaitingRequest".to_string()),
+            State::Signing(p) => Value::Map(
+                vec![(Value::Text("Signing".to_string()), p.to_cbor_value()?)]
+                    .into_iter()
+                    .collect(),
+            ),
+            State::ReadyToRespond(v) => Value::Map(
+                vec![(Value::Text("ReadyToRespond".to_string()), Value::Bytes(v))]
+                    .into_iter()
+                    .collect(),
+            ),
+        })
+    }
 }
 
 /// Various errors that can occur during the interaction with the reader.
@@ -115,7 +514,7 @@ pub enum Error {
     SharedSecretGeneration(anyhow::Error),
     /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
-    CborEncoding(serde_cbor::Error),
+    CborEncoding(coset::CoseError),
     /// Session manager was used incorrectly.
     #[error("session manager was used incorrectly")]
     ApiMisuse,
@@ -129,15 +528,110 @@ pub enum Error {
 
 /// The documents the device owns.
 pub type Documents = NonEmptyMap<DocType, Document>;
-type DocType = String;
+type DocType = CborString;
 
 /// Device-internal document datatype.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, FieldsNames)]
 pub struct Document {
     pub id: Uuid,
     pub issuer_auth: CoseSign1,
     pub mso: Mso,
     pub namespaces: Namespaces,
+}
+
+impl CborSerializable for Document {}
+impl AsCborValue for Document {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "Document is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(Document {
+            id: Uuid::from_bytes(
+                map.remove(&Document::fn_id().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(None, "Document id is missing".to_string()),
+                    ))?
+                    .into_bytes()
+                    .map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "Document id is not a UUID".to_string(),
+                        ))
+                    })?
+                    .try_into()
+                    .map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "Document id has an invalid size".to_string(),
+                        ))
+                    })?,
+            ),
+            issuer_auth: CoseSign1::from_cbor_value(
+                map.remove(&Document::fn_issuer_auth().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "Document issuer_auth is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            mso: Mso::from_cbor_value(
+                map.remove(&Document::fn_mso().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "Document issuer_auth is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            namespaces: Namespaces::from_cbor_value(
+                map.remove(&Document::fn_namespaces().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "Document issuer_auth is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(
+            vec![
+                (
+                    Value::Text(Document::fn_id().to_string()),
+                    Value::Bytes(self.id.as_bytes().to_vec()),
+                ),
+                (
+                    Value::Text(Document::fn_issuer_auth().to_string()),
+                    self.issuer_auth.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(Document::fn_mso().to_string()),
+                    self.mso.to_cbor_value()?,
+                ),
+                (
+                    Value::Text(Document::fn_namespaces().to_string()),
+                    self.namespaces.to_cbor_value()?,
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .into())
+    }
 }
 
 /// Stores the prepared response.
@@ -149,7 +643,7 @@ pub struct Document {
 /// it will keep a list of prepared documents
 /// which needs to be signed with [SessionManager::get_next_signature_payload] and [SessionManager::submit_next_signature].
 /// After those are signed, they are kept in a list of [DeviceResponseDoc]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, FieldsNames)]
 pub struct PreparedDeviceResponse {
     prepared_documents: Vec<PreparedDocument>,
     signed_documents: Vec<DeviceResponseDoc>,
@@ -158,10 +652,198 @@ pub struct PreparedDeviceResponse {
     device_auth_type: DeviceAuthType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl CborSerializable for PreparedDeviceResponse {}
+impl AsCborValue for PreparedDeviceResponse {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "PreparedDeviceResponse is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(PreparedDeviceResponse {
+            prepared_documents: map
+                .remove(&PreparedDeviceResponse::fn_prepared_documents().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedDeviceResponse prepared_documents is missing".to_string(),
+                    ),
+                ))?
+                .into_array()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedDeviceResponse prepared_documents is not an array".to_string(),
+                    ))
+                })?
+                .into_iter()
+                .map(|v| PreparedDocument::from_cbor_value(v.into()))
+                .collect::<coset::Result<Vec<PreparedDocument>>>()?,
+            signed_documents: map
+                .remove(&PreparedDeviceResponse::fn_signed_documents().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedDeviceResponse signed_documents is missing".to_string(),
+                    ),
+                ))?
+                .into_array()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedDeviceResponse signed_documents is not an array".to_string(),
+                    ))
+                })?
+                .into_iter()
+                .map(|v| DeviceResponseDoc::from_cbor_value(v.into()))
+                .collect::<coset::Result<Vec<DeviceResponseDoc>>>()?,
+            document_errors: map
+                .remove(&PreparedDeviceResponse::fn_document_errors().into())
+                .map(|v| DocumentErrors::from_cbor_value(v.into()))
+                .transpose()?,
+            status: {
+                let v = map
+                    .remove(&PreparedDeviceResponse::fn_status().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDeviceResponse status is missing".to_string(),
+                        ),
+                    ))?
+                    .into_integer()
+                    .map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDeviceResponse status is not an integer".to_string(),
+                        ))
+                    })?;
+                (v as i32).try_into().map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedDeviceResponse status is not a string".to_string(),
+                    ))
+                })?
+            },
+            device_auth_type: DeviceAuthType::from_cbor_value(
+                map.remove(&PreparedDeviceResponse::fn_device_auth_type().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDeviceResponse device_auth_type is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let mut map = vec![];
+        map.push((
+            Value::Text(PreparedDeviceResponse::fn_prepared_documents().to_string()),
+            Value::Array(
+                self.prepared_documents
+                    .into_iter()
+                    .map(|d| d.to_cbor_value())
+                    .collect::<coset::Result<Vec<Value>>>()?,
+            ),
+        ));
+        map.push((
+            Value::Text(PreparedDeviceResponse::fn_signed_documents().to_string()),
+            Value::Array(
+                self.signed_documents
+                    .into_iter()
+                    .map(|d| d.to_cbor_value())
+                    .collect::<coset::Result<Vec<Value>>>()?,
+            ),
+        ));
+        if let Some(errors) = self.document_errors {
+            map.push((
+                Value::Text(PreparedDeviceResponse::fn_document_errors().to_string()),
+                errors.to_cbor_value()?,
+            ));
+        }
+        map.push((
+            Value::Text(PreparedDeviceResponse::fn_status().to_string()),
+            Value::Integer(
+                (self.status as i32)
+                    .try_into()
+                    .map_err(|_| coset::CoseError::EncodeFailed)?,
+            ),
+        ));
+        map.push((
+            Value::Text(PreparedDeviceResponse::fn_device_auth_type().to_string()),
+            self.device_auth_type.to_cbor_value()?,
+        ));
+        Ok(Value::Map(map))
+    }
+}
+
+#[derive(Debug, Clone, FieldsNames)]
 enum PreparedCose {
     Sign1(PreparedCoseSign1),
     Mac0(PreparedCoseMac0),
+}
+
+impl CborSerializable for PreparedCose {}
+impl AsCborValue for PreparedCose {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "PreparedCose is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        if map.len() != 1 {
+            return Err(coset::CoseError::DecodeFailed(
+                ciborium::de::Error::Semantic(
+                    None,
+                    "PreparedCose is not a map with a single key".to_string(),
+                ),
+            ));
+        }
+        let (k, v) = map.into_iter().next().unwrap();
+        Ok(match k {
+            k if k == PreparedCose::fn_sign1().into() => {
+                PreparedCose::Sign1(PreparedCoseSign1::from_cbor_value(v.into())?)
+            }
+            k if k == PreparedCose::fn_mac0().into() => {
+                PreparedCose::Mac0(PreparedCoseMac0::from_cbor_value(v.into())?)
+            }
+            _ => {
+                return Err(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedCose is not a map with a single key".to_string(),
+                    ),
+                ))
+            }
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(match self {
+            PreparedCose::Sign1(s) => vec![(
+                Value::Text(PreparedCose::fn_sign1().to_string()),
+                s.to_cbor_value()?,
+            )],
+            PreparedCose::Mac0(m) => vec![(
+                Value::Text(PreparedCose::fn_mac0().to_string()),
+                m.to_cbor_value()?,
+            )],
+        }))
+    }
 }
 
 impl PreparedCose {
@@ -173,7 +855,7 @@ impl PreparedCose {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, FieldsNames)]
 struct PreparedDocument {
     id: Uuid,
     doc_type: String,
@@ -183,10 +865,133 @@ struct PreparedDocument {
     errors: Option<NamespaceErrors>,
 }
 
+impl CborSerializable for PreparedDocument {}
+impl AsCborValue for PreparedDocument {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "PreparedDocument is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(PreparedDocument {
+            id: Uuid::from_bytes(
+                map.remove(&PreparedDocument::fn_id().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDocument id is missing".to_string(),
+                        ),
+                    ))?
+                    .into_bytes()
+                    .map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDocument id is not a UUID".to_string(),
+                        ))
+                    })?
+                    .try_into()
+                    .map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDocument id has an invalid size".to_string(),
+                        ))
+                    })?,
+            ),
+            doc_type: map
+                .remove(&PreparedDocument::fn_doc_type().into())
+                .ok_or(coset::CoseError::DecodeFailed(
+                    ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedDocument doc_type is missing".to_string(),
+                    ),
+                ))?
+                .into_text()
+                .map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "PreparedDocument doc_type is not a string".to_string(),
+                    ))
+                })?,
+            issuer_signed: IssuerSigned::from_cbor_value(
+                map.remove(&PreparedDocument::fn_issuer_signed().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDocument issuer_signed is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            device_namespaces: DeviceNamespacesBytes::from_cbor_value(
+                map.remove(&PreparedDocument::fn_device_namespaces().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDocument device_namespaces is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            prepared_cose: PreparedCose::from_cbor_value(
+                map.remove(&PreparedDocument::fn_prepared_cose().into())
+                    .ok_or(coset::CoseError::DecodeFailed(
+                        ciborium::de::Error::Semantic(
+                            None,
+                            "PreparedDocument prepared_cose is missing".to_string(),
+                        ),
+                    ))?
+                    .into(),
+            )?,
+            errors: map
+                .remove(&PreparedDocument::fn_errors().into())
+                .map(|v| NamespaceErrors::from_cbor_value(v.into()))
+                .transpose()?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        let mut map = vec![
+            (
+                Value::Text(PreparedDocument::fn_id().to_string()),
+                Value::Bytes(self.id.as_bytes().to_vec()),
+            ),
+            (
+                Value::Text(PreparedDocument::fn_doc_type().to_string()),
+                Value::Text(self.doc_type),
+            ),
+            (
+                Value::Text(PreparedDocument::fn_issuer_signed().to_string()),
+                self.issuer_signed.to_cbor_value()?,
+            ),
+            (
+                Value::Text(PreparedDocument::fn_device_namespaces().to_string()),
+                self.device_namespaces.to_cbor_value()?,
+            ),
+            (
+                Value::Text(PreparedDocument::fn_prepared_cose().to_string()),
+                self.prepared_cose.to_cbor_value()?,
+            ),
+        ];
+        if let Some(errors) = self.errors {
+            map.push((
+                Value::Text(PreparedDocument::fn_errors().to_string()),
+                errors.to_cbor_value()?,
+            ));
+        }
+        Ok(Value::Map(map))
+    }
+}
+
 /// Elements in a namespace.
 type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
-type Namespace = String;
-type ElementIdentifier = String;
+type Namespace = CborString;
+type ElementIdentifier = CborString;
 
 /// A list of the requested items by the reader.
 pub type RequestedItems = Vec<ItemsRequest>;
@@ -298,7 +1103,7 @@ impl SessionManagerEngaged {
 
 impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
-        let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
+        let request = CborValue::from_slice(request).map_err(|_| {
             // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborDecodingError, self.device_auth_type)
         })?;
@@ -387,7 +1192,7 @@ impl SessionManager {
     ///
     /// It returns the requested items by the reader.
     pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
-        let session_data: SessionData = serde_cbor::from_slice(request)?;
+        let session_data = SessionData::from_slice(request)?;
         self.handle_decoded_request(session_data)
     }
 
@@ -432,7 +1237,7 @@ impl SessionManager {
                     if p.is_complete() {
                         let response = p.finalize_response();
                         let mut status: Option<session::Status> = None;
-                        let response_bytes = serde_cbor::to_vec(&response)?;
+                        let response_bytes = response.to_vec()?;
                         let encrypted_response = session::encrypt_device_data(
                             &self.sk_device.into(),
                             &response_bytes,
@@ -449,7 +1254,7 @@ impl SessionManager {
                             Some(encrypted_response.into())
                         };
                         let session_data = SessionData { status, data };
-                        let encoded_response = serde_cbor::to_vec(&session_data)?;
+                        let encoded_response = session_data.to_vec()?;
                         self.state = State::ReadyToRespond(encoded_response);
                     } else {
                         self.state = State::Signing(p)
@@ -635,7 +1440,7 @@ pub trait DeviceSession {
                 CborString,
                 NonEmptyVec<IssuerSignedItemBytes>,
             > = Default::default();
-            let mut errors: BTreeMap<String, NonEmptyMap<String, DocumentErrorCode>> =
+            let mut errors: BTreeMap<CborString, NonEmptyMap<CborString, DocumentErrorCode>> =
                 Default::default();
 
             for (namespace, elements) in namespaces.into_iter() {
@@ -690,7 +1495,7 @@ pub trait DeviceSession {
             };
             let device_auth = DeviceAuthentication::new(
                 self.session_transcript(),
-                doc_type.clone(),
+                doc_type.clone().into(),
                 device_namespaces.clone(),
             );
             let device_auth = match Tag24::new(device_auth) {
@@ -703,7 +1508,7 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
+            let device_auth_bytes = match device_auth.to_vec() {
                 Ok(dab) => dab,
                 Err(_e) => {
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
@@ -762,7 +1567,7 @@ pub trait DeviceSession {
 
             let prepared_document = PreparedDocument {
                 id: document.id,
-                doc_type,
+                doc_type: doc_type.into(),
                 issuer_signed: IssuerSigned {
                     namespaces: issuer_namespaces.try_into().ok(),
                     issuer_auth: document.issuer_auth.clone(),
@@ -806,7 +1611,7 @@ impl From<Mdoc> for Document {
         ) -> NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes> {
             v.into_inner()
                 .into_iter()
-                .map(|i| (i.as_ref().element_identifier.clone(), i))
+                .map(|i| (i.as_ref().element_identifier.clone().into(), i))
                 .collect::<BTreeMap<_, _>>()
                 .try_into()
                 // Can unwrap as there is always at least one element in a NonEmptyVec.
@@ -844,17 +1649,24 @@ fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> Perm
         .filter_map(|(doc_type, namespaces)| {
             request
                 .iter()
-                .find(|item| item.doc_type == doc_type)
+                .find(|item| {
+                    let doc_type: String = doc_type.clone().into();
+                    item.doc_type == doc_type
+                })
                 .map(|item| {
                     namespaces
                         .into_iter()
                         .filter_map(|(ns, elems)| {
+                            let ns2: String = ns.clone().into();
                             item.namespaces
-                                .get(&ns)
+                                .get(&ns2)
                                 .map(|req_elems| {
                                     elems
                                         .into_iter()
-                                        .filter(|elem| req_elems.contains_key(elem))
+                                        .filter(|elem| {
+                                            let elem2: String = elem.clone().into();
+                                            req_elems.contains_key(&elem2)
+                                        })
                                         .collect()
                                 })
                                 .map(|e| (ns, e))

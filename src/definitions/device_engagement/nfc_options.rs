@@ -2,7 +2,7 @@ use crate::cbor::CborValue;
 use crate::definitions::device_engagement::error::Error;
 use anyhow::Result;
 use ciborium::Value;
-use coset::AsCborValue;
+use coset::{AsCborValue, CborSerializable};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -11,10 +11,66 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandDataLength(u16);
 
+impl CborSerializable for CommandDataLength {}
+impl AsCborValue for CommandDataLength {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        value
+            .into_integer()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "invalid bytes".to_string(),
+                ))
+            })
+            .and_then(|int_val| {
+                u16::try_from(int_val)
+                    .map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "invalid bytes".to_string(),
+                        ))
+                    })
+                    .map(CommandDataLength)
+            })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Integer(self.0.into()))
+    }
+}
+
 /// The maximum length of the NFC response data, as specified in ISO_18013-5 2021 Section 8.3.3.1.2
 /// Values of this type must lie between 256 and 65,536 inclusive, as specified in Note 2.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResponseDataLength(u32);
+
+impl CborSerializable for ResponseDataLength {}
+impl AsCborValue for ResponseDataLength {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        value
+            .into_integer()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "invalid bytes".to_string(),
+                ))
+            })
+            .and_then(|int_val| {
+                u32::try_from(int_val)
+                    .map_err(|_| {
+                        coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                            None,
+                            "invalid bytes".to_string(),
+                        ))
+                    })
+                    .map(ResponseDataLength)
+            })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Integer(self.0.into()))
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct NfcOptions {
@@ -306,8 +362,8 @@ mod test {
     #[test]
     fn command_data_length_cbor_roundtrip_test() {
         let cdl: CommandDataLength = CommandDataLength::new(512).unwrap();
-        let bytes: Vec<u8> = serde_cbor::to_vec(&cdl).unwrap();
-        let deserialized: CommandDataLength = serde_cbor::from_slice(&bytes).unwrap();
+        let bytes: Vec<u8> = cdl.clone().to_vec().unwrap();
+        let deserialized = CommandDataLength::from_slice(&bytes).unwrap();
         assert_eq!(cdl, deserialized);
     }
 
@@ -374,14 +430,14 @@ mod test {
     #[test]
     fn response_data_length_cbor_roundtrip_test() {
         let rdl: ResponseDataLength = ResponseDataLength::new(512).unwrap();
-        let bytes: Vec<u8> = serde_cbor::to_vec(&rdl).unwrap();
-        let deserialized: ResponseDataLength = serde_cbor::from_slice(&bytes).unwrap();
+        let bytes: Vec<u8> = rdl.clone().to_vec().unwrap();
+        let deserialized = ResponseDataLength::from_slice(&bytes).unwrap();
         assert_eq!(rdl, deserialized);
     }
 
     fn nfc_options_cbor_roundtrip_test(nfc_options: NfcOptions) {
-        let bytes: Vec<u8> = serde_cbor::to_vec(&nfc_options).unwrap();
-        let deserialized: NfcOptions = serde_cbor::from_slice(&bytes).unwrap();
+        let bytes: Vec<u8> = nfc_options.clone().to_vec().unwrap();
+        let deserialized = NfcOptions::from_slice(&bytes).unwrap();
         assert_eq!(nfc_options, deserialized);
     }
 
@@ -412,9 +468,9 @@ mod test {
             max_len_response_data_field: ResponseDataLength::MIN,
         };
 
-        let bytes: Vec<u8> = serde_cbor::to_vec(&nfc_options).unwrap();
+        let bytes: Vec<u8> = nfc_options.to_vec().unwrap();
         let deserialized_result: Result<NfcOptions, Error> =
-            serde_cbor::from_slice(&bytes).map_err(Error::from);
+            NfcOptions::from_slice(&bytes).map_err(Error::from);
         assert_eq!(Err(Error::SerdeCborError), deserialized_result);
     }
 
@@ -425,9 +481,9 @@ mod test {
             max_len_response_data_field: ResponseDataLength::MIN,
         };
 
-        let bytes: Vec<u8> = serde_cbor::to_vec(&nfc_options).unwrap();
+        let bytes: Vec<u8> = nfc_options.to_vec().unwrap();
         let deserialized_result: Result<NfcOptions, Error> =
-            serde_cbor::from_slice(&bytes).map_err(Error::from);
+            NfcOptions::from_slice(&bytes).map_err(Error::from);
         assert_eq!(Err(Error::SerdeCborError), deserialized_result);
     }
 }

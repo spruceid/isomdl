@@ -1,12 +1,16 @@
-use crate::cose::SignatureAlgorithm;
+use std::collections::BTreeMap;
+
 use ciborium::Value;
 use coset::cwt::ClaimsSet;
 use coset::{
     iana, sig_structure_data, AsCborValue, CborSerializable, CoseError, RegisteredLabelWithPrivate,
     SignatureContext, TaggedCborSerializable,
 };
-use serde::{ser, Deserialize, Deserializer, Serialize};
+use isomdl_macros::FieldsNames;
 use signature::Verifier;
+
+use crate::cbor::CborValue;
+use crate::cose::SignatureAlgorithm;
 
 /// Prepared `COSE_Sign1` for remote signing.
 ///
@@ -52,11 +56,85 @@ use signature::Verifier;
 ///         .map_err(Error::Signing)?
 ///         .to_vec())
 /// }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, FieldsNames)]
 pub struct PreparedCoseSign1 {
     tagged: bool,
     cose_sign1: CoseSign1,
     signature_payload: Vec<u8>,
+}
+
+impl CborSerializable for PreparedCoseSign1 {}
+impl AsCborValue for PreparedCoseSign1 {
+    fn from_cbor_value(value: Value) -> coset::Result<Self> {
+        let mut map = value
+            .into_map()
+            .map_err(|_| {
+                CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "PreparedCoseSign1 is not a map".to_string(),
+                ))
+            })?
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<BTreeMap<CborValue, CborValue>>();
+        Ok(PreparedCoseSign1 {
+            tagged: map
+                .remove(&CborValue::Text(PreparedCoseSign1::fn_tagged().to_string()))
+                .ok_or(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "tagged not found".to_string(),
+                )))?
+                .into_bool()
+                .map_err(|_| {
+                    CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "tagged is not a bool".to_string(),
+                    ))
+                })?,
+            cose_sign1: CoseSign1::from_cbor_value(
+                map.remove(&CborValue::Text(
+                    PreparedCoseSign1::fn_cose_sign1().to_string(),
+                ))
+                .ok_or(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "cose_sign1 not found".to_string(),
+                )))?
+                .into(),
+            )?,
+            signature_payload: map
+                .remove(&CborValue::Text(
+                    PreparedCoseSign1::fn_signature_payload().to_string(),
+                ))
+                .ok_or(CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "signature_payload not found".to_string(),
+                )))?
+                .into_bytes()
+                .map_err(|_| {
+                    CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "signature_payload is not bytes".to_string(),
+                    ))
+                })?,
+        })
+    }
+
+    fn to_cbor_value(self) -> coset::Result<Value> {
+        Ok(Value::Map(vec![
+            (
+                Value::Text(PreparedCoseSign1::fn_tagged().to_string()),
+                Value::Bool(self.tagged),
+            ),
+            (
+                Value::Text(PreparedCoseSign1::fn_cose_sign1().to_string()),
+                self.cose_sign1.to_cbor_value()?,
+            ),
+            (
+                Value::Text(PreparedCoseSign1::fn_signature_payload().to_string()),
+                Value::Bytes(self.signature_payload),
+            ),
+        ]))
+    }
 }
 
 /// COSE_Sign1 implementation.

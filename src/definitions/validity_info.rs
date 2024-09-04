@@ -89,8 +89,9 @@ impl<'de> Deserialize<'de> for ValidityInfo {
 
         let value = Value::deserialize(deserializer)?;
         let value: CborValue = value.into();
-        // todo: use mar_err
-        let mut map = value.into_map().expect("not a map");
+        let mut map = value
+            .into_map()
+            .map_err(|_| D::Error::custom("not a map"))?;
         let signed = extract_date!(map, "signed");
         let valid_from = extract_date!(map, "validFrom");
         let valid_until = extract_date!(map, "validUntil");
@@ -234,8 +235,8 @@ mod test {
     #[test]
     fn roundtrip() {
         let cbor = hex::decode("A3667369676E6564C074323032302D30312D30315430303A30303A30305A6976616C696446726F6DC074323032302D30312D30315430303A30303A30305A6A76616C6964556E74696CC074323032302D30312D30315430303A30303A30305A").unwrap();
-        let validity_info: ValidityInfo = serde_cbor::from_slice(&cbor).unwrap();
-        let roundtripped = serde_cbor::to_vec(&validity_info).unwrap();
+        let validity_info = ValidityInfo::from_slice(&cbor).unwrap();
+        let roundtripped = validity_info.to_vec().unwrap();
         assert_eq!(cbor, roundtripped);
     }
 
@@ -243,8 +244,8 @@ mod test {
     #[test]
     fn trim() {
         let cbor = hex::decode("A3667369676E6564C07818323032302D30312D30315430303A30303A30302E3130315A6976616C696446726F6DC0781B323032302D30312D30315430303A30303A30302E3131323231395A6A76616C6964556E74696CC0781E323032302D30312D30315430303A30303A30302E3939393939393939395A").unwrap();
-        let validity_info: ValidityInfo = serde_cbor::from_slice(&cbor).unwrap();
-        let roundtripped = serde_cbor::to_vec(&validity_info).unwrap();
+        let validity_info = ValidityInfo::from_slice(&cbor).unwrap();
+        let roundtripped = validity_info.to_vec().unwrap();
         let trimmed = hex::decode("A3667369676E6564C074323032302D30312D30315430303A30303A30305A6976616C696446726F6DC074323032302D30312D30315430303A30303A30305A6A76616C6964556E74696CC074323032302D30312D30315430303A30303A30305A").unwrap();
         assert_eq!(trimmed, roundtripped);
     }
