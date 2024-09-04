@@ -47,6 +47,7 @@ pub type IssuerSignedItemBytes = Tag24<IssuerSignedItem>;
 pub struct IssuerSignedItem {
     /// The ID of the digest used for signing.
     #[serde(rename = "digestID")]
+    #[isomdl(rename = "digestID")]
     pub digest_id: DigestId,
 
     /// Random bytes associated with the signed item.

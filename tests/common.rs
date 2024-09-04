@@ -1,10 +1,12 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, Context, Result};
+use coset::CborSerializable;
 use signature::Signer;
 use uuid::Uuid;
 
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
-use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
+use isomdl::definitions::device_request::{DataElements, Namespaces};
+use isomdl::definitions::helpers::string_cbor::CborString;
 use isomdl::definitions::helpers::NonEmptyMap;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
@@ -18,10 +20,10 @@ pub struct Device {}
 
 impl Device {
     /// Parse the mDL encoded string into a [Documents] object.
-    pub fn parse_mdl() -> Result<NonEmptyMap<DocType, Document>> {
+    pub fn parse_mdl() -> Result<NonEmptyMap<CborString, Document>> {
         let mdl_encoded = include_str!("data/stringified-mdl.txt");
         let mdl = Document::parse(mdl_encoded.to_string()).context("could not parse mDL")?;
-        let docs = Documents::new(DOC_TYPE.to_string(), mdl);
+        let docs = Documents::new(DOC_TYPE.to_string().into(), mdl);
         Ok(docs)
     }
 
@@ -63,8 +65,8 @@ impl Device {
         request: Vec<u8>,
     ) -> Result<(device::SessionManager, RequestedItems)> {
         let (session_manager, items_requests) = {
-            let session_establishment: definitions::SessionEstablishment =
-                serde_cbor::from_slice(&request).context("could not deserialize request")?;
+            let session_establishment = definitions::SessionEstablishment::from_slice(&request)
+                .context("could not deserialize request")?;
             state
                 .process_session_establishment(session_establishment)
                 .context("could not process process session establishment")?
@@ -81,11 +83,12 @@ impl Device {
         requested_items: RequestedItems,
         key: &p256::ecdsa::SigningKey,
     ) -> Result<Vec<u8>> {
+        let namespace: CborString = NAMESPACE.into();
+        let doc_type: CborString = DOC_TYPE.into();
+        let age_over_21: CborString = AGE_OVER_21_ELEMENT.into();
         let permitted_items = [(
-            DOC_TYPE.to_string(),
-            [(NAMESPACE.to_string(), vec![AGE_OVER_21_ELEMENT.to_string()])]
-                .into_iter()
-                .collect(),
+            doc_type,
+            [(namespace, vec![age_over_21])].into_iter().collect(),
         )]
         .into_iter()
         .collect();

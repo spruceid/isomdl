@@ -3,6 +3,7 @@ use crate::definitions::device_engagement::error::Error;
 use anyhow::Result;
 use ciborium::Value;
 use coset::{AsCborValue, CborSerializable};
+use isomdl_macros::CborSerializableFromCborValue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -72,30 +73,12 @@ impl AsCborValue for ResponseDataLength {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(
+    Clone, Debug, CborSerializableFromCborValue, Serialize, Deserialize, PartialEq, Eq, Default,
+)]
 pub struct NfcOptions {
     max_len_command_data_field: CommandDataLength,
     max_len_response_data_field: ResponseDataLength,
-}
-
-impl coset::CborSerializable for NfcOptions {}
-impl AsCborValue for NfcOptions {
-    fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let cbor = CborValue::from(value);
-        Ok(cbor.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "invalid bytes".to_string(),
-            ))
-        })?)
-    }
-
-    fn to_cbor_value(self) -> coset::Result<Value> {
-        let cbor: CborValue = self
-            .try_into()
-            .map_err(|_| coset::CoseError::EncodeFailed)?;
-        Ok(cbor.into())
-    }
 }
 
 impl TryFrom<CborValue> for NfcOptions {

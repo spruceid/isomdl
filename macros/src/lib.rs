@@ -191,6 +191,43 @@ pub fn fields_names_derive(input: TokenStream) -> TokenStream {
     fields_names(input)
 }
 
+use quote::quote;
+use syn::{parse_macro_input, DeriveInput};
+
+#[proc_macro_derive(CborSerializableFromCborValue)]
+pub fn cbor_serializable_impl(input: TokenStream) -> TokenStream {
+    // Parse the input tokens into a syntax tree
+    let input = parse_macro_input!(input as DeriveInput);
+
+    // Get the name of the struct
+    let name = &input.ident;
+
+    // Generate the CborSerializable and AsCborValue implementation
+    let expanded = quote! {
+        impl coset::CborSerializable for #name {}
+
+        impl coset::AsCborValue for #name {
+            fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+                let cbor = CborValue::from(value);
+                cbor.try_into().map_err(|_| {
+                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                        None,
+                        "invalid bytes".to_string(),
+                    ))
+                })
+            }
+
+            fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
+                let cbor: CborValue = self.into();
+                Ok(cbor.into())
+            }
+        }
+    };
+
+    // Convert the generated code into a TokenStream and return it
+    TokenStream::from(expanded)
+}
+
 #[cfg(test)]
 mod test {
     use syn::{parse_str, Data, DeriveInput};

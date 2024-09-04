@@ -1,11 +1,13 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+use coset::CborSerializable;
 use signature::Signer;
 use uuid::Uuid;
 
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, Namespaces};
+use isomdl::definitions::helpers::string_cbor::CborString;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Documents, RequestedItems};
 use isomdl::presentation::{device, reader};
@@ -110,8 +112,8 @@ fn handle_request(
     key: Arc<p256::ecdsa::SigningKey>,
 ) -> Result<Option<RequestData>> {
     let (session_manager, items_requests) = {
-        let session_establishment: definitions::SessionEstablishment =
-            serde_cbor::from_slice(&request).context("could not deserialize request")?;
+        let session_establishment = definitions::SessionEstablishment::from_slice(&request)
+            .context("could not deserialize request")?;
         state
             .0
             .clone()
@@ -135,11 +137,12 @@ fn handle_request(
 
 // Prepare response with required elements.
 fn create_response(session_manager: Arc<SessionManager>) -> Result<Vec<u8>> {
+    let doc_type: CborString = DOC_TYPE.into();
+    let namespace: CborString = NAMESPACE.into();
+    let age_over_21: CborString = AGE_OVER_21_ELEMENT.into();
     let permitted_items = [(
-        DOC_TYPE.to_string(),
-        [(NAMESPACE.to_string(), vec![AGE_OVER_21_ELEMENT.to_string()])]
-            .into_iter()
-            .collect(),
+        doc_type,
+        [(namespace, vec![age_over_21])].into_iter().collect(),
     )]
     .into_iter()
     .collect();

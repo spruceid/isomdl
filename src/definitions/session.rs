@@ -314,6 +314,9 @@ impl AsCborValue for Handover {
                             (Value::Bytes(b1), Value::Bytes(b2)) => {
                                 Ok(Handover::NFC(ByteStr::from(b1), Some(ByteStr::from(b2))))
                             }
+                            (Value::Bytes(b1), Value::Null) => {
+                                Ok(Handover::NFC(ByteStr::from(b1), None))
+                            }
                             (Value::Text(s1), Value::Text(s2)) => Ok(Handover::OID4VP(s1, s2)),
                             _ => Err(coset::CoseError::DecodeFailed(
                                 ciborium::de::Error::Semantic(None, "not a handover".to_string()),
@@ -331,18 +334,20 @@ impl AsCborValue for Handover {
 
     fn to_cbor_value(self) -> coset::Result<Value> {
         Ok(match self {
-            Handover::QR => CborValue::Null.into(),
+            Handover::QR => Value::Null,
             Handover::NFC(b, b2) => {
                 let mut arr = vec![b.into()];
                 if let Some(b2) = b2 {
-                    arr.push(b2.into());
+                    arr.push(Value::Bytes(b2.into()));
+                } else {
+                    arr.push(Value::Null);
                 }
-                CborValue::Array(arr).into()
+                Value::Array(arr)
             }
             Handover::OID4VP(s, s2) => {
-                let s: CborValue = s.into();
-                let s2: CborValue = s2.into();
-                CborValue::Array(vec![s, s2]).into()
+                let s: Value = s.into();
+                let s2: Value = s2.into();
+                Value::Array(vec![s, s2])
             }
         })
     }

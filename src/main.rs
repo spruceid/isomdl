@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Error};
 use clap::Parser;
 use clap_stdin::MaybeStdin;
+use isomdl::definitions::helpers::string_cbor::CborString;
 use isomdl::presentation::{device::Document, Stringify};
 
 #[derive(Parser, Debug)]
@@ -33,8 +34,8 @@ fn print_namespaces(mdl: String) -> Result<(), Error> {
         .namespaces
         .into_inner()
         .into_iter()
-        .map(|(ns, inner)| (ns, inner.into_inner().into_keys().collect()))
-        .collect::<BTreeMap<String, Vec<String>>>();
+        .map(|(ns, inner)| (ns.into(), inner.into_inner().into_keys().collect()))
+        .collect::<BTreeMap<String, Vec<CborString>>>();
     println!("{}", serde_json::to_string_pretty(&claims)?);
     Ok(())
 }

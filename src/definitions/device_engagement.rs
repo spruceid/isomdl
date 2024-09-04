@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, vec};
 use anyhow::Result;
 use ciborium::Value;
 use coset::AsCborValue;
-use isomdl_macros::FieldsNames;
+use isomdl_macros::{CborSerializableFromCborValue, FieldsNames};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -33,7 +33,7 @@ pub type Oidc = (u64, String, String);
 pub type WebApi = (u64, String, String);
 
 /// Represents a device engagement.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, CborSerializableFromCborValue, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue", rename_all = "camelCase")]
 pub struct DeviceEngagement {
     /// The version of the device engagement.
@@ -55,27 +55,7 @@ pub struct DeviceEngagement {
     pub protocol_info: Option<ProtocolInfo>,
 }
 
-impl coset::CborSerializable for DeviceEngagement {}
-impl AsCborValue for DeviceEngagement {
-    fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let cbor = CborValue::from(value);
-        Ok(cbor.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "invalid bytes".to_string(),
-            ))
-        })?)
-    }
-
-    fn to_cbor_value(self) -> coset::Result<Value> {
-        let cbor: CborValue = self
-            .try_into()
-            .map_err(|_| coset::CoseError::EncodeFailed)?;
-        Ok(cbor.into())
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, CborSerializableFromCborValue, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub enum DeviceRetrievalMethod {
     /// Represents the options for a WiFi connection.
@@ -91,35 +71,14 @@ pub enum DeviceRetrievalMethod {
     NFC(NfcOptions),
 }
 
-impl coset::CborSerializable for DeviceRetrievalMethod {}
-impl AsCborValue for DeviceRetrievalMethod {
-    fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let cbor = CborValue::from(value);
-        Ok(cbor.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "invalid bytes".to_string(),
-            ))
-        })?)
-    }
-
-    fn to_cbor_value(self) -> coset::Result<Value> {
-        let cbor: CborValue = self.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "invalid bytes".to_string(),
-            ))
-        })?;
-        Ok(cbor.into())
-    }
-}
-
 /// Represents the bytes of an EDevice key.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Security(pub u64, pub EDeviceKeyBytes);
 
 /// Represents the server retrieval methods for device engagement.
-#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, CborSerializableFromCborValue, FieldsNames, Serialize, Deserialize, PartialEq, Eq,
+)]
 #[serde(rename_all = "camelCase")]
 #[isomdl(rename_all = "camelCase")]
 pub struct ServerRetrievalMethods {
@@ -134,28 +93,8 @@ pub struct ServerRetrievalMethods {
     oidc: Option<Oidc>,
 }
 
-impl coset::CborSerializable for ServerRetrievalMethods {}
-impl AsCborValue for ServerRetrievalMethods {
-    fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let cbor = CborValue::from(value);
-        Ok(cbor.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "invalid bytes".to_string(),
-            ))
-        })?)
-    }
-
-    fn to_cbor_value(self) -> coset::Result<Value> {
-        let cbor: CborValue = self
-            .try_into()
-            .map_err(|_| coset::CoseError::EncodeFailed)?;
-        Ok(cbor.into())
-    }
-}
-
 /// Represents the options for `Bluetooth Low Energy` (BLE) device engagement.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, CborSerializableFromCborValue, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct BleOptions {
     /// The peripheral server mode for `BLE` device engagement.
@@ -165,26 +104,6 @@ pub struct BleOptions {
     /// The central client mode for `BLE` device engagement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub central_client_mode: Option<CentralClientMode>,
-}
-
-impl coset::CborSerializable for BleOptions {}
-impl AsCborValue for BleOptions {
-    fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let cbor = CborValue::from(value);
-        Ok(cbor.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "invalid bytes".to_string(),
-            ))
-        })?)
-    }
-
-    fn to_cbor_value(self) -> coset::Result<Value> {
-        let cbor: CborValue = self
-            .try_into()
-            .map_err(|_| coset::CoseError::EncodeFailed)?;
-        Ok(cbor.into())
-    }
 }
 
 /// Represents a peripheral server mode.
@@ -204,7 +123,9 @@ pub struct CentralClientMode {
 }
 
 /// Represents the options for a `WiFi` device engagement.
-#[derive(Clone, Debug, FieldsNames, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(
+    Clone, Debug, CborSerializableFromCborValue, Serialize, Deserialize, PartialEq, Eq, Default,
+)]
 #[serde(try_from = "CborValue", into = "CborValue")]
 pub struct WifiOptions {
     /// The passphrase for the `WiFi connection. If [None], no passphrase is required.
@@ -222,26 +143,6 @@ pub struct WifiOptions {
     /// The band information of the `WiFi channel. If [None], the band information is not specified.
     #[serde(skip_serializing_if = "Option::is_none")]
     band_info: Option<ByteStr>,
-}
-
-impl coset::CborSerializable for WifiOptions {}
-impl AsCborValue for WifiOptions {
-    fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let cbor = CborValue::from(value);
-        Ok(cbor.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "invalid bytes".to_string(),
-            ))
-        })?)
-    }
-
-    fn to_cbor_value(self) -> coset::Result<Value> {
-        let cbor: CborValue = self
-            .try_into()
-            .map_err(|_| coset::CoseError::EncodeFailed)?;
-        Ok(cbor.into())
-    }
 }
 
 impl coset::CborSerializable for Security {}
@@ -754,10 +655,9 @@ impl TryFrom<CborValue> for ServerRetrievalMethods {
 
 #[cfg(test)]
 mod test {
+    use crate::definitions::session::create_p256_ephemeral_keys;
     use coset::CborSerializable;
     use uuid::Uuid;
-
-    use crate::definitions::session::create_p256_ephemeral_keys;
 
     use super::*;
 
