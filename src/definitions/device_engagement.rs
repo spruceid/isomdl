@@ -202,7 +202,7 @@ impl From<DeviceEngagement> for CborValue {
     fn from(device_engagement: DeviceEngagement) -> CborValue {
         let mut map = vec![];
         map.push((
-            Value::Integer(0.into()).into(),
+            Value::Integer(0.into()),
             Value::Text(device_engagement.version),
         ));
         let v = device_engagement

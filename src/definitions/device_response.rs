@@ -188,8 +188,7 @@ fn cbor_value_to_errors(val: Value) -> coset::Result<Errors> {
                     let value = v
                         .into_integer()
                         .map_err(|_| coset::CoseError::UnexpectedItem("value", "integer"))?
-                        .try_into()
-                        .map_err(|_| coset::CoseError::UnexpectedItem("value", "integer"))?;
+                        .into();
                     let value = match value {
                         0 => DocumentErrorCode::DataNotReturned,
                         i => DocumentErrorCode::ApplicationSpecific(i),
@@ -220,18 +219,15 @@ pub enum DocumentErrorCode {
 impl CborSerializable for DocumentErrorCode {}
 impl AsCborValue for DocumentErrorCode {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        let map = value.into_integer().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "not an integer".to_string(),
-            ))
-        })?;
-        let v = map.try_into().map_err(|_| {
-            coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                None,
-                "not an integer".to_string(),
-            ))
-        })?;
+        let v = value
+            .into_integer()
+            .map_err(|_| {
+                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
+                    None,
+                    "not an integer".to_string(),
+                ))
+            })?
+            .into();
         Ok(match v {
             0 => DocumentErrorCode::DataNotReturned,
             i => DocumentErrorCode::ApplicationSpecific(i),
@@ -473,13 +469,7 @@ fn cbor_value_to_document_errors(val: Value) -> coset::Result<DocumentErrors> {
                 .ok_or(coset::CoseError::DecodeFailed(
                     ciborium::de::Error::Semantic(None, "not an integer".to_string()),
                 ))?
-                .try_into()
-                .map_err(|_| {
-                    coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                        None,
-                        "not an integer".to_string(),
-                    ))
-                })?;
+                .into();
             let v = if code == 0 {
                 DocumentErrorCode::DataNotReturned
             } else {

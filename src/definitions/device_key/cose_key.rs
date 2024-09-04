@@ -38,12 +38,12 @@ impl CborSerializable for CoseKey {}
 impl AsCborValue for CoseKey {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
         let v: CborValue = value.into();
-        Ok(v.try_into().map_err(|_| {
+        v.try_into().map_err(|_| {
             coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                 None,
                 "invalid bytes".to_string(),
             ))
-        })?)
+        })
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
@@ -205,10 +205,10 @@ impl TryFrom<CborValue> for CoseKey {
                 map.remove(&CborValue::Integer(-2)),
             ) {
                 (
-                    Some(CborValue::Integer(i2)),
+                    Some(CborValue::Integer(2)),
                     Some(CborValue::Integer(crv_id)),
                     Some(CborValue::Bytes(x)),
-                ) if i2 == 2 => {
+                ) => {
                     let crv: i128 = crv_id;
                     let crv = match crv {
                         1 => EC2Curve::P256,
@@ -228,10 +228,10 @@ impl TryFrom<CborValue> for CoseKey {
                     Ok(Self::EC2 { crv, x, y })
                 }
                 (
-                    Some(CborValue::Integer(i1)),
+                    Some(CborValue::Integer(1)),
                     Some(CborValue::Integer(crv_id)),
                     Some(CborValue::Bytes(x)),
-                ) if i1 == 1 => {
+                ) => {
                     let crv = match crv_id {
                         4 => OKPCurve::X25519,
                         5 => OKPCurve::X448,

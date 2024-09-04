@@ -67,12 +67,12 @@ impl TryFrom<Value> for CborString {
 impl CborSerializable for CborString {}
 impl AsCborValue for CborString {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
-        Ok(value.try_into().map_err(|_| {
+        value.try_into().map_err(|_| {
             coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                 None,
                 "not a string".to_string(),
             ))
-        })?)
+        })
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {

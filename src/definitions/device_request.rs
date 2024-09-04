@@ -65,15 +65,16 @@ impl AsCborValue for DeviceRequest {
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {
-        let mut map = vec![];
-        map.push((
-            DeviceRequest::fn_version().into(),
-            Value::Text(self.version),
-        ));
-        map.push((
-            Value::Text(DeviceRequest::fn_doc_requests().to_string()),
-            self.doc_requests.to_cbor_value()?,
-        ));
+        let map = vec![
+            (
+                DeviceRequest::fn_version().into(),
+                Value::Text(self.version),
+            ),
+            (
+                Value::Text(DeviceRequest::fn_doc_requests().to_string()),
+                self.doc_requests.to_cbor_value()?,
+            ),
+        ];
         Ok(Value::Map(map))
     }
 }

@@ -39,7 +39,7 @@ impl From<ByteStr> for CborValue {
 
 impl From<ByteStr> for Value {
     fn from(ByteStr(bytes): ByteStr) -> Value {
-        Value::Bytes(bytes).into()
+        Value::Bytes(bytes)
     }
 }
 

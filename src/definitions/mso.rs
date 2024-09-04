@@ -65,7 +65,7 @@ impl TryFrom<CborValue> for DigestIds {
     type Error = Error;
 
     fn try_from(value: CborValue) -> Result<Self, Self::Error> {
-        Ok(value
+        value
             .into_map()
             .map_err(|_| Error::Deserialize("not an map"))?
             .into_iter()
@@ -77,7 +77,7 @@ impl TryFrom<CborValue> for DigestIds {
                     .map_err(|_| Error::Deserialize("cannot deserialize value"))?;
                 Ok((DigestId(k as i32), v))
             })
-            .collect::<Result<BTreeMap<DigestId, ByteStr>, Error>>()?)
+            .collect::<Result<BTreeMap<DigestId, ByteStr>, Error>>()
     }
 }
 

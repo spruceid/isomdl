@@ -623,11 +623,9 @@ fn cbor_value_into_ciborium_value(val: &CborValue) -> Value {
         CborValue::Float(f) => Value::Float(*f),
         CborValue::Bytes(b) => Value::Bytes(b.clone()),
         CborValue::Text(t) => Value::Text(t.to_string()),
-        CborValue::Array(a) => {
-            Value::Array(a.into_iter().map(cbor_value_into_ciborium_value).collect())
-        }
+        CborValue::Array(a) => Value::Array(a.iter().map(cbor_value_into_ciborium_value).collect()),
         CborValue::Map(m) => Value::Map(
-            m.into_iter()
+            m.iter()
                 .map(|(k, v)| {
                     (
                         cbor_value_into_ciborium_value(k),
@@ -636,7 +634,7 @@ fn cbor_value_into_ciborium_value(val: &CborValue) -> Value {
                 })
                 .collect(),
         ),
-        CborValue::Tag(t, v) => Value::Tag(*t, Box::new(cbor_value_into_ciborium_value(&*v))),
+        CborValue::Tag(t, v) => Value::Tag(*t, Box::new(cbor_value_into_ciborium_value(v))),
         _ => unimplemented!("Unsupported cbor value {val:?}"),
     }
 }
@@ -649,11 +647,9 @@ fn ciborium_value_into_cbor_value(val: &Value) -> CborValue {
         Value::Float(f) => CborValue::Float(*f),
         Value::Bytes(b) => CborValue::Bytes(b.clone()),
         Value::Text(t) => CborValue::Text(t.to_string()),
-        Value::Array(a) => {
-            CborValue::Array(a.into_iter().map(ciborium_value_into_cbor_value).collect())
-        }
+        Value::Array(a) => CborValue::Array(a.iter().map(ciborium_value_into_cbor_value).collect()),
         Value::Map(m) => CborValue::Map(
-            m.into_iter()
+            m.iter()
                 .map(|(k, v)| {
                     (
                         ciborium_value_into_cbor_value(k),
@@ -662,7 +658,7 @@ fn ciborium_value_into_cbor_value(val: &Value) -> CborValue {
                 })
                 .collect(),
         ),
-        Value::Tag(t, v) => CborValue::Tag(*t, Box::new(ciborium_value_into_cbor_value(&*v))),
+        Value::Tag(t, v) => CborValue::Tag(*t, Box::new(ciborium_value_into_cbor_value(v))),
         _ => unimplemented!("Unsupported cbor value {val:?}"),
     }
 }
@@ -701,7 +697,7 @@ impl Ord for CborValue {
             (Map(a), Map(b)) if a.len() != b.len() => a.len().cmp(&b.len()),
             (Bytes(a), Bytes(b)) => a.cmp(b),
             (Text(a), Text(b)) => a.cmp(b),
-            (a, b) => a.cmp(&b),
+            (a, b) => a.cmp(b),
         }
     }
 }
@@ -987,9 +983,7 @@ impl TryFrom<CborValue> for i128 {
     fn try_from(value: CborValue) -> Result<Self, Self::Error> {
         value
             .into_integer()
-            .map_err(|_| Error::Deserialize("not an integer"))?
-            .try_into()
-            .map_err(|_| Error::Deserialize("not i128"))
+            .map_err(|_| Error::Deserialize("not an integer"))
     }
 }
 

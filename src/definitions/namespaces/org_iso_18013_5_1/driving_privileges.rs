@@ -53,7 +53,7 @@ impl TryFrom<CborValue> for FullDate {
         let s = value
             .into_text()
             .map_err(|_| Error::Decode("FullDate is not a text"))?;
-        Ok(FullDate::from_str(&s).map_err(|_| Error::Decode("FullDate is not a valid date"))?)
+        FullDate::from_str(&s).map_err(|_| Error::Decode("FullDate is not a valid date"))
     }
 }
 
@@ -213,12 +213,12 @@ impl CborSerializable for Code {}
 impl AsCborValue for Code {
     fn from_cbor_value(value: Value) -> coset::Result<Self> {
         let value: CborValue = value.into();
-        Ok(Self::try_from(value).map_err(|_| {
+        Self::try_from(value).map_err(|_| {
             coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
                 None,
                 "invalid Code".to_string(),
             ))
-        })?)
+        })
     }
 
     fn to_cbor_value(self) -> coset::Result<Value> {

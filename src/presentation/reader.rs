@@ -173,11 +173,7 @@ impl AsCborValue for SessionManager {
                 ),
                 (
                     Value::Text(SessionManager::fn_device_message_counter().to_string()),
-                    Value::Integer(
-                        self.device_message_counter
-                            .try_into()
-                            .map_err(|_| coset::CoseError::EncodeFailed)?,
-                    ),
+                    Value::Integer(self.device_message_counter.into()),
                 ),
                 (
                     Value::Text(SessionManager::fn_sk_reader().to_string()),
@@ -185,11 +181,7 @@ impl AsCborValue for SessionManager {
                 ),
                 (
                     Value::Text(SessionManager::fn_reader_message_counter().to_string()),
-                    Value::Integer(
-                        self.reader_message_counter
-                            .try_into()
-                            .map_err(|_| coset::CoseError::EncodeFailed)?,
-                    ),
+                    Value::Integer(self.reader_message_counter.into()),
                 ),
             ]
             .into_iter()

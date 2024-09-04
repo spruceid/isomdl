@@ -229,24 +229,9 @@ impl AsCborValue for SessionTranscript180135 {
             ));
         }
         Ok(SessionTranscript180135(
-            DeviceEngagementBytes::from_cbor_value(arr.remove(0).try_into().map_err(|_| {
-                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                    None,
-                    "device_engagement is not a tag 24".to_string(),
-                ))
-            })?)?,
-            Tag24::<EReaderKey>::from_cbor_value(arr.remove(0).try_into().map_err(|_| {
-                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                    None,
-                    "e_reader_key is not a tag 24".to_string(),
-                ))
-            })?)?,
-            Handover::from_cbor_value(arr.remove(0).try_into().map_err(|_| {
-                coset::CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-                    None,
-                    "handover is not a tag 24".to_string(),
-                ))
-            })?)?,
+            DeviceEngagementBytes::from_cbor_value(arr.remove(0).into())?,
+            Tag24::<EReaderKey>::from_cbor_value(arr.remove(0).into())?,
+            Handover::from_cbor_value(arr.remove(0).into())?,
         ))
     }
 

@@ -117,16 +117,16 @@ impl TryFrom<CborValue> for NfcOptions {
 
 impl From<NfcOptions> for CborValue {
     fn from(o: NfcOptions) -> CborValue {
-        let mut map = vec![];
-        map.push((
-            Value::Integer(0.into()).into(),
-            Value::Integer(o.max_len_command_data_field.get().into()),
-        ));
-        map.push((
-            Value::Integer(1.into()).into(),
-            Value::Integer(o.max_len_response_data_field.get().into()),
-        ));
-
+        let map = vec![
+            (
+                Value::Integer(0.into()),
+                Value::Integer(o.max_len_command_data_field.get().into()),
+            ),
+            (
+                Value::Integer(1.into()),
+                Value::Integer(o.max_len_response_data_field.get().into()),
+            ),
+        ];
         Value::Map(map).into()
     }
 }

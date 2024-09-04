@@ -120,7 +120,7 @@ impl<S: SessionTranscript> AsCborValue for DeviceAuthentication<S> {
                     "not a text".to_string(),
                 ))
             })?,
-            DeviceNamespacesBytes::from_cbor_value(arr.remove(0).into())?,
+            DeviceNamespacesBytes::from_cbor_value(arr.remove(0))?,
         ))
     }
 
