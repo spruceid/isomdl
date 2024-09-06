@@ -19,6 +19,7 @@ rand = { version = "0.8.5", features = ["getrandom"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = { version = "0.11.2", features = ["tags"] }
 serde_json = "1.0"
+serde_bytes = "0.11.0"
 sha2 = "0.10.6"
 thiserror = "1.0"
 elliptic-curve = "0.13.1"
@@ -46,9 +47,9 @@ clap-stdin = "0.2.1"
 strum = "0.24"
 strum_macros = "0.24"
 
-[dependencies.cose-rs]
-git = "https://github.com/spruceid/cose-rs"
-rev = "4104505"
+coset = "0.3.8"
+ciborium = "0.2.2"
+digest = "0.10.7"
 
 [dev-dependencies]
 hex = "0.4.3"

@@ -23,12 +23,12 @@
 //! }
 //! ```
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
-use cose_rs::algorithm::Algorithm;
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use ssi_jwk::JWK;
 use std::collections::BTreeMap;
+use coset::iana::Algorithm;
 
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
 /// restricted to the requirements of ISO/IEC 18013-5:2021.

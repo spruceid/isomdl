@@ -13,9 +13,9 @@ use crate::definitions::{
     helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
     DigestId,
 };
-use cose_rs::sign1::CoseSign1;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
+use crate::cose::sign1::CoseSign1;
 
 /// Represents an issuer-signed object.
 ///

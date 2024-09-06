@@ -94,9 +94,9 @@ mod test {
             <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
         let signed: IssuerSigned =
             serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
-        let mso_bytes = signed
+        let mso_bytes = &signed
             .issuer_auth
-            .payload()
+            .inner.payload
             .expect("expected a COSE_Sign1 with attached payload, found detached payload");
         let mso: Tag24<Mso> =
             serde_cbor::from_slice(mso_bytes).expect("unable to parse payload as Mso");

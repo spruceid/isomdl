@@ -8,22 +8,22 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;
-use cose_rs::{
-    algorithm::{Algorithm, SignatureAlgorithm},
-    sign1::{CoseSign1, PreparedCoseSign1},
-};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_cbor::Value as CborValue;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 use std::collections::{BTreeMap, HashSet};
+use coset::iana::Algorithm;
+use coset::Label;
+use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::cose::SignatureAlgorithm;
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
 
+/// A signed mdoc.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-/// A signed mdoc.
 pub struct Mdoc {
     pub doc_type: String,
     pub mso: Mso,
@@ -31,8 +31,8 @@ pub struct Mdoc {
     pub issuer_auth: CoseSign1,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 /// An incomplete mdoc, requiring a remotely signed signature to be completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedMdoc {
     doc_type: String,
     mso: Mso,
@@ -84,11 +84,13 @@ impl Mdoc {
 
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
-        let prepared_sig = CoseSign1::builder()
-            .payload(mso_bytes)
-            .signature_algorithm(signature_algorithm)
-            .prepare()
-            .map_err(|e| anyhow!("error preparing cosesign1: {}", e))?;
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(signature_algorithm)
+            .build();
+        let builder = coset::CoseSign1Builder::new()
+            .protected(protected)
+            .payload(mso_bytes);
+        let prepared_sig = PreparedCoseSign1::new(builder, None, None, true)?;
 
         let preparation_mdoc = PreparedMdoc {
             doc_type,
@@ -189,10 +191,10 @@ impl PreparedMdoc {
         } = self;
 
         let mut issuer_auth = prepared_sig.finalize(signature);
-        issuer_auth
-            .unprotected_mut()
-            .insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
-
+        issuer_auth.inner.unprotected.rest.push((
+            Label::Int(X5CHAIN_HEADER_LABEL as i64),
+            x5chain.into_cbor().into(),
+        ));
         Mdoc {
             doc_type,
             mso,
@@ -340,7 +342,7 @@ impl Builder {
             enable_decoy_digests,
             signer,
         )
-        .await
+            .await
     }
 }
 
@@ -367,7 +369,7 @@ fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
 
 fn to_issuer_signed_items(
     elements: BTreeMap<String, CborValue>,
-) -> impl Iterator<Item = IssuerSignedItem> {
+) -> impl Iterator<Item=IssuerSignedItem> {
     let mut used_ids = HashSet::new();
     elements.into_iter().map(move |(key, value)| {
         let digest_id = generate_digest_id(&mut used_ids);
@@ -581,8 +583,8 @@ pub mod test {
             (isomdl_namespace, isomdl_data),
             (aamva_namespace, aamva_data),
         ]
-        .into_iter()
-        .collect();
+            .into_iter()
+            .collect();
 
         let validity_info = ValidityInfo {
             signed: OffsetDateTime::now_utc(),
