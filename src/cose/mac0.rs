@@ -1,6 +1,9 @@
 use ::hmac::Hmac;
 use coset::cwt::ClaimsSet;
-use coset::{mac_structure_data, CborSerializable, CoseError, MacContext, RegisteredLabelWithPrivate, CoseMac0};
+use coset::{
+    mac_structure_data, CborSerializable, CoseError, CoseMac0, MacContext,
+    RegisteredLabelWithPrivate,
+};
 use digest::{Mac, MacError};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -238,13 +241,13 @@ mod hmac {
 mod tests {
     use crate::cbor;
     use crate::cose::mac0::{CoseMac0, PreparedCoseMac0};
+    use crate::cose::MaybeTagged;
     use coset::cwt::{ClaimsSet, Timestamp};
     use coset::{iana, CborSerializable, Header};
     use digest::Mac;
     use hex::FromHex;
     use hmac::Hmac;
     use sha2::Sha256;
-    use crate::cose::MaybeTagged;
 
     static COSE_MAC0: &str = include_str!("../../test/definitions/cose/mac0/serialized.cbor");
     static KEY: &str = include_str!("../../test/definitions/cose/mac0/secret_key");
@@ -255,8 +258,8 @@ mod tests {
     #[test]
     fn roundtrip() {
         let bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let mut parsed: MaybeTagged<CoseMac0> = cbor::from_slice(&bytes)
-            .expect("failed to parse COSE_MAC0 from bytes");
+        let mut parsed: MaybeTagged<CoseMac0> =
+            cbor::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
         parsed.set_tagged();
         let roundtripped = cbor::to_vec(&parsed).expect("failed to serialize COSE_MAC0");
         assert_eq!(
@@ -304,8 +307,8 @@ mod tests {
             Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC verifier");
 
         let cose_mac0_bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let cose_mac0: MaybeTagged<CoseMac0> = cbor::from_slice(&cose_mac0_bytes)
-            .expect("failed to parse COSE_MAC0 from bytes");
+        let cose_mac0: MaybeTagged<CoseMac0> =
+            cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
 
         cose_mac0
             .verify(&verifier, None, None)
@@ -396,8 +399,8 @@ mod tests {
     #[test]
     fn deserializing_tdeserializing_signed_cwtagged_cwt() {
         let cose_mac0_bytes = hex::decode(RFC8392_MAC0).unwrap();
-        let cose_mac0: MaybeTagged<CoseMac0> = cbor::from_slice(&cose_mac0_bytes)
-            .expect("failed to parse COSE_MAC0 from bytes");
+        let cose_mac0: MaybeTagged<CoseMac0> =
+            cbor::from_slice(&cose_mac0_bytes).expect("failed to parse COSE_MAC0 from bytes");
         let parsed_claims_set = cose_mac0
             .claims_set()
             .expect("failed to parse claims set from payload")

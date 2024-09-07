@@ -1,7 +1,7 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::ops::{Deref, DerefMut};
 
-use coset::{AsCborValue, iana, TaggedCborSerializable};
+use coset::{iana, AsCborValue, TaggedCborSerializable};
 
 use crate::cose::serialized_as_cbor_value::SerializedAsCborValue;
 

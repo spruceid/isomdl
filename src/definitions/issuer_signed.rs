@@ -10,14 +10,14 @@
 //! - [IssuerSignedItem] struct represents a signed item within the [IssuerSigned] object, including information such as digest ID, random bytes, element identifier, and element value.
 //! - [IssuerSigned] struct also includes a test module with a unit test for serialization and deserialization.
 
-use coset::CoseSign1;
 use crate::cbor::Value as CborValue;
+use crate::cose::MaybeTagged;
 use crate::definitions::{
     helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
     DigestId,
 };
+use coset::CoseSign1;
 use serde::{Deserialize, Serialize};
-use crate::cose::MaybeTagged;
 
 /// Represents an issuer-signed object.
 ///

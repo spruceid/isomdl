@@ -1,9 +1,9 @@
 //! This module contains the definitions for the device request functionality.
+use crate::cose::MaybeTagged;
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec, Tag24};
+use coset::CoseSign1;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use coset::CoseSign1;
-use crate::cose::MaybeTagged;
 
 pub type ItemsRequestBytes = Tag24<ItemsRequest>;
 pub type DocType = String;

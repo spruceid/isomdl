@@ -5,7 +5,7 @@ use std::io::Cursor;
 use std::ops::{Deref, DerefMut};
 use thiserror::Error;
 
-/// Wraps [chromium::Value] and implements [PartialEq], [Eq], [PartialOrd] and [Ord],
+/// Wraps [ciborium::Value] and implements [PartialEq], [Eq], [PartialOrd] and [Ord],
 /// so it can be used in maps and sets.
 ///
 /// Also, useful in future if we want to change the CBOR library.

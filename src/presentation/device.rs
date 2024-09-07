@@ -19,6 +19,7 @@
 use crate::cbor::{CborError, Value as CborValue};
 use crate::cose::mac0::PreparedCoseMac0;
 use crate::cose::sign1::PreparedCoseSign1;
+use crate::cose::MaybeTagged;
 use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::IssuerSignedItem;
 use crate::{
@@ -47,7 +48,6 @@ use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
-use crate::cose::MaybeTagged;
 
 /// Initialisation state.
 ///
