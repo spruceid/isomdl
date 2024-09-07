@@ -1,6 +1,6 @@
+use crate::cbor::CborError;
 use crate::definitions::device_key::cose_key::Error as CoseKeyError;
 use crate::definitions::helpers::tag24::Error as Tag24Error;
-use serde_cbor::Error as SerdeCborError;
 
 /// Errors that can occur when deserialising a DeviceEngagement.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub enum Error {
     #[error("Something went wrong parsing a tag24")]
     Tag24Error,
     #[error("Could not deserialize from cbor")]
-    SerdeCborError,
+    CborError,
     #[error("NFC Command Data Length must be between 255 and 65535")]
     InvalidNfcCommandDataLengthError,
     #[error("NFC Response Data Length must be between 256 and 65536")]
@@ -43,8 +43,14 @@ impl From<Tag24Error> for Error {
     }
 }
 
-impl From<SerdeCborError> for Error {
-    fn from(_: SerdeCborError) -> Self {
-        Error::SerdeCborError
+impl From<coset::CoseError> for Error {
+    fn from(_: coset::CoseError) -> Self {
+        Error::CborError
+    }
+}
+
+impl From<CborError> for Error {
+    fn from(_: CborError) -> Self {
+        Error::CborError
     }
 }

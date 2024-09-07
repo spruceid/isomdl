@@ -1,5 +1,5 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_cbor::Value as Cbor;
+use crate::cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::str::FromStr;
 
@@ -265,7 +265,8 @@ pub enum Error {
 
 impl From<Alpha2> for Cbor {
     fn from(a: Alpha2) -> Cbor {
-        a.as_str().to_string().into()
+        let cbor: ciborium::Value = a.as_str().to_string().into();
+        cbor.into()
     }
 }
 

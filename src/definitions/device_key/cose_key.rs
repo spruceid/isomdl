@@ -25,7 +25,7 @@
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
+use crate::cbor::Value as CborValue;
 use ssi_jwk::JWK;
 use std::collections::BTreeMap;
 use coset::iana::Algorithm;
@@ -77,7 +77,8 @@ pub enum Error {
     NotAMap(CborValue),
     #[error("Unable to discern the elliptic curve")]
     UnknownCurve,
-    #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves")]
+    #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves"
+    )]
     UnsupportedCurve,
     #[error("This implementation of COSE_Key only supports EC2 and OKP keys")]
     UnsupportedKeyType,
@@ -118,28 +119,37 @@ impl CoseKey {
 
 impl From<CoseKey> for CborValue {
     fn from(key: CoseKey) -> CborValue {
-        let mut map = BTreeMap::new();
+        let mut map = vec![];
         match key {
             CoseKey::EC2 { crv, x, y } => {
                 // kty: 1, EC2: 2
-                map.insert(CborValue::Integer(1), CborValue::Integer(2));
+                map.push((ciborium::Value::Integer(1.into()), ciborium::Value::Integer(2.into())));
                 // crv: -1
-                map.insert(CborValue::Integer(-1), crv.into());
+                map.push((ciborium::Value::Integer((-1).into()), {
+                    let cbor: CborValue = crv.into();
+                    cbor.into()
+                }));
                 // x: -2
-                map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
+                map.push((ciborium::Value::Integer((-2).into()), ciborium::Value::Bytes(x)));
                 // y: -3
-                map.insert(CborValue::Integer(-3), y.into());
+                map.push((ciborium::Value::Integer((-3).into()), {
+                    let cbor: CborValue = y.into();
+                    cbor.into()
+                }));
             }
             CoseKey::OKP { crv, x } => {
                 // kty: 1, OKP: 1
-                map.insert(CborValue::Integer(1), CborValue::Integer(1));
+                map.push((ciborium::Value::Integer(1.into()), ciborium::Value::Integer(1.into())));
                 // crv: -1
-                map.insert(CborValue::Integer(-1), crv.into());
+                map.push((ciborium::Value::Integer((-1).into()), {
+                    let cbor: CborValue = crv.into();
+                    cbor.into()
+                }));
                 // x: -2
-                map.insert(CborValue::Integer(-2), CborValue::Bytes(x));
+                map.push((ciborium::Value::Integer((-2).into()), ciborium::Value::Bytes(x)));
             }
         }
-        CborValue::Map(map)
+        ciborium::Value::Map(map).into()
     }
 }
 
@@ -147,29 +157,43 @@ impl TryFrom<CborValue> for CoseKey {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        if let CborValue::Map(mut map) = v {
+        if let ciborium::Value::Map(map) = v.0 {
+            let mut map = map.into_iter().map(|(k, v)| (CborValue(k), CborValue(v))).collect::<BTreeMap<_, _>>();
             match (
-                map.remove(&CborValue::Integer(1)),
-                map.remove(&CborValue::Integer(-1)),
-                map.remove(&CborValue::Integer(-2)),
+                map.remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer(1.into()).into();
+                    cbor
+                }),
+                map.remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer((-1).into()).into();
+                    cbor
+                }),
+                map.remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer((-2).into()).into();
+                    cbor
+                }),
             ) {
                 (
-                    Some(CborValue::Integer(2)),
-                    Some(CborValue::Integer(crv_id)),
-                    Some(CborValue::Bytes(x)),
-                ) => {
+                    Some(CborValue(ciborium::Value::Integer(i2))),
+                    Some(CborValue(ciborium::Value::Integer(crv_id))),
+                    Some(CborValue(ciborium::Value::Bytes(x))),
+                ) if <ciborium::value::Integer as Into<i128>>::into(i2) == 2 => {
+                    let crv_id: i128 = crv_id.try_into().map_err(|_| Error::UnsupportedCurve)?;
                     let crv = crv_id.try_into()?;
                     let y = map
-                        .remove(&CborValue::Integer(-3))
+                        .remove(&{
+                            let cbor: CborValue = ciborium::Value::Integer((-3).into()).into(); cbor
+                        })
                         .ok_or(Error::EC2MissingY)?
                         .try_into()?;
                     Ok(Self::EC2 { crv, x, y })
                 }
                 (
-                    Some(CborValue::Integer(1)),
-                    Some(CborValue::Integer(crv_id)),
-                    Some(CborValue::Bytes(x)),
-                ) => {
+                    Some(CborValue(ciborium::Value::Integer(i1))),
+                    Some(CborValue(ciborium::Value::Integer(crv_id))),
+                    Some(CborValue(ciborium::Value::Bytes(x))),
+                ) if <ciborium::value::Integer as Into<i128>>::into(i1) == 1 => {
+                    let crv_id: i128 = crv_id.try_into().map_err(|_| Error::UnsupportedCurve)?;
                     let crv = crv_id.try_into()?;
                     Ok(Self::OKP { crv, x })
                 }
@@ -230,8 +254,8 @@ impl TryFrom<CoseKey> for EncodedPoint {
 impl From<EC2Y> for CborValue {
     fn from(y: EC2Y) -> CborValue {
         match y {
-            EC2Y::Value(s) => CborValue::Bytes(s),
-            EC2Y::SignBit(b) => CborValue::Bool(b),
+            EC2Y::Value(s) => ciborium::Value::Bytes(s).into(),
+            EC2Y::SignBit(b) => ciborium::Value::Bool(b).into(),
         }
     }
 }
@@ -240,9 +264,9 @@ impl TryFrom<CborValue> for EC2Y {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        match v {
-            CborValue::Bytes(s) => Ok(EC2Y::Value(s)),
-            CborValue::Bool(b) => Ok(EC2Y::SignBit(b)),
+        match v.0 {
+            ciborium::Value::Bytes(s) => Ok(EC2Y::Value(s)),
+            ciborium::Value::Bool(b) => Ok(EC2Y::SignBit(b)),
             _ => Err(Error::InvalidTypeY(v)),
         }
     }
@@ -251,10 +275,10 @@ impl TryFrom<CborValue> for EC2Y {
 impl From<EC2Curve> for CborValue {
     fn from(crv: EC2Curve) -> CborValue {
         match crv {
-            EC2Curve::P256 => CborValue::Integer(1),
-            EC2Curve::P384 => CborValue::Integer(2),
-            EC2Curve::P521 => CborValue::Integer(3),
-            EC2Curve::P256K => CborValue::Integer(8),
+            EC2Curve::P256 => ciborium::Value::Integer(1.into()).into(),
+            EC2Curve::P384 => ciborium::Value::Integer(2.into()).into(),
+            EC2Curve::P521 => ciborium::Value::Integer(3.into()).into(),
+            EC2Curve::P256K => ciborium::Value::Integer(8.into()).into(),
         }
     }
 }
@@ -276,10 +300,10 @@ impl TryFrom<i128> for EC2Curve {
 impl From<OKPCurve> for CborValue {
     fn from(crv: OKPCurve) -> CborValue {
         match crv {
-            OKPCurve::X25519 => CborValue::Integer(4),
-            OKPCurve::X448 => CborValue::Integer(5),
-            OKPCurve::Ed25519 => CborValue::Integer(6),
-            OKPCurve::Ed448 => CborValue::Integer(7),
+            OKPCurve::X25519 => ciborium::Value::Integer(4.into()).into(),
+            OKPCurve::X448 => ciborium::Value::Integer(5.into()).into(),
+            OKPCurve::Ed25519 => ciborium::Value::Integer(6.into()).into(),
+            OKPCurve::Ed448 => ciborium::Value::Integer(7.into()).into(),
         }
     }
 }
@@ -422,19 +446,20 @@ impl TryFrom<&ssi_jwk::OctetParams> for OKPCurve {
 mod test {
     use super::*;
     use hex::FromHex;
+    use crate::cbor;
 
     static EC_P256: &str = include_str!("../../../test/definitions/cose_key/ec_p256.cbor");
 
     #[test]
     fn ec_p256() {
         let key_bytes = <Vec<u8>>::from_hex(EC_P256).expect("unable to convert cbor hex to bytes");
-        let key = serde_cbor::from_slice(&key_bytes).unwrap();
+        let key = crate::cbor::from_slice(&key_bytes).unwrap();
         match &key {
             CoseKey::EC2 { crv, .. } => assert_eq!(crv, &EC2Curve::P256),
             _ => panic!("expected an EC2 cose key"),
         };
         assert_eq!(
-            serde_cbor::to_vec(&key).unwrap(),
+            cbor::to_vec(&key).unwrap(),
             key_bytes,
             "cbor encoding roundtrip failed"
         );

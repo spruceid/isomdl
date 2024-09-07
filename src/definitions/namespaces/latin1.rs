@@ -1,4 +1,4 @@
-use serde_cbor::Value as Cbor;
+use crate::cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::{ops::Deref, str::FromStr};
 

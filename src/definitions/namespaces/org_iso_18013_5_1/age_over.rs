@@ -1,5 +1,5 @@
 use crate::definitions::traits::{FromJson, FromJsonError, FromJsonMap, ToNamespaceMap};
-use serde_cbor::Value as Cbor;
+use crate::cbor::Value as Cbor;
 use serde_json::{Map, Value as Json};
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -50,7 +50,7 @@ impl ToNamespaceMap for AgeOver {
     fn to_ns_map(self) -> BTreeMap<String, Cbor> {
         self.0
             .into_iter()
-            .map(|(Age(x, y), v)| (format!("age_over_{x}{y}"), v.into()))
+            .map(|(Age(x, y), v)| (format!("age_over_{x}{y}"), ciborium::Value::Bool(v).into()))
             .collect()
     }
 }

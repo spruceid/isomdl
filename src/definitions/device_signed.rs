@@ -9,10 +9,10 @@ use crate::definitions::{
     session::SessionTranscript,
 };
 use serde::{Deserialize, Serialize};
-use serde_cbor::{Error as CborError, Value as CborValue};
 use std::collections::BTreeMap;
-use crate::cose::mac0::CoseMac0;
 use crate::cose::sign1::CoseSign1;
+use crate::cbor::Value as CborValue;
+use crate::cose::mac0::CoseMac0;
 
 /// Represents a device-signed structure.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -74,5 +74,5 @@ impl<S: SessionTranscript> DeviceAuthentication<S> {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Unable to encode value as CBOR: {0}")]
-    UnableToEncode(CborError),
+    UnableToEncode(coset::CoseError),
 }

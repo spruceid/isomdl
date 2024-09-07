@@ -43,7 +43,7 @@
 //! ```
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
+use crate::cbor::Value as CborValue;
 use std::collections::BTreeMap;
 
 pub mod cose_key;

@@ -6,7 +6,7 @@ use crate::{
     },
     macros::{FromJson, ToCbor},
 };
-use serde_cbor::Value as Cbor;
+use crate::cbor::Value as Cbor;
 use strum_macros::{AsRefStr, EnumString, EnumVariantNames};
 
 /// `driving_privileges` in the org.iso.18013.5.1 namespace.
@@ -16,7 +16,7 @@ pub struct DrivingPrivileges(Vec<DrivingPrivilege>);
 
 impl From<DrivingPrivileges> for Cbor {
     fn from(d: DrivingPrivileges) -> Cbor {
-        Cbor::Array(d.0.into_iter().map(ToCbor::to_cbor).collect())
+        ciborium::Value::Array(d.0.into_iter().map(|v|v.to_cbor().into()).collect()).into()
     }
 }
 
@@ -57,7 +57,7 @@ pub enum VehicleCategoryCode {
 
 impl From<VehicleCategoryCode> for Cbor {
     fn from(c: VehicleCategoryCode) -> Cbor {
-        Cbor::Text(c.as_ref().to_string())
+        ciborium::Value::Text(c.as_ref().to_string()).into()
     }
 }
 
@@ -85,7 +85,7 @@ pub struct Codes(NonEmptyVec<Code>);
 
 impl From<Codes> for Cbor {
     fn from(c: Codes) -> Cbor {
-        Cbor::Array(c.0.into_inner().into_iter().map(ToCbor::to_cbor).collect())
+        ciborium::Value::Array(c.0.into_inner().into_iter().map(|v| v.to_cbor().into()).collect()).into()
     }
 }
 
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(c, VehicleCategoryCode::A);
 
         let v = c.to_cbor();
-        assert_eq!(v, serde_cbor::Value::Text("A".to_string()));
+        assert_eq!(v.0, ciborium::Value::Text("A".to_string()));
 
         let j = serde_json::json!("A");
         let c = VehicleCategoryCode::from_json(&j).unwrap();

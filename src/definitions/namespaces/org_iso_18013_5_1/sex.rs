@@ -1,5 +1,5 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_cbor::Value as Cbor;
+use crate::cbor::Value as Cbor;
 use serde_json::Value as Json;
 
 /// `sex` in the org.iso.18013.5.1 namespace.

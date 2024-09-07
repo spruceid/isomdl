@@ -62,12 +62,12 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
     /// use isomdl::presentation::device::Document;
     ///
     /// let doc_str = include_str!("../../test/stringified-mdl.txt").to_string();
-    /// let doc : Document = serde_cbor::from_slice(&decode(doc_str).unwrap()).unwrap();
+    /// let doc : Document = crate::cbor::from_slice(&decode(doc_str).unwrap()).unwrap();
     /// let serialized = doc.stringify().unwrap();
     /// assert_eq!(serialized, Document::parse(serialized.clone()).unwrap().stringify().unwrap());
     /// ```
     fn stringify(&self) -> Result<String> {
-        let data = serde_cbor::to_vec(self)?;
+        let data = crate::cbor::to_vec(self)?;
         let encoded = encode(data);
         Ok(encoded)
     }
@@ -86,13 +86,13 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
     /// use isomdl::presentation::device::Document;
     ///
     /// let doc_str = include_str!("../../test/stringified-mdl.txt").to_string();
-    /// let doc : Document = serde_cbor::from_slice(&decode(doc_str).unwrap()).unwrap();
+    /// let doc : Document = crate::cbor::from_slice(&decode(doc_str).unwrap()).unwrap();
     /// let serialized = doc.stringify().unwrap();
     /// assert_eq!(serialized, Document::parse(serialized.clone()).unwrap().stringify().unwrap());
     /// ```
     fn parse(encoded: String) -> Result<Self> {
         let data = decode(encoded)?;
-        let this = serde_cbor::from_slice(&data)?;
+        let this = crate::cbor::from_slice(&data)?;
         Ok(this)
     }
 }
@@ -108,7 +108,7 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 
 fn calculate_ble_ident(e_device_key: &Tag24<CoseKey>) -> Result<[u8; 16]> {
-    let e_device_key_bytes = serde_cbor::to_vec(e_device_key)?;
+    let e_device_key_bytes = crate::cbor::to_vec(e_device_key)?;
     let mut ble_ident = [0u8; 16];
 
     Hkdf::<Sha256>::new(None, &e_device_key_bytes)

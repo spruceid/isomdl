@@ -1,5 +1,5 @@
 use anyhow::Error;
-use serde_cbor::Value as Cbor;
+use crate::cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::{fmt, str::FromStr};
 use time::{format_description::FormatItem, macros::format_description, Date};
@@ -14,7 +14,7 @@ pub struct FullDate(Date);
 
 impl From<FullDate> for Cbor {
     fn from(d: FullDate) -> Cbor {
-        Cbor::Tag(1004, Box::new(Cbor::Text(d.to_string())))
+        ciborium::Value::Tag(1004, Box::new(ciborium::Value::Text(d.to_string()))).into()
     }
 }
 

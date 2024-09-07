@@ -1,10 +1,12 @@
 //! This module contains the definition of the `DeviceResponse` struct and related types.
-use crate::definitions::{
-    helpers::{NonEmptyMap, NonEmptyVec},
-    DeviceSigned, IssuerSigned,
-};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::definitions::{
+    DeviceSigned,
+    helpers::{NonEmptyMap, NonEmptyVec}, IssuerSigned,
+};
 
 /// Represents a device response.
 #[derive(Clone, Debug, Deserialize, Serialize)]

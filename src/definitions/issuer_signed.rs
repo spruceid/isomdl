@@ -14,7 +14,7 @@ use crate::definitions::{
     DigestId,
 };
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
+use crate::cbor::Value as CborValue;
 use crate::cose::sign1::CoseSign1;
 
 /// Represents an issuer-signed object.
@@ -55,6 +55,7 @@ pub struct IssuerSignedItem {
 mod test {
     use super::IssuerSigned;
     use hex::FromHex;
+    use crate::cbor;
 
     static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/definitions/issuer_signed.cbor");
 
@@ -63,9 +64,9 @@ mod test {
         let cbor_bytes =
             <Vec<u8>>::from_hex(ISSUER_SIGNED_CBOR).expect("unable to convert cbor hex to bytes");
         let signed: IssuerSigned =
-            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
+            cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as an IssuerSigned");
         let roundtripped_bytes =
-            serde_cbor::to_vec(&signed).expect("unable to encode IssuerSigned as cbor bytes");
+            cbor::to_vec(&signed).expect("unable to encode IssuerSigned as cbor bytes");
         assert_eq!(
             cbor_bytes, roundtripped_bytes,
             "original cbor and re-serialized IssuerSigned do not match"

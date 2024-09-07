@@ -17,27 +17,24 @@
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use crate::definitions::IssuerSignedItem;
-use crate::{
-    definitions::{
-        device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
-        device_request::{DeviceRequest, DocRequest, ItemsRequest},
-        device_response::{
-            Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
-            Errors as NamespaceErrors, Status,
-        },
-        device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
-        helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
-        issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
-        session::{
-            self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
-        },
-        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
+use crate::{cbor, definitions::{
+    device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
+    device_request::{DeviceRequest, DocRequest, ItemsRequest},
+    device_response::{
+        Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
+        Errors as NamespaceErrors, Status,
     },
-    issuance::Mdoc,
-};
+    device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
+    helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
+    issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
+    session::{
+        self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
+    },
+    CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
+}, issuance::Mdoc};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
+use crate::cbor::{CborError, Value as CborValue};
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
@@ -130,7 +127,7 @@ pub enum Error {
     SharedSecretGeneration(anyhow::Error),
     /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
-    CborEncoding(serde_cbor::Error),
+    CborEncoding(CborError),
     /// Session manager was used incorrectly.
     #[error("session manager was used incorrectly")]
     ApiMisuse,
@@ -312,12 +309,12 @@ impl SessionManagerEngaged {
 
 impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
-        let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
+        let request: CborValue = cbor::from_slice(request).map_err(|_| {
             // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborDecodingError)
         })?;
 
-        serde_cbor::value::from_value(request).map_err(|_| {
+        cbor::from_value2(request).map_err(|_| {
             // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborValidationError)
         })
@@ -398,7 +395,7 @@ impl SessionManager {
     ///
     /// It returns the requested items by the reader.
     pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
-        let session_data: SessionData = serde_cbor::from_slice(request)?;
+        let session_data: SessionData = cbor::from_slice(request).map_err(CborError::from)?;
         self.handle_decoded_request(session_data)
     }
 
@@ -443,7 +440,7 @@ impl SessionManager {
                     if p.is_complete() {
                         let response = p.finalize_response();
                         let mut status: Option<session::Status> = None;
-                        let response_bytes = serde_cbor::to_vec(&response)?;
+                        let response_bytes = crate::cbor::to_vec(&response)?;
                         let encrypted_response = session::encrypt_device_data(
                             &self.sk_device.into(),
                             &response_bytes,
@@ -460,7 +457,7 @@ impl SessionManager {
                             Some(encrypted_response.into())
                         };
                         let session_data = SessionData { status, data };
-                        let encoded_response = serde_cbor::to_vec(&session_data)?;
+                        let encoded_response = crate::cbor::to_vec(&session_data)?;
                         self.state = State::ReadyToRespond(encoded_response);
                     } else {
                         self.state = State::Signing(p)
@@ -708,7 +705,7 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
+            let device_auth_bytes = match cbor::to_vec(&device_auth) {
                 Ok(dab) => dab,
                 Err(_e) => {
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
@@ -897,7 +894,7 @@ pub fn nearest_age_attestation(
     let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
         age_over_claims_numerical?
             .into_iter()
-            .partition(|x| x.1.to_owned().into_inner().element_value == CborValue::Bool(true));
+            .partition(|x| x.1.to_owned().into_inner().element_value == ciborium::Value::Bool(true).into());
 
     let nearest_age_over = true_age_over_claims
         .iter()
@@ -1035,21 +1032,21 @@ mod test {
             digest_id: DigestId::new(1),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier1.clone(),
-            element_value: CborValue::Bool(true),
+            element_value: ciborium::Value::Bool(true).into(),
         };
 
         let issuer_signed_item2 = IssuerSignedItem {
             digest_id: DigestId::new(2),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier2.clone(),
-            element_value: CborValue::Bool(false),
+            element_value: ciborium::Value::Bool(false).into(),
         };
 
         let issuer_signed_item3 = IssuerSignedItem {
             digest_id: DigestId::new(3),
             random: ByteStr::from(random),
             element_identifier: element_identifier3.clone(),
-            element_value: CborValue::Bool(false),
+            element_value: ciborium::Value::Bool(false).into(),
         };
 
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();

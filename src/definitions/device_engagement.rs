@@ -9,21 +9,22 @@ use crate::definitions::helpers::{ByteStr, NonEmptyVec};
 use crate::definitions::CoseKey;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use std::{collections::BTreeMap, vec};
 use uuid::Uuid;
+use crate::cbor::{CborError, into_value, Value as CborValue};
 
 pub mod error;
 pub use error::Error;
 
 pub mod nfc_options;
 pub use nfc_options::NfcOptions;
+use crate::cbor;
 
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
 
 pub type DeviceRetrievalMethods = NonEmptyVec<DeviceRetrievalMethod>;
-pub type ProtocolInfo = CborValue;
+pub type ProtocolInfo = cbor::Value;
 pub type Oidc = (u64, String, String);
 pub type WebApi = (u64, String, String);
 
@@ -135,39 +136,43 @@ pub struct WifiOptions {
 
 impl From<DeviceEngagement> for CborValue {
     fn from(device_engagement: DeviceEngagement) -> CborValue {
-        let mut map = BTreeMap::new();
-        map.insert(
-            CborValue::Integer(0),
-            CborValue::Text(device_engagement.version),
-        );
-        map.insert(
-            CborValue::Integer(1),
-            CborValue::Array(vec![
-                device_engagement.security.0.into(),
-                device_engagement.security.1.into(),
+        let mut map = vec![];
+        map.push((
+            ciborium::Value::Integer(0.into()),
+            ciborium::Value::Text(device_engagement.version),
+        ));
+        map.push((
+            ciborium::Value::Integer(1.into()),
+            ciborium::Value::Array(vec![
+                into_value(device_engagement.security.0).unwrap(),
+                into_value(device_engagement.security.1).unwrap(),
             ]),
-        );
+        ));
         if let Some(methods) = device_engagement.device_retrieval_methods {
-            let methods = Vec::from(methods).into_iter().map(Into::into).collect();
-            map.insert(CborValue::Integer(2), CborValue::Array(methods));
+            let methods = Vec::from(methods).into_iter().map(into_value).collect::<Result<Vec<ciborium::Value>, CborError>>().unwrap();
+            map.push((ciborium::Value::Integer(2.into()), ciborium::Value::Array(methods)));
         }
         if let Some(methods) = device_engagement.server_retrieval_methods {
-            map.insert(CborValue::Integer(3), methods.into());
+            map.push((ciborium::Value::Integer(3.into()), into_value(methods).unwrap()));
         }
         if let Some(_info) = device_engagement.protocol_info {
             // Usage of protocolinfo is RFU and should for now be none
         }
 
-        CborValue::Map(map)
+        CborValue(ciborium::Value::Map(map))
     }
 }
 
 impl TryFrom<CborValue> for DeviceEngagement {
     type Error = Error;
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        if let CborValue::Map(mut map) = v {
-            let device_engagement_version = map.remove(&CborValue::Integer(0));
-            if let Some(CborValue::Text(v)) = device_engagement_version {
+        if let ciborium::Value::Map(map) = v.0 {
+            let mut map = map.into_iter().map(|(k, v)| (CborValue(k), CborValue(v))).collect::<BTreeMap<_, _>>();
+            let device_engagement_version = map.remove(&{
+                let cbor: CborValue = ciborium::Value::Integer(0.into()).into();
+                cbor
+            });
+            if let Some(CborValue(ciborium::Value::Text(v))) = device_engagement_version {
                 if v != "1.0" {
                     return Err(Error::UnsupportedVersion);
                 }
@@ -175,26 +180,35 @@ impl TryFrom<CborValue> for DeviceEngagement {
                 return Err(Error::Malformed);
             }
             let device_engagement_security =
-                map.remove(&CborValue::Integer(1)).ok_or(Error::Malformed)?;
+                map.remove(&cbor::Value(ciborium::Value::Integer(1.into()))).ok_or(Error::Malformed)?;
 
-            let security: Security = serde_cbor::value::from_value(device_engagement_security)
+            let security: Security = cbor::from_value(device_engagement_security.0)
                 .map_err(|_| Error::Malformed)?;
 
             let device_retrieval_methods = map
-                .remove(&CborValue::Integer(2))
-                .map(serde_cbor::value::from_value)
+                .remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer(2.into()).into();
+                    cbor
+                })
+                .map(cbor::from_value2)
                 .transpose()
                 .map_err(|_| Error::Malformed)?;
 
             let server_retrieval_methods = map
-                .remove(&CborValue::Integer(3))
-                .map(serde_cbor::value::from_value)
+                .remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer(3.into()).into();
+                    cbor
+                })
+                .map(cbor::from_value2)
                 .transpose()
                 .map_err(|_| Error::Malformed)?;
             if server_retrieval_methods.is_some() {
                 //tracing::warn!("server_retrieval is unimplemented.")
             }
-            let protocol_info = map.remove(&CborValue::Integer(4));
+            let protocol_info = map.remove(&{
+                let cbor: CborValue = ciborium::Value::Integer(4.into()).into();
+                cbor
+            });
             if protocol_info.is_some() {
                 //tracing::warn!("protocol_info is RFU and has been ignored in deserialization.")
             }
@@ -217,7 +231,7 @@ impl TryFrom<CborValue> for DeviceEngagement {
 impl Tag24<DeviceEngagement> {
     const BASE64_CONFIG: base64::Config = base64::Config::new(base64::CharacterSet::UrlSafe, false);
 
-    pub fn to_qr_code_uri(&self) -> Result<String, serde_cbor::Error> {
+    pub fn to_qr_code_uri(&self) -> Result<String, CborError> {
         let mut qr_code_uri = String::from("mdoc:");
         base64::encode_config_buf(&self.inner_bytes, Self::BASE64_CONFIG, &mut qr_code_uri);
         Ok(qr_code_uri)
@@ -249,22 +263,25 @@ impl DeviceRetrievalMethod {
 impl TryFrom<CborValue> for DeviceRetrievalMethod {
     type Error = Error;
     fn try_from(value: CborValue) -> Result<Self, Self::Error> {
-        if let CborValue::Array(list) = value {
-            let method: [CborValue; 3] = list.try_into().map_err(|_| Error::Malformed)?;
+        if let ciborium::Value::Array(list) = value.0 {
+            let method: [CborValue; 3] = list.into_iter().map(CborValue).collect::<Vec<_>>().try_into().map_err(|_| Error::Malformed)?;
             match method {
-                [CborValue::Integer(1), CborValue::Integer(1), methods] => {
+                [CborValue(ciborium::Value::Integer(i1)), CborValue(ciborium::Value::Integer(i11)), methods]
+                if <ciborium::value::Integer as Into<i128>>::into(i1) == 1 && <ciborium::value::Integer as Into<i128>>::into(i11) == 1 => {
                     let nfc_options = NfcOptions::try_from(methods)?;
                     Ok(DeviceRetrievalMethod::NFC(nfc_options))
                 }
-                [CborValue::Integer(2), CborValue::Integer(1), methods] => {
+                [CborValue(ciborium::Value::Integer(i2)), CborValue(ciborium::Value::Integer(i1)), methods]
+                if <ciborium::value::Integer as Into<i128>>::into(i1) == 1 && <ciborium::value::Integer as Into<i128>>::into(i2) == 2 => {
                     let ble_options = BleOptions::try_from(methods)?;
                     Ok(DeviceRetrievalMethod::BLE(ble_options))
                 }
-                [CborValue::Integer(3), CborValue::Integer(1), methods] => {
+                [CborValue(ciborium::Value::Integer(i3)), CborValue(ciborium::Value::Integer(i1)), methods]
+                if <ciborium::value::Integer as Into<i128>>::into(i1) == 1 && <ciborium::value::Integer as Into<i128>>::into(i3) == 3 => {
                     let wifi_options = WifiOptions::try_from(methods)?;
                     Ok(DeviceRetrievalMethod::WIFI(wifi_options))
                 }
-                [CborValue::Integer(_), _, _] => Err(Error::UnsupportedDRM),
+                [CborValue(ciborium::Value::Integer(_)), _, _] => Err(Error::UnsupportedDRM),
                 _ => Err(Error::Malformed),
             }
         } else {
@@ -278,11 +295,11 @@ impl From<DeviceRetrievalMethod> for CborValue {
         let transport_type = drm.transport_type().into();
         let version = drm.version().into();
         let retrieval_method = match drm {
-            DeviceRetrievalMethod::NFC(opts) => opts.into(),
-            DeviceRetrievalMethod::BLE(opts) => opts.into(),
-            DeviceRetrievalMethod::WIFI(opts) => opts.into(),
+            DeviceRetrievalMethod::NFC(opts) => into_value(opts).unwrap(),
+            DeviceRetrievalMethod::BLE(opts) => into_value(opts).unwrap(),
+            DeviceRetrievalMethod::WIFI(opts) => into_value(opts).unwrap(),
         };
-        CborValue::Array(vec![transport_type, version, retrieval_method])
+        CborValue(ciborium::Value::Array(vec![transport_type, version, retrieval_method]))
     }
 }
 
@@ -290,28 +307,44 @@ impl TryFrom<CborValue> for BleOptions {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        if let CborValue::Map(mut map) = v {
+        if let ciborium::Value::Map(map) = v.0 {
+            let mut map = map.into_iter().map(|(k, v)| (CborValue(k), CborValue(v))).collect::<BTreeMap<_, _>>();
             let central_client_mode = match (
-                map.remove(&CborValue::Integer(1)),
-                map.remove(&CborValue::Integer(11)),
+                map.remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer(1.into()).into();
+                    cbor
+                }),
+                map.remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer(11.into()).into();
+                    cbor
+                }),
             ) {
-                (Some(CborValue::Bool(true)), Some(CborValue::Bytes(uuid))) => {
+                (Some(CborValue(ciborium::Value::Bool(true))), Some(CborValue(ciborium::Value::Bytes(uuid)))) => {
                     let uuid_bytes: [u8; 16] = uuid.try_into().map_err(|_| Error::Malformed)?;
                     Some(CentralClientMode {
                         uuid: Uuid::from_bytes(uuid_bytes),
                     })
                 }
-                (Some(CborValue::Bool(false)), _) => None,
+                (Some(CborValue(ciborium::Value::Bool(false))), _) => None,
                 _ => return Err(Error::Malformed),
             };
 
             let peripheral_server_mode = match (
-                map.remove(&CborValue::Integer(0)),
-                map.remove(&CborValue::Integer(10)),
+                map.remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer(0.into()).into();
+                    cbor
+                }),
+                map.remove(&{
+                    let cbor: CborValue = ciborium::Value::Integer(10.into()).into();
+                    cbor
+                }),
             ) {
-                (Some(CborValue::Bool(true)), Some(CborValue::Bytes(uuid))) => {
+                (Some(CborValue(ciborium::Value::Bool(true))), Some(CborValue(ciborium::Value::Bytes(uuid)))) => {
                     let uuid_bytes: [u8; 16] = uuid.try_into().map_err(|_| Error::Malformed)?;
-                    let ble_device_address = match map.remove(&CborValue::Integer(20)) {
+                    let ble_device_address = match map.remove(&{
+                        let cbor: CborValue = ciborium::Value::Integer(20.into()).into();
+                        cbor
+                    }) {
                         Some(value) => Some(value.try_into().map_err(|_| Error::Malformed)?),
                         None => None,
                     };
@@ -320,7 +353,7 @@ impl TryFrom<CborValue> for BleOptions {
                         ble_device_address,
                     })
                 }
-                (Some(CborValue::Bool(false)), _) => None,
+                (Some(CborValue(ciborium::Value::Bool(false))), _) => None,
                 _ => return Err(Error::Malformed),
             };
 
@@ -336,41 +369,41 @@ impl TryFrom<CborValue> for BleOptions {
 
 impl From<BleOptions> for CborValue {
     fn from(o: BleOptions) -> CborValue {
-        let mut map = BTreeMap::new();
+        let mut map = vec![];
 
         match o.central_client_mode {
             Some(CentralClientMode { uuid }) => {
-                map.insert(CborValue::Integer(1), CborValue::Bool(true));
-                map.insert(
-                    CborValue::Integer(11),
-                    CborValue::Bytes(uuid.as_bytes().to_vec()),
-                );
+                map.push((ciborium::Value::Integer(1.into()), ciborium::Value::Bool(true)));
+                map.push((
+                    ciborium::Value::Integer(11.into()),
+                    ciborium::Value::Bytes(uuid.as_bytes().to_vec()),
+                ));
             }
             None => {
-                map.insert(CborValue::Integer(1), CborValue::Bool(false));
+                map.push((ciborium::Value::Integer(1.into()), ciborium::Value::Bool(false)));
             }
         }
 
         match o.peripheral_server_mode {
             Some(PeripheralServerMode {
-                uuid,
-                ble_device_address,
-            }) => {
-                map.insert(CborValue::Integer(0), CborValue::Bool(true));
-                map.insert(
-                    CborValue::Integer(10),
-                    CborValue::Bytes(uuid.as_bytes().to_vec()),
-                );
+                     uuid,
+                     ble_device_address,
+                 }) => {
+                map.push((ciborium::Value::Integer(0.into()), ciborium::Value::Bool(true)));
+                map.push((
+                    ciborium::Value::Integer(10.into()),
+                    ciborium::Value::Bytes(uuid.as_bytes().to_vec()),
+                ));
                 if let Some(address) = ble_device_address {
-                    map.insert(CborValue::Integer(20), address.into());
+                    map.push((ciborium::Value::Integer(20.into()), into_value(address).unwrap()));
                 }
             }
             None => {
-                map.insert(CborValue::Integer(0), CborValue::Bool(false));
+                map.push((ciborium::Value::Integer(0.into()), ciborium::Value::Bool(false)));
             }
         }
 
-        CborValue::Map(map)
+        ciborium::Value::Map(map).into()
     }
 }
 
@@ -382,9 +415,12 @@ impl TryFrom<CborValue> for WifiOptions {
             map: &BTreeMap<CborValue, CborValue>,
             idx: i128,
         ) -> Result<Option<String>, Error> {
-            match map.get(&CborValue::Integer(idx)) {
+            match map.get(&{
+                let cbor: CborValue = ciborium::Value::Integer(idx.try_into().map_err(|_| Error::Malformed)?).into();
+                cbor
+            }) {
                 None => Ok(None),
-                Some(CborValue::Text(text)) => Ok(Some(text.to_string())),
+                Some(CborValue(ciborium::Value::Text(text))) => Ok(Some(text.to_string())),
                 _ => Err(Error::InvalidWifiOptions),
             }
         }
@@ -393,9 +429,12 @@ impl TryFrom<CborValue> for WifiOptions {
             map: &BTreeMap<CborValue, CborValue>,
             idx: i128,
         ) -> Result<Option<u64>, Error> {
-            match map.get(&CborValue::Integer(idx)) {
+            match map.get(&{
+                let cbor: CborValue = ciborium::Value::Integer(idx.try_into().map_err(|_| Error::Malformed)?).into();
+                cbor
+            }) {
                 None => Ok(None),
-                Some(CborValue::Integer(int_val)) => {
+                Some(CborValue(ciborium::Value::Integer(int_val))) => {
                     let uint_val =
                         u64::try_from(*int_val).map_err(|_| Error::InvalidWifiOptions)?;
                     Ok(Some(uint_val))
@@ -408,7 +447,10 @@ impl TryFrom<CborValue> for WifiOptions {
             map: &BTreeMap<CborValue, CborValue>,
             idx: i128,
         ) -> Result<Option<ByteStr>, Error> {
-            match map.get(&CborValue::Integer(idx)) {
+            match map.get(&{
+                let cbor: CborValue = ciborium::Value::Integer(idx.try_into().map_err(|_| Error::Malformed)?).into();
+                cbor
+            }) {
                 None => Ok(None),
                 Some(cbor_val) => {
                     let byte_str = ByteStr::try_from(cbor_val.clone())
@@ -418,8 +460,11 @@ impl TryFrom<CborValue> for WifiOptions {
             }
         }
 
-        let map: BTreeMap<CborValue, CborValue> = match v {
-            CborValue::Map(map) => Ok(map),
+        let map: BTreeMap<CborValue, CborValue> = match v.0 {
+            ciborium::Value::Map(map) => {
+                let map = map.into_iter().map(|(k, v)| (CborValue(k), CborValue(v))).collect::<BTreeMap<_, _>>();
+                Ok(map)
+            }
             _ => Err(Error::InvalidWifiOptions),
         }?;
 
@@ -457,43 +502,43 @@ impl TryFrom<CborValue> for WifiOptions {
 
 impl From<WifiOptions> for CborValue {
     fn from(o: WifiOptions) -> CborValue {
-        let mut map = BTreeMap::<CborValue, CborValue>::new();
+        let mut map = vec![];
         if let Some(v) = o.pass_phrase {
-            map.insert(CborValue::Integer(0), v.into());
+            map.push((ciborium::Value::Integer(0.into()), into_value(v).unwrap()));
         }
         if let Some(v) = o.channel_info_operating_class {
-            map.insert(CborValue::Integer(1), v.into());
+            map.push(((ciborium::Value::Integer(1.into())), into_value(v).unwrap()));
         }
         if let Some(v) = o.channel_info_channel_number {
-            map.insert(CborValue::Integer(2), v.into());
+            map.push((ciborium::Value::Integer(2.into()), into_value(v).unwrap()));
         }
         if let Some(v) = o.band_info {
-            map.insert(CborValue::Integer(3), v.into());
+            map.push((ciborium::Value::Integer(3.into()), into_value(v).unwrap()));
         }
 
-        CborValue::Map(map)
+        ciborium::Value::Map(map).into()
     }
 }
 
 impl From<ServerRetrievalMethods> for CborValue {
     fn from(m: ServerRetrievalMethods) -> CborValue {
-        let mut map = BTreeMap::<CborValue, CborValue>::new();
+        let mut map = vec![];
 
         if let Some((x, y, z)) = m.web_api {
-            map.insert(
+            map.push((
                 "webApi".to_string().into(),
-                CborValue::Array(vec![x.into(), y.into(), z.into()]),
-            );
+                ciborium::Value::Array(vec![into_value(x).unwrap(), into_value(y).unwrap(), into_value(z).unwrap()]),
+            ));
         }
 
         if let Some((x, y, z)) = m.oidc {
-            map.insert(
+            map.push((
                 "oidc".to_string().into(),
-                CborValue::Array(vec![x.into(), y.into(), z.into()]),
-            );
+                ciborium::Value::Array(vec![into_value(x).unwrap(), into_value(y).unwrap(), into_value(z).unwrap()]),
+            ));
         }
 
-        CborValue::Map(map)
+        ciborium::Value::Map(map).into()
     }
 }
 
@@ -526,8 +571,8 @@ mod test {
             protocol_info: None,
         };
 
-        let bytes = serde_cbor::to_vec(&device_engagement).unwrap();
-        let roundtripped = serde_cbor::from_slice(&bytes).unwrap();
+        let bytes = crate::cbor::to_vec(&device_engagement).unwrap();
+        let roundtripped = crate::cbor::from_slice(&bytes).unwrap();
 
         assert_eq!(device_engagement, roundtripped)
     }
@@ -541,8 +586,8 @@ mod test {
     }
 
     fn wifi_options_cbor_roundtrip_test(wifi_options: WifiOptions) {
-        let bytes: Vec<u8> = serde_cbor::to_vec(&wifi_options).unwrap();
-        let deserialized: WifiOptions = serde_cbor::from_slice(&bytes).unwrap();
+        let bytes: Vec<u8> = crate::cbor::to_vec(&wifi_options).unwrap();
+        let deserialized: WifiOptions = crate::cbor::from_slice(&bytes).unwrap();
         assert_eq!(wifi_options, deserialized);
     }
 
