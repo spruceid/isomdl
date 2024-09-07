@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, Context, Result};
-use signature::Signer;
-use uuid::Uuid;
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
@@ -9,6 +7,8 @@ use isomdl::definitions::helpers::NonEmptyMap;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
 use isomdl::presentation::{device, reader, Stringify};
+use signature::Signer;
+use uuid::Uuid;
 
 pub const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 pub const NAMESPACE: &str = "org.iso.18013.5.1";

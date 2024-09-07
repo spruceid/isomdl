@@ -13,6 +13,8 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
+use crate::cbor;
+use crate::cbor::{CborError, Value as CborValue};
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
@@ -25,12 +27,10 @@ use crate::definitions::{
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use crate::cbor::{CborError, Value as CborValue};
 use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
-use crate::cbor;
 
 /// The main state of the reader.
 ///
@@ -219,7 +219,7 @@ impl SessionManager {
             &device_request_bytes,
             &mut self.reader_message_counter,
         )
-            .map_err(|e| anyhow!("unable to encrypt request: {}", e))
+        .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
     /// Handles a response from the device.
@@ -242,7 +242,7 @@ impl SessionManager {
             encrypted_response.as_ref(),
             &mut self.device_message_counter,
         )
-            .map_err(|_e| Error::DecryptionError)?;
+        .map_err(|_e| Error::DecryptionError)?;
         let response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
         let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
         let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();

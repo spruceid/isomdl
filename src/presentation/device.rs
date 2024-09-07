@@ -16,33 +16,37 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use crate::definitions::IssuerSignedItem;
-use crate::{cbor, definitions::{
-    device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
-    device_request::{DeviceRequest, DocRequest, ItemsRequest},
-    device_response::{
-        Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
-        Errors as NamespaceErrors, Status,
-    },
-    device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
-    helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
-    issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
-    session::{
-        self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
-    },
-    CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
-}, issuance::Mdoc};
-use p256::FieldBytes;
-use serde::{Deserialize, Serialize};
 use crate::cbor::{CborError, Value as CborValue};
-use session::SessionTranscript180135;
-use std::collections::BTreeMap;
-use std::num::ParseIntError;
-use coset::{CoseMac0Builder, CoseSign1Builder};
-use uuid::Uuid;
 use crate::cose::mac0::PreparedCoseMac0;
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
 use crate::definitions::device_signed::DeviceAuthType;
+use crate::definitions::IssuerSignedItem;
+use crate::{
+    cbor,
+    definitions::{
+        device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
+        device_request::{DeviceRequest, DocRequest, ItemsRequest},
+        device_response::{
+            Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
+            Errors as NamespaceErrors, Status,
+        },
+        device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
+        helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
+        issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
+        session::{
+            self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
+        },
+        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
+    },
+    issuance::Mdoc,
+};
+use coset::{CoseMac0Builder, CoseSign1Builder};
+use p256::FieldBytes;
+use serde::{Deserialize, Serialize};
+use session::SessionTranscript180135;
+use std::collections::BTreeMap;
+use std::num::ParseIntError;
+use uuid::Uuid;
 
 /// Initialisation state.
 ///
@@ -369,7 +373,7 @@ impl SessionManager {
             data.as_ref(),
             &mut self.reader_message_counter,
         )
-            .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
         let request = match self.parse_request(&decrypted_request) {
             Ok(r) => r,
             Err(e) => {
@@ -446,11 +450,11 @@ impl SessionManager {
                             &response_bytes,
                             &mut self.device_message_counter,
                         )
-                            .unwrap_or_else(|_e| {
-                                //tracing::warn!("unable to encrypt response: {}", e);
-                                status = Some(session::Status::SessionEncryptionError);
-                                Default::default()
-                            });
+                        .unwrap_or_else(|_e| {
+                            //tracing::warn!("unable to encrypt response: {}", e);
+                            status = Some(session::Status::SessionEncryptionError);
+                            Default::default()
+                        });
                         let data = if status.is_some() {
                             None
                         } else {
@@ -892,9 +896,9 @@ pub fn nearest_age_attestation(
             .collect();
 
     let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
-        age_over_claims_numerical?
-            .into_iter()
-            .partition(|x| x.1.to_owned().into_inner().element_value == ciborium::Value::Bool(true).into());
+        age_over_claims_numerical?.into_iter().partition(|x| {
+            x.1.to_owned().into_inner().element_value == ciborium::Value::Bool(true).into()
+        });
 
     let nearest_age_over = true_age_over_claims
         .iter()
@@ -981,7 +985,7 @@ mod test {
                 }
             }
         ]))
-            .unwrap();
+        .unwrap();
         let permitted = serde_json::from_value(json!({
             "doc_type_1": {
                 "namespace_1": [
@@ -998,7 +1002,7 @@ mod test {
                 ],
             }
         }))
-            .unwrap();
+        .unwrap();
         let expected: PermittedItems = serde_json::from_value(json!({
             "doc_type_1": {
                 "namespace_1": [
@@ -1006,7 +1010,7 @@ mod test {
                 ],
             }
         }))
-            .unwrap();
+        .unwrap();
 
         let filtered = super::filter_permitted(&requested, permitted);
 

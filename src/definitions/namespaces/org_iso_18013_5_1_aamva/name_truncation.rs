@@ -1,5 +1,5 @@
-use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use crate::cbor::Value as Cbor;
+use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use serde_json::Value as Json;
 use std::str::FromStr;
 

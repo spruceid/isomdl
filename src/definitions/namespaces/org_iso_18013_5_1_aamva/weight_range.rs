@@ -1,5 +1,5 @@
-use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use crate::cbor::Value as Cbor;
+use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use serde_json::Value as Json;
 
 /// `weight_range` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation

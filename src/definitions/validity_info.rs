@@ -27,11 +27,11 @@
 //! - [std::collections::BTreeMap]: Provides the [BTreeMap] type for storing key-value pairs in a sorted order.
 //! - [time]: Provides date and time manipulation functionality.
 //! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
+use crate::cbor::Value as CborValue;
 use serde::{
     ser::{Error as SerError, Serializer},
     Deserialize, Serialize,
 };
-use crate::cbor::Value as CborValue;
 use std::collections::BTreeMap;
 use time::{
     error::Format as FormatError, error::Parse as ParseError,
@@ -110,7 +110,10 @@ impl TryFrom<CborValue> for ValidityInfo {
 
     fn try_from(v: CborValue) -> Result<ValidityInfo> {
         if let ciborium::Value::Map(map) = v.0 {
-            let mut map = map.into_iter().map(|(k, v)| (k.into(), v.into())).collect::<BTreeMap<CborValue, CborValue>>();
+            let mut map = map
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect::<BTreeMap<CborValue, CborValue>>();
             macro_rules! extract_date {
                 ($map:ident, $name:literal) => {{
                     let key = CborValue(ciborium::Value::Text(String::from($name)));
@@ -124,7 +127,8 @@ impl TryFrom<CborValue> for ValidityInfo {
             let valid_from = extract_date!(map, "validFrom");
             let valid_until = extract_date!(map, "validUntil");
 
-            let expected_update_key: CborValue = ciborium::Value::Text(String::from("expectedUpdate")).into();
+            let expected_update_key: CborValue =
+                ciborium::Value::Text(String::from("expectedUpdate")).into();
             let expected_update = map
                 .remove(&expected_update_key)
                 .map(cbor_to_datetime)

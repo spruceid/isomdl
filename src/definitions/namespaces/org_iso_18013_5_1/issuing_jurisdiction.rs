@@ -1,8 +1,8 @@
+use crate::cbor::Value as Cbor;
 use crate::definitions::{
     namespaces::org_iso_18013_5_1::Alpha2,
     traits::{FromJson, FromJsonError, FromJsonMap},
 };
-use crate::cbor::Value as Cbor;
 use serde_json::{Map, Value as Json};
 
 /// `issuing_jurisdiction` in the org.iso.18013.5.1 namespace.

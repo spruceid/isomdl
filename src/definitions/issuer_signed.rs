@@ -9,13 +9,13 @@
 //! - [IssuerSignedItemBytes] type is an alias for [`Tag24<IssuerSignedItem>`].
 //! - [IssuerSignedItem] struct represents a signed item within the [IssuerSigned] object, including information such as digest ID, random bytes, element identifier, and element value.
 //! - [IssuerSigned] struct also includes a test module with a unit test for serialization and deserialization.
+use crate::cbor::Value as CborValue;
+use crate::cose::sign1::CoseSign1;
 use crate::definitions::{
     helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
     DigestId,
 };
 use serde::{Deserialize, Serialize};
-use crate::cbor::Value as CborValue;
-use crate::cose::sign1::CoseSign1;
 
 /// Represents an issuer-signed object.
 ///
@@ -54,8 +54,8 @@ pub struct IssuerSignedItem {
 #[cfg(test)]
 mod test {
     use super::IssuerSigned;
-    use hex::FromHex;
     use crate::cbor;
+    use hex::FromHex;
 
     static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/definitions/issuer_signed.cbor");
 

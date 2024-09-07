@@ -1,8 +1,8 @@
+use crate::cbor::Value as CborValue;
+use crate::definitions::device_engagement::error::Error;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use crate::cbor::Value as CborValue;
 use std::collections::BTreeMap;
-use crate::definitions::device_engagement::error::Error;
 
 /// The maximum length of the NFC command, as specified in ISO_18013-5 2021 Section 8.3.3.1.2
 /// Values of this type must lie between 255 and 65,535 inclusive, as specified in Note 2.
@@ -26,52 +26,53 @@ impl TryFrom<CborValue> for NfcOptions {
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
         let map: BTreeMap<CborValue, CborValue> = match v.0 {
-            ciborium::Value::Map(map) => Ok(map.into_iter().map(|(k, v)| (CborValue(k), CborValue(v))).collect::<BTreeMap::<CborValue, CborValue>>()),
+            ciborium::Value::Map(map) => Ok(map
+                .into_iter()
+                .map(|(k, v)| (CborValue(k), CborValue(v)))
+                .collect::<BTreeMap<CborValue, CborValue>>()),
             _ => Err(Error::InvalidNfcOptions),
         }?;
 
         Ok(NfcOptions::default())
             .and_then(|nfc_opts| {
                 map.get(&{
-                    let cbor: CborValue =
-                        ciborium::Value::Integer(0.into()).into();
+                    let cbor: CborValue = ciborium::Value::Integer(0.into()).into();
                     cbor
                 })
-                    .ok_or(Error::InvalidNfcOptions)
-                    .and_then(CommandDataLength::try_from)
-                    .map(|max_len_command_data_field| NfcOptions {
-                        max_len_command_data_field,
-                        ..nfc_opts
-                    })
+                .ok_or(Error::InvalidNfcOptions)
+                .and_then(CommandDataLength::try_from)
+                .map(|max_len_command_data_field| NfcOptions {
+                    max_len_command_data_field,
+                    ..nfc_opts
+                })
             })
             .and_then(|nfc_opts| {
                 map.get(&{
-                    let cbor: CborValue =
-                        ciborium::Value::Integer(1.into()).into();
+                    let cbor: CborValue = ciborium::Value::Integer(1.into()).into();
                     cbor
                 })
-                    .ok_or(Error::InvalidNfcOptions)
-                    .and_then(ResponseDataLength::try_from)
-                    .map(|max_len_response_data_field| NfcOptions {
-                        max_len_response_data_field,
-                        ..nfc_opts
-                    })
+                .ok_or(Error::InvalidNfcOptions)
+                .and_then(ResponseDataLength::try_from)
+                .map(|max_len_response_data_field| NfcOptions {
+                    max_len_response_data_field,
+                    ..nfc_opts
+                })
             })
     }
 }
 
 impl From<NfcOptions> for CborValue {
     fn from(o: NfcOptions) -> CborValue {
-        let mut map = vec![];
-        map.push((
-            ciborium::Value::Integer(0.into()),
-            ciborium::Value::Integer(o.max_len_command_data_field.get().into()),
-        ));
-        map.push((
-            ciborium::Value::Integer(1.into()),
-            ciborium::Value::Integer(o.max_len_response_data_field.get().into()),
-        ));
-
+        let map = vec![
+            (
+                ciborium::Value::Integer(0.into()),
+                ciborium::Value::Integer(o.max_len_command_data_field.get().into()),
+            ),
+            (
+                ciborium::Value::Integer(1.into()),
+                ciborium::Value::Integer(o.max_len_response_data_field.get().into()),
+            ),
+        ];
         CborValue(ciborium::Value::Map(map))
     }
 }
@@ -216,8 +217,8 @@ impl From<ResponseDataLength> for CborValue {
 
 #[cfg(test)]
 mod test {
-    use crate::cbor;
     use super::*;
+    use crate::cbor;
 
     #[test]
     fn command_data_length_valid_data_test() {

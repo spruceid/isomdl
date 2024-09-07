@@ -231,11 +231,11 @@
 //! ```ignore
 #![doc = include_str!("../tests/simulated_device_and_reader_state.rs")]
 //! ```
+pub mod cbor;
 pub mod cose;
 pub mod definitions;
 pub mod issuance;
 pub mod presentation;
-pub mod cbor;
 
 pub mod macros {
     pub use isomdl_macros::{FromJson, ToCbor};

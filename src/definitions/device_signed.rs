@@ -4,15 +4,15 @@
 //!
 //! The [Error] enum represents the possible errors that can occur in this module.  
 //! - [Error::UnableToEncode]: Indicates an error when encoding a value as CBOR.
+use crate::cbor::Value as CborValue;
+use crate::cose::mac0::CoseMac0;
+use crate::cose::sign1::CoseSign1;
 use crate::definitions::{
     helpers::{NonEmptyMap, Tag24},
     session::SessionTranscript,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use crate::cose::sign1::CoseSign1;
-use crate::cbor::Value as CborValue;
-use crate::cose::mac0::CoseMac0;
 
 /// Represents a device-signed structure.
 #[derive(Clone, Debug, Deserialize, Serialize)]

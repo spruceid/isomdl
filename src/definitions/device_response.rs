@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::definitions::{
-    DeviceSigned,
-    helpers::{NonEmptyMap, NonEmptyVec}, IssuerSigned,
+    helpers::{NonEmptyMap, NonEmptyVec},
+    DeviceSigned, IssuerSigned,
 };
 
 /// Represents a device response.

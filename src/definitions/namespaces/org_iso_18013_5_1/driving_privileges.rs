@@ -1,4 +1,5 @@
 use super::FullDate;
+use crate::cbor::Value as Cbor;
 use crate::{
     definitions::{
         helpers::NonEmptyVec,
@@ -6,7 +7,6 @@ use crate::{
     },
     macros::{FromJson, ToCbor},
 };
-use crate::cbor::Value as Cbor;
 use strum_macros::{AsRefStr, EnumString, EnumVariantNames};
 
 /// `driving_privileges` in the org.iso.18013.5.1 namespace.
@@ -16,7 +16,7 @@ pub struct DrivingPrivileges(Vec<DrivingPrivilege>);
 
 impl From<DrivingPrivileges> for Cbor {
     fn from(d: DrivingPrivileges) -> Cbor {
-        ciborium::Value::Array(d.0.into_iter().map(|v|v.to_cbor().into()).collect()).into()
+        ciborium::Value::Array(d.0.into_iter().map(|v| v.to_cbor().into()).collect()).into()
     }
 }
 
@@ -85,7 +85,13 @@ pub struct Codes(NonEmptyVec<Code>);
 
 impl From<Codes> for Cbor {
     fn from(c: Codes) -> Cbor {
-        ciborium::Value::Array(c.0.into_inner().into_iter().map(|v| v.to_cbor().into()).collect()).into()
+        ciborium::Value::Array(
+            c.0.into_inner()
+                .into_iter()
+                .map(|v| v.to_cbor().into())
+                .collect(),
+        )
+        .into()
     }
 }
 

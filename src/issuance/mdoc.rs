@@ -9,17 +9,17 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 
-use crate::{
-    definitions::{
-        DeviceKeyInfo,
-        DigestAlgorithm,
-        DigestId, DigestIds, helpers::{NonEmptyMap, NonEmptyVec, Tag24}, issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes}, IssuerSignedItem, Mso, ValidityInfo,
-    },
-    issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
-};
 use crate::cbor::Value as CborValue;
 use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
 use crate::cose::SignatureAlgorithm;
+use crate::{
+    definitions::{
+        helpers::{NonEmptyMap, NonEmptyVec, Tag24},
+        issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
+        DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, ValidityInfo,
+    },
+    issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
+};
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
 
@@ -193,10 +193,11 @@ impl PreparedMdoc {
         } = self;
 
         let mut issuer_auth = prepared_sig.finalize(signature);
-        issuer_auth.inner.unprotected.rest.push((
-            Label::Int(X5CHAIN_HEADER_LABEL as i64),
-            x5chain.into_cbor().into(),
-        ));
+        issuer_auth
+            .inner
+            .unprotected
+            .rest
+            .push((Label::Int(X5CHAIN_HEADER_LABEL as i64), x5chain.into_cbor()));
         Mdoc {
             doc_type,
             mso,
@@ -344,7 +345,7 @@ impl Builder {
             enable_decoy_digests,
             signer,
         )
-            .await
+        .await
     }
 }
 
@@ -371,7 +372,7 @@ fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
 
 fn to_issuer_signed_items(
     elements: BTreeMap<String, CborValue>,
-) -> impl Iterator<Item=IssuerSignedItem> {
+) -> impl Iterator<Item = IssuerSignedItem> {
     let mut used_ids = HashSet::new();
     elements.into_iter().map(move |(key, value)| {
         let digest_id = generate_digest_id(&mut used_ids);
@@ -586,8 +587,8 @@ pub mod test {
             (isomdl_namespace, isomdl_data),
             (aamva_namespace, aamva_data),
         ]
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
 
         let validity_info = ValidityInfo {
             signed: OffsetDateTime::now_utc(),

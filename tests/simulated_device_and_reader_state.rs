@@ -1,14 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use signature::Signer;
-use uuid::Uuid;
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, Namespaces};
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Documents, RequestedItems};
 use isomdl::presentation::{device, reader};
+use signature::Signer;
+use uuid::Uuid;
 
 use crate::common::{Device, AGE_OVER_21_ELEMENT, DOC_TYPE, NAMESPACE};
 

@@ -1,6 +1,6 @@
+use crate::cbor::Value as Cbor;
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use anyhow::anyhow;
-use crate::cbor::Value as Cbor;
 use serde_json::Value as Json;
 
 /// Indicator of presence for elements in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation

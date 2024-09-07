@@ -1,11 +1,11 @@
 //! Support for embedded
 //! [CBOR Data Items](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item),
 //! also known as a tagged data item with tag number 24.
+use crate::cbor::{from_slice, to_vec, CborError, Value as CborValue};
 use serde::{
     de::{self, Error as DeError},
     ser, Deserialize, Serialize,
 };
-use crate::cbor::{CborError, from_slice, to_vec, Value as CborValue};
 
 /// A wrapper for a struct that is to be encoded as a CBOR tagged item, with tag number 24.
 ///
@@ -64,7 +64,7 @@ impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
                         inner_bytes: inner_bytes.to_vec(),
                     })
                 }
-                _ => Err(Error::InvalidTag24(inner_value.into())),
+                _ => Err(Error::InvalidTag24(inner_value)),
             },
             _ => Err(Error::NotATag24(v.0)),
         }
@@ -85,7 +85,11 @@ impl<T> AsRef<T> for Tag24<T> {
 
 impl<T> Serialize for Tag24<T> {
     fn serialize<S: ser::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        ciborium::Value::Tag(24, Box::new(ciborium::Value::Bytes(self.inner_bytes.clone()))).serialize(s)
+        ciborium::Value::Tag(
+            24,
+            Box::new(ciborium::Value::Bytes(self.inner_bytes.clone())),
+        )
+        .serialize(s)
     }
 }
 
@@ -95,8 +99,7 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
         D: de::Deserializer<'de>,
     {
         let cbor: CborValue = ciborium::Value::deserialize(d)?.into();
-            cbor.try_into()
-            .map_err(D::Error::custom)
+        cbor.try_into().map_err(D::Error::custom)
     }
 }
 

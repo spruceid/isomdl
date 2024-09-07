@@ -1,9 +1,9 @@
 use super::FullDate;
+use crate::cbor::Value as Cbor;
 use crate::{
     definitions::{helpers::NonEmptyVec, traits::ToCbor},
     macros::{FromJson, ToCbor},
 };
-use crate::cbor::Value as Cbor;
 
 /// `domestic_driving_privileges` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
 /// Guidelines (Version 1.0).
@@ -46,7 +46,8 @@ impl ToCbor for DomesticVehicleRestrictions {
                 .into_iter()
                 .map(|v| v.to_cbor().into())
                 .collect(),
-        ).into()
+        )
+        .into()
     }
 }
 
@@ -69,7 +70,8 @@ impl ToCbor for DomesticVehicleEndorsements {
                 .into_iter()
                 .map(|v| v.to_cbor().into())
                 .collect(),
-        ).into()
+        )
+        .into()
     }
 }
 

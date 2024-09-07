@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::cbor::Value as CborValue;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "CborValue", into = "CborValue")]

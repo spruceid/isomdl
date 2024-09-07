@@ -199,9 +199,10 @@ pub fn derive_session_key(
     session_transcript: &SessionTranscriptBytes,
     reader: bool,
 ) -> Result<GenericArray<u8, U32>> {
-    let salt = Sha256::digest(crate::cbor::to_vec(session_transcript).map_err(|e| {
-        anyhow::anyhow!("failed to serialize session transcript: {e}")
-    })?);
+    let salt = Sha256::digest(
+        crate::cbor::to_vec(session_transcript)
+            .map_err(|e| anyhow::anyhow!("failed to serialize session transcript: {e}"))?,
+    );
     let hkdf = shared_secret.extract::<Sha256>(Some(salt.as_ref()));
     let mut okm = [0u8; 32];
     let sk_device = "SKDevice".as_bytes();
@@ -285,8 +286,8 @@ pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 
 
 #[cfg(test)]
 mod test {
-    use crate::cbor;
     use super::*;
+    use crate::cbor;
     use crate::definitions::device_engagement::Security;
     use crate::definitions::device_request::DeviceRequest;
 

@@ -1,8 +1,8 @@
-use std::borrow::{Borrow, BorrowMut};
-use std::ops::{Deref, DerefMut};
-use serde::{de, Deserialize, Serialize};
-use std::io::Cursor;
 use coset::{cbor, CoseError, EndOfFile};
+use serde::{de, Deserialize, Serialize};
+use std::borrow::{Borrow, BorrowMut};
+use std::io::Cursor;
+use std::ops::{Deref, DerefMut};
 use thiserror::Error;
 
 /// Wraps [chromium::Value] and implements [PartialEq], [Eq], [PartialOrd] and [Ord],
@@ -51,17 +51,18 @@ impl From<CoseError> for CborError {
             CoseError::OutOfRangeIntegerValue => CborError::OutOfRangeIntegerValue,
             CoseError::UnexpectedItem(s, s2) => CborError::UnexpectedItem(s, s2),
             CoseError::UnregisteredIanaValue => CborError::UnregisteredIanaValue,
-            CoseError::UnregisteredIanaNonPrivateValue => CborError::UnregisteredIanaNonPrivateValue,
+            CoseError::UnregisteredIanaNonPrivateValue => {
+                CborError::UnregisteredIanaNonPrivateValue
+            }
         }
     }
 }
 
 impl Value {
     pub fn to_string(&self) -> coset::Result<String> {
-        self.0.clone().into_text().map_err(|e| CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-            None,
-            format!("{e:?}"),
-        )))
+        self.0.clone().into_text().map_err(|e| {
+            CoseError::DecodeFailed(ciborium::de::Error::Semantic(None, format!("{e:?}")))
+        })
     }
 }
 
@@ -89,7 +90,7 @@ impl Eq for Value {}
 
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 
@@ -104,7 +105,9 @@ where
     T: serde::Serialize,
 {
     let mut buf = Vec::new();
-    ciborium::into_writer(value, &mut buf).map_err(coset::CoseError::from).map_err(CborError::from)?;
+    ciborium::into_writer(value, &mut buf)
+        .map_err(coset::CoseError::from)
+        .map_err(CborError::from)?;
     Ok(buf)
 }
 
@@ -112,10 +115,9 @@ pub fn from_slice<T>(slice: &[u8]) -> Result<T, CborError>
 where
     T: de::DeserializeOwned,
 {
-    ciborium::from_reader(Cursor::new(&slice)).map_err(|e| CoseError::DecodeFailed(ciborium::de::Error::Semantic(
-        None,
-        e.to_string(),
-    ))).map_err(CborError::from)
+    ciborium::from_reader(Cursor::new(&slice))
+        .map_err(|e| CoseError::DecodeFailed(ciborium::de::Error::Semantic(None, e.to_string())))
+        .map_err(CborError::from)
 }
 
 /// Convert a `chor::Value` into a type `T`
@@ -155,9 +157,9 @@ impl From<ciborium::Value> for Value {
     }
 }
 
-impl Into<ciborium::Value> for Value {
-    fn into(self) -> ciborium::Value {
-        self.0
+impl From<Value> for ciborium::Value {
+    fn from(val: Value) -> Self {
+        val.0
     }
 }
 
@@ -175,7 +177,7 @@ impl<'de> Deserialize<'de> for Value {
     where
         D: serde::Deserializer<'de>,
     {
-        ciborium::Value::deserialize(deserializer).map(|v| Value(v))
+        ciborium::Value::deserialize(deserializer).map(Value)
     }
 }
 

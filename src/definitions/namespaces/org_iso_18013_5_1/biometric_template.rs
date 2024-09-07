@@ -1,8 +1,8 @@
+use crate::cbor::Value as Cbor;
 use crate::definitions::{
     helpers::ByteStr,
     traits::{FromJson, FromJsonError, FromJsonMap, ToNamespaceMap},
 };
-use crate::cbor::Value as Cbor;
 use serde_json::{Map, Value as Json};
 use std::collections::BTreeMap;
 

@@ -1,16 +1,16 @@
 //! ToCbor is specifically NOT implemented for `Vec<T>` where `T: ToCbor`, as `Vec<u8>` likely should be
 //! represented as a `bytestr` instead of an `array` in `cbor`.
 
+use crate::cbor;
 use crate::cbor::{CborError, Value};
 use std::collections::BTreeMap;
-use crate::cbor;
 
 pub type Bytes = Vec<u8>;
 
 pub trait ToCbor: Sized {
     fn to_cbor(self) -> Value;
     fn to_cbor_bytes(self) -> Result<Bytes, ToCborError> {
-        cbor::to_vec(&self.to_cbor().0).map_err(|err| CborError::from(err)).map_err(Into::into)
+        cbor::to_vec(&self.to_cbor().0).map_err(Into::into)
     }
 }
 
