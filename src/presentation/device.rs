@@ -18,7 +18,7 @@
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use crate::cbor::{CborError, Value as CborValue};
 use crate::cose::mac0::PreparedCoseMac0;
-use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
+use crate::cose::sign1::PreparedCoseSign1;
 use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::IssuerSignedItem;
 use crate::{
@@ -40,13 +40,14 @@ use crate::{
     },
     issuance::Mdoc,
 };
-use coset::{CoseMac0Builder, CoseSign1Builder};
+use coset::{CoseMac0Builder, CoseSign1, CoseSign1Builder};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
+use crate::cose::MaybeTagged;
 
 /// Initialisation state.
 ///
@@ -151,7 +152,7 @@ type DocType = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub id: Uuid,
-    pub issuer_auth: CoseSign1,
+    pub issuer_auth: MaybeTagged<CoseSign1>,
     pub mso: Mso,
     pub namespaces: Namespaces,
 }

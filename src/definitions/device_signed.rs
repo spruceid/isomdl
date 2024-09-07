@@ -5,14 +5,14 @@
 //! The [Error] enum represents the possible errors that can occur in this module.  
 //! - [Error::UnableToEncode]: Indicates an error when encoding a value as CBOR.
 use crate::cbor::Value as CborValue;
-use crate::cose::mac0::CoseMac0;
-use crate::cose::sign1::CoseSign1;
 use crate::definitions::{
     helpers::{NonEmptyMap, Tag24},
     session::SessionTranscript,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use coset::{CoseMac0, CoseSign1};
+use crate::cose::MaybeTagged;
 
 /// Represents a device-signed structure.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -38,9 +38,9 @@ pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
 #[serde(untagged)]
 pub enum DeviceAuth {
     #[serde(rename_all = "camelCase")]
-    Signature { device_signature: CoseSign1 },
+    Signature { device_signature: MaybeTagged<CoseSign1> },
     #[serde(rename_all = "camelCase")]
-    Mac { device_mac: CoseMac0 },
+    Mac { device_mac: MaybeTagged<CoseMac0> },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

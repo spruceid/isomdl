@@ -1,12 +1,9 @@
-use crate::cose::serialized_as_cbor_value::SerializedAsCborValue;
-use crate::cose::SignatureAlgorithm;
+use coset::{CborSerializable, CoseError, CoseSign1, RegisteredLabelWithPrivate, sig_structure_data, SignatureContext};
 use coset::cwt::ClaimsSet;
-use coset::{
-    sig_structure_data, CborSerializable, CoseError, RegisteredLabelWithPrivate, SignatureContext,
-    TaggedCborSerializable,
-};
 use serde::{Deserialize, Serialize};
 use signature::Verifier;
+
+use crate::cose::{MaybeTagged, SignatureAlgorithm};
 
 /// Prepared `COSE_Sign1` for remote signing.
 ///
@@ -54,17 +51,9 @@ use signature::Verifier;
 /// }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedCoseSign1 {
-    tagged: bool,
-    cose_sign1: CoseSign1,
+    cose_sign1: MaybeTagged<CoseSign1>,
     #[serde(with = "serde_bytes")] // This optimizes (de)serialization of byte vectors
     signature_payload: Vec<u8>,
-}
-
-/// COSE_Sign1 implementation.
-#[derive(Clone, Debug)]
-pub struct CoseSign1 {
-    pub tagged: bool,
-    pub inner: coset::CoseSign1,
 }
 
 /// Errors that can occur when building, signing or verifying a COSE_Sign1.
@@ -151,11 +140,7 @@ impl PreparedCoseSign1 {
         );
 
         Ok(Self {
-            tagged,
-            cose_sign1: CoseSign1 {
-                tagged,
-                inner: cose_sign1,
-            },
+            cose_sign1: MaybeTagged::new(tagged, cose_sign1),
             signature_payload,
         })
     }
@@ -166,14 +151,14 @@ impl PreparedCoseSign1 {
     }
 
     /// Finalize the COSE_Sign1 by adding the signature.
-    pub fn finalize(self, signature: Vec<u8>) -> CoseSign1 {
+    pub fn finalize(self, signature: Vec<u8>) -> MaybeTagged<CoseSign1> {
         let mut cose_sign1 = self.cose_sign1;
         cose_sign1.inner.signature = signature;
         cose_sign1
     }
 }
 
-impl CoseSign1 {
+impl MaybeTagged<CoseSign1> {
     /// Verify that the signature of a COSE_Sign1 is authentic.
     pub fn verify<'a, V, S>(
         &'a self,
@@ -247,41 +232,6 @@ impl CoseSign1 {
     }
 }
 
-/// Serialize manually using `ciborium::tag::Captured`, putting the tag if
-/// necessary.
-impl Serialize for CoseSign1 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let tag = if self.tagged {
-            Some(coset::CoseSign1::TAG)
-        } else {
-            None
-        };
-
-        ciborium::tag::Captured(tag, SerializedAsCborValue(&self.inner)).serialize(serializer)
-    }
-}
-
-/// Deserialize manually using `ciborium::tag::Captured`, checking the tag.
-impl<'de> Deserialize<'de> for CoseSign1 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let ciborium::tag::Captured(tag, SerializedAsCborValue(inner)) =
-            ciborium::tag::Captured::deserialize(deserializer)?;
-        let tagged = match tag {
-            Some(coset::CoseSign1::TAG) => true,
-            Some(_) => return Err(serde::de::Error::custom("unexpected tag")),
-            None => false,
-        };
-
-        Ok(Self { tagged, inner })
-    }
-}
-
 mod p256 {
     use coset::iana;
     use p256::ecdsa::{SigningKey, VerifyingKey};
@@ -326,16 +276,16 @@ mod p384 {
 
 #[cfg(test)]
 mod tests {
-    use crate::cbor;
-    use crate::cose::sign1::{CoseSign1, Error, PreparedCoseSign1};
-    use crate::cose::SignatureAlgorithm;
+    use coset::{CborSerializable, Header, iana};
     use coset::cwt::{ClaimsSet, Timestamp};
-    use coset::{iana, CborSerializable, Header};
     use hex::FromHex;
     use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
     use p256::SecretKey;
     use signature::{SignatureEncoding, Signer};
-    use std::io::Cursor;
+
+    use crate::cbor;
+    use crate::cose::{MaybeTagged, SignatureAlgorithm};
+    use crate::cose::sign1::{CoseSign1, Error, PreparedCoseSign1};
 
     static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
     static COSE_KEY: &str = include_str!("../../test/definitions/cose/sign1/secret_key");
@@ -346,7 +296,7 @@ mod tests {
     #[test]
     fn roundtrip() {
         let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let mut parsed: CoseSign1 = ciborium::from_reader(Cursor::new(&bytes))
+        let mut parsed: MaybeTagged<CoseSign1> = cbor::from_slice(&bytes)
             .expect("failed to parse COSE_Sign1 from bytes");
         parsed.set_tagged();
         let roundtripped = cbor::to_vec(&parsed).expect("failed to serialize COSE_Sign1 to bytes");
@@ -361,9 +311,8 @@ mod tests {
     #[test]
     fn roundtrip_ciborium() {
         let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let mut parsed: CoseSign1 =
+        let parsed: MaybeTagged<CoseSign1> =
             cbor::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
-        parsed.set_tagged();
         let roundtripped = cbor::to_vec(&parsed).expect("failed to serialize COSE_Sign1 to bytes");
         println!("bytes: {:?}", hex::encode(&bytes));
         println!("roundtripped: {:?}", hex::encode(&roundtripped));
@@ -416,7 +365,7 @@ mod tests {
         let verifier: VerifyingKey = (&signer).into();
 
         let cose_sign1_bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let cose_sign1: CoseSign1 =
+        let cose_sign1: MaybeTagged<CoseSign1> =
             cbor::from_slice(&cose_sign1_bytes).expect("failed to parse COSE_Sign1 from bytes");
 
         cose_sign1
@@ -510,7 +459,7 @@ mod tests {
     #[test]
     fn deserializing_signed_cwt() {
         let cose_sign1_bytes = hex::decode(RFC8392_COSE_SIGN1).unwrap();
-        let cose_sign1: CoseSign1 =
+        let cose_sign1: MaybeTagged<CoseSign1> =
             cbor::from_slice(&cose_sign1_bytes).expect("failed to parse COSE_Sign1 from bytes");
         let parsed_claims_set = cose_sign1
             .claims_set()
@@ -526,7 +475,7 @@ mod tests {
         let bytes = hex::decode(COSE_SIGN1).unwrap();
 
         // can parse tagged value
-        let parsed: CoseSign1 = cbor::from_slice(&bytes).unwrap();
+        let parsed: MaybeTagged<CoseSign1> = cbor::from_slice(&bytes).unwrap();
         assert!(parsed.is_tagged());
         println!("successfully deserialized Value from tagged bytes");
 

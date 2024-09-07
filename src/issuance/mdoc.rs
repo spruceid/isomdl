@@ -3,15 +3,15 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::{anyhow, Result};
 use async_signature::AsyncSigner;
 use coset::iana::Algorithm;
-use coset::Label;
+use coset::{CoseSign1, Label};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 
 use crate::cbor::Value as CborValue;
-use crate::cose::sign1::{CoseSign1, PreparedCoseSign1};
-use crate::cose::SignatureAlgorithm;
+use crate::cose::sign1::PreparedCoseSign1;
+use crate::cose::{MaybeTagged, SignatureAlgorithm};
 use crate::{
     definitions::{
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
@@ -30,7 +30,7 @@ pub struct Mdoc {
     pub doc_type: String,
     pub mso: Mso,
     pub namespaces: IssuerNamespaces,
-    pub issuer_auth: CoseSign1,
+    pub issuer_auth: MaybeTagged<CoseSign1>,
 }
 
 /// An incomplete mdoc, requiring a remotely signed signature to be completed.

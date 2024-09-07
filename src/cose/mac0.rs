@@ -1,15 +1,11 @@
 use ::hmac::Hmac;
 use coset::cwt::ClaimsSet;
-use coset::{
-    mac_structure_data, CborSerializable, CoseError, MacContext, RegisteredLabelWithPrivate,
-    TaggedCborSerializable,
-};
+use coset::{mac_structure_data, CborSerializable, CoseError, MacContext, RegisteredLabelWithPrivate, CoseMac0};
 use digest::{Mac, MacError};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
-use crate::cose::serialized_as_cbor_value::SerializedAsCborValue;
-use crate::cose::SignatureAlgorithm;
+use crate::cose::{MaybeTagged, SignatureAlgorithm};
 
 /// Prepared `COSE_Mac0` for remote signing.
 ///
@@ -51,15 +47,8 @@ use crate::cose::SignatureAlgorithm;
 ///  }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedCoseMac0 {
-    tagged: bool,
-    cose_mac0: CoseMac0,
+    cose_mac0: MaybeTagged<CoseMac0>,
     tag_payload: Vec<u8>,
-}
-
-#[derive(Clone, Debug)]
-pub struct CoseMac0 {
-    pub tagged: bool,
-    pub inner: coset::CoseMac0,
 }
 
 /// Errors that can occur when building, signing or verifying a COSE_Mac0.
@@ -145,11 +134,7 @@ impl PreparedCoseMac0 {
         );
 
         Ok(Self {
-            tagged,
-            cose_mac0: CoseMac0 {
-                tagged,
-                inner: cose_mac0,
-            },
+            cose_mac0: MaybeTagged::new(tagged, cose_mac0),
             tag_payload,
         })
     }
@@ -160,14 +145,14 @@ impl PreparedCoseMac0 {
     }
 
     /// Finalize the COSE_Mac0 by adding the tag.
-    pub fn finalize(self, tag: Vec<u8>) -> CoseMac0 {
+    pub fn finalize(self, tag: Vec<u8>) -> MaybeTagged<CoseMac0> {
         let mut cose_mac0 = self.cose_mac0;
         cose_mac0.inner.tag = tag;
         cose_mac0
     }
 }
 
-impl CoseMac0 {
+impl MaybeTagged<CoseMac0> {
     /// Verify that the tag of a `COSE_Mac0` is authentic.
     pub fn verify(
         &self,
@@ -233,41 +218,6 @@ impl CoseMac0 {
     }
 }
 
-/// Serialize manually using `ciborium::tag::Captured`, putting the tag if
-/// necessary.
-impl Serialize for CoseMac0 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let tag = if self.tagged {
-            Some(coset::CoseMac0::TAG)
-        } else {
-            None
-        };
-
-        ciborium::tag::Captured(tag, SerializedAsCborValue(&self.inner)).serialize(serializer)
-    }
-}
-
-/// Deserialize manually using `ciborium::tag::Captured`, checking the tag.
-impl<'de> Deserialize<'de> for CoseMac0 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let ciborium::tag::Captured(tag, SerializedAsCborValue(inner)) =
-            ciborium::tag::Captured::deserialize(deserializer)?;
-        let tagged = match tag {
-            Some(coset::CoseMac0::TAG) => true,
-            Some(_) => return Err(serde::de::Error::custom("unexpected tag")),
-            None => false,
-        };
-
-        Ok(Self { tagged, inner })
-    }
-}
-
 mod hmac {
     use coset::iana;
     use hmac::Hmac;
@@ -286,8 +236,6 @@ mod hmac {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use crate::cbor;
     use crate::cose::mac0::{CoseMac0, PreparedCoseMac0};
     use coset::cwt::{ClaimsSet, Timestamp};
@@ -296,6 +244,7 @@ mod tests {
     use hex::FromHex;
     use hmac::Hmac;
     use sha2::Sha256;
+    use crate::cose::MaybeTagged;
 
     static COSE_MAC0: &str = include_str!("../../test/definitions/cose/mac0/serialized.cbor");
     static KEY: &str = include_str!("../../test/definitions/cose/mac0/secret_key");
@@ -306,7 +255,7 @@ mod tests {
     #[test]
     fn roundtrip() {
         let bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let mut parsed: CoseMac0 = ciborium::from_reader(Cursor::new(&bytes))
+        let mut parsed: MaybeTagged<CoseMac0> = cbor::from_slice(&bytes)
             .expect("failed to parse COSE_MAC0 from bytes");
         parsed.set_tagged();
         let roundtripped = cbor::to_vec(&parsed).expect("failed to serialize COSE_MAC0");
@@ -355,7 +304,7 @@ mod tests {
             Hmac::<Sha256>::new_from_slice(&key).expect("failed to create HMAC verifier");
 
         let cose_mac0_bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let cose_mac0: CoseMac0 = ciborium::from_reader(Cursor::new(&cose_mac0_bytes))
+        let cose_mac0: MaybeTagged<CoseMac0> = cbor::from_slice(&cose_mac0_bytes)
             .expect("failed to parse COSE_MAC0 from bytes");
 
         cose_mac0
@@ -447,7 +396,7 @@ mod tests {
     #[test]
     fn deserializing_tdeserializing_signed_cwtagged_cwt() {
         let cose_mac0_bytes = hex::decode(RFC8392_MAC0).unwrap();
-        let cose_mac0: CoseMac0 = ciborium::from_reader(Cursor::new(&cose_mac0_bytes))
+        let cose_mac0: MaybeTagged<CoseMac0> = cbor::from_slice(&cose_mac0_bytes)
             .expect("failed to parse COSE_MAC0 from bytes");
         let parsed_claims_set = cose_mac0
             .claims_set()
