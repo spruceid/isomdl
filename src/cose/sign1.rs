@@ -1,8 +1,5 @@
+use coset::{CborSerializable, CoseError, CoseSign1, RegisteredLabelWithPrivate, sig_structure_data, SignatureContext};
 use coset::cwt::ClaimsSet;
-use coset::{
-    sig_structure_data, CborSerializable, CoseError, CoseSign1, RegisteredLabelWithPrivate,
-    SignatureContext,
-};
 use serde::{Deserialize, Serialize};
 use signature::Verifier;
 
@@ -279,16 +276,16 @@ mod p384 {
 
 #[cfg(test)]
 mod tests {
+    use coset::{CborSerializable, Header, iana};
     use coset::cwt::{ClaimsSet, Timestamp};
-    use coset::{iana, CborSerializable, Header};
     use hex::FromHex;
     use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
     use p256::SecretKey;
     use signature::{SignatureEncoding, Signer};
 
     use crate::cbor;
-    use crate::cose::sign1::{CoseSign1, Error, PreparedCoseSign1};
     use crate::cose::{MaybeTagged, SignatureAlgorithm};
+    use crate::cose::sign1::{CoseSign1, Error, PreparedCoseSign1};
 
     static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
     static COSE_KEY: &str = include_str!("../../test/definitions/cose/sign1/secret_key");
@@ -299,12 +296,9 @@ mod tests {
     #[test]
     fn roundtrip() {
         let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let mut parsed: MaybeTagged<CoseSign1> =
-            cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
-        parsed.set_tagged();
+        let parsed: MaybeTagged<CoseSign1> = cbor::from_slice(&bytes)
+            .expect("failed to parse COSE_Sign1 from bytes");
         let roundtripped = cbor::to_vec(&parsed).expect("failed to serialize COSE_Sign1 to bytes");
-        println!("bytes: {:?}", hex::encode(&bytes));
-        println!("roundtripped: {:?}", hex::encode(&roundtripped));
         assert_eq!(
             bytes, roundtripped,
             "original bytes and roundtripped bytes do not match"

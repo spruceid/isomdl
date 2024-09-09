@@ -90,7 +90,7 @@ where
         S: serde::Serializer,
     {
         let tag = if self.tagged {
-            Some(coset::CoseSign1::TAG)
+            Some(T::TAG)
         } else {
             None
         };
@@ -111,7 +111,7 @@ where
         let ciborium::tag::Captured(tag, SerializedAsCborValue(inner)) =
             ciborium::tag::Captured::deserialize(deserializer)?;
         let tagged = match tag {
-            Some(coset::CoseSign1::TAG) => true,
+            Some(tag) if tag == T::TAG => true,
             Some(_) => return Err(serde::de::Error::custom("unexpected tag")),
             None => false,
         };
