@@ -85,6 +85,7 @@ impl Mdoc {
         let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
 
         let prepared_sig = CoseSign1::builder()
+            .tagged()
             .payload(mso_bytes)
             .signature_algorithm(signature_algorithm)
             .prepare()
