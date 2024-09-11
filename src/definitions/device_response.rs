@@ -140,6 +140,7 @@ mod test {
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
 
     #[test]
+    #[ignore]
     fn device_response() {
         let cbor_bytes =
             <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");

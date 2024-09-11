@@ -58,11 +58,12 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
     /// ```
     /// use base64::decode;
     /// use serde::Serialize;
+    /// use isomdl::cbor::from_slice;
     /// use isomdl::presentation::{device, Stringify};
     /// use isomdl::presentation::device::Document;
     ///
     /// let doc_str = include_str!("../../test/stringified-mdl.txt").to_string();
-    /// let doc : Document = crate::cbor::from_slice(&decode(doc_str).unwrap()).unwrap();
+    /// let doc : Document = from_slice(&decode(doc_str).unwrap()).unwrap();
     /// let serialized = doc.stringify().unwrap();
     /// assert_eq!(serialized, Document::parse(serialized.clone()).unwrap().stringify().unwrap());
     /// ```
@@ -82,11 +83,12 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
     /// ```
     /// use base64::decode;
     /// use serde::Serialize;
+    /// use isomdl::cbor::from_slice;
     /// use isomdl::presentation::{device, Stringify};
     /// use isomdl::presentation::device::Document;
     ///
     /// let doc_str = include_str!("../../test/stringified-mdl.txt").to_string();
-    /// let doc : Document = crate::cbor::from_slice(&decode(doc_str).unwrap()).unwrap();
+    /// let doc : Document = from_slice(&decode(doc_str).unwrap()).unwrap();
     /// let serialized = doc.stringify().unwrap();
     /// assert_eq!(serialized, Document::parse(serialized.clone()).unwrap().stringify().unwrap());
     /// ```

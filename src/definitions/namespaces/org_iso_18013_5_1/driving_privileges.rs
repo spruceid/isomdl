@@ -111,7 +111,7 @@ pub struct Code {
 #[cfg(test)]
 mod tests {
     use crate::definitions::traits::{FromJson, ToCbor};
-
+    use crate::cbor::Value as CborValue;
     use super::VehicleCategoryCode;
 
     #[test]
@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(c, VehicleCategoryCode::A);
 
         let v = c.to_cbor();
-        assert_eq!(v.0, ciborium::Value::Text("A".to_string()));
+        assert_eq!(<CborValue as Into<ciborium::Value>>::into(v), ciborium::Value::Text("A".to_string()));
 
         let j = serde_json::json!("A");
         let c = VehicleCategoryCode::from_json(&j).unwrap();

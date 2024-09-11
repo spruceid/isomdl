@@ -35,7 +35,7 @@ pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
 /// This struct contains the device signature in the form of a [CoseSign1] object.  
 /// The [CoseSign1] object represents a `COSE (CBOR Object Signing and Encryption) signature.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(untagged)]
+// #[serde(untagged)]
 pub enum DeviceAuth {
     #[serde(rename_all = "camelCase")]
     Signature {
@@ -90,8 +90,10 @@ mod tests {
     #[test]
     fn device_auth() {
         let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let mut cose_sign1: MaybeTagged<CoseSign1> =
+        let cose_sign1: MaybeTagged<CoseSign1> =
             cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
+        let bytes2 = cbor::to_vec(&cose_sign1).unwrap();
+        assert_eq!(bytes, bytes2);
         let device_auth = DeviceAuth::Signature {
             device_signature: cose_sign1
         };

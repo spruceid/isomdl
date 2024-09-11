@@ -25,7 +25,7 @@ impl TryFrom<CborValue> for NfcOptions {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        let map: BTreeMap<CborValue, CborValue> = match v.0 {
+        let map: BTreeMap<CborValue, CborValue> = match v.into() {
             ciborium::Value::Map(map) => map
                 .into_iter()
                 .map(|(k, v)| {
@@ -77,7 +77,7 @@ impl From<NfcOptions> for CborValue {
                 ciborium::Value::Integer(o.max_len_response_data_field.get().into()),
             ),
         ];
-        CborValue(ciborium::Value::Map(map))
+        ciborium::Value::Map(map).try_into().unwrap()
     }
 }
 
@@ -138,8 +138,8 @@ impl TryFrom<&CborValue> for CommandDataLength {
     type Error = Error;
 
     fn try_from(v: &CborValue) -> Result<Self, Error> {
-        match v.0 {
-            ciborium::Value::Integer(int_val) => Ok(Self(int_val.try_into().unwrap())),
+        match v.as_ref() {
+            ciborium::Value::Integer(int_val) => Ok(Self(int_val.clone().try_into().unwrap())),
             _ => Err(Error::InvalidNfcOptions),
         }
     }
@@ -147,7 +147,7 @@ impl TryFrom<&CborValue> for CommandDataLength {
 
 impl From<CommandDataLength> for CborValue {
     fn from(cdl: CommandDataLength) -> CborValue {
-        CborValue(ciborium::Value::Integer(cdl.get().into()))
+        ciborium::Value::Integer(cdl.get().into()).try_into().unwrap()
     }
 }
 
@@ -206,8 +206,8 @@ impl TryFrom<&CborValue> for ResponseDataLength {
     type Error = Error;
 
     fn try_from(v: &CborValue) -> Result<Self, Error> {
-        match v.0 {
-            ciborium::Value::Integer(int_val) => Ok(Self(int_val.try_into().unwrap())),
+        match v.as_ref() {
+            ciborium::Value::Integer(int_val) => Ok(Self(int_val.clone().try_into().unwrap())),
             _ => Err(Error::InvalidNfcOptions),
         }
     }
@@ -215,7 +215,7 @@ impl TryFrom<&CborValue> for ResponseDataLength {
 
 impl From<ResponseDataLength> for CborValue {
     fn from(rdl: ResponseDataLength) -> CborValue {
-        CborValue(ciborium::Value::Integer(rdl.get().into()))
+        ciborium::Value::Integer(rdl.get().into()).try_into().unwrap()
     }
 }
 

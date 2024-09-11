@@ -41,7 +41,7 @@ impl TryFrom<CborValue> for ByteStr {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<ByteStr> {
-        if let ciborium::Value::Bytes(bytes) = v.0 {
+        if let ciborium::Value::Bytes(bytes) = v.clone().into() {
             Ok(ByteStr(bytes))
         } else {
             Err(Error::NotAByteString(v))

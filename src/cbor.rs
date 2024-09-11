@@ -17,7 +17,7 @@ use thiserror::Error;
 ///
 /// Also, useful in future if we want to change the CBOR library.
 #[derive(Debug, Clone)]
-pub struct Value(pub(crate) ciborium::Value);
+pub struct Value(ciborium::Value);
 
 impl Value {
     /// Create a new CBOR value.
@@ -37,6 +37,10 @@ impl Value {
     /// It will allow creating from value containing non-finite floats or NaN.
     pub unsafe fn from_unsafe(value: ciborium::Value) -> Self {
         Value(value)
+    }
+
+    pub fn into_inner(self) -> ciborium::Value {
+        self.0
     }
 }
 

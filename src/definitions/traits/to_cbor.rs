@@ -10,7 +10,7 @@ pub type Bytes = Vec<u8>;
 pub trait ToCbor: Sized {
     fn to_cbor(self) -> Value;
     fn to_cbor_bytes(self) -> Result<Bytes, ToCborError> {
-        cbor::to_vec(&self.to_cbor().0).map_err(Into::into)
+        cbor::to_vec(&self.to_cbor()).map_err(Into::into)
     }
 }
 

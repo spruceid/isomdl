@@ -55,7 +55,7 @@ impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Tag24<T>> {
-        match v.0 {
+        match v.clone().into() {
             ciborium::Value::Tag(24, inner_value) => match inner_value.as_ref() {
                 ciborium::Value::Bytes(inner_bytes) => {
                     let inner: T = from_slice(inner_bytes).map_err(Error::UnableToDecode)?;
@@ -66,7 +66,7 @@ impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
                 }
                 _ => Err(Error::InvalidTag24(inner_value)),
             },
-            _ => Err(Error::NotATag24(v.0)),
+            _ => Err(Error::NotATag24(v.into())),
         }
     }
 }

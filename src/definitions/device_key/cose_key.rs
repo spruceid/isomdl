@@ -171,35 +171,35 @@ impl TryFrom<CborValue> for CoseKey {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        if let ciborium::Value::Map(map) = v.0 {
+        if let ciborium::Value::Map(map) = v.clone().into() {
             let mut map = map
                 .into_iter()
-                .map(|(k, v)| (CborValue(k), CborValue(v)))
-                .collect::<BTreeMap<_, _>>();
+                .map(|(k, v)| Ok((CborValue::from(k).map_err(Error::CborError)?, CborValue::from(v).map_err(Error::CborError)?)))
+                .collect::<Result<BTreeMap<_, _>, Error>>()?;
             match (
                 map.remove(&{
                     let cbor: CborValue = ciborium::Value::Integer(1.into())
                         .try_into()
                         .map_err(Error::CborError)?;
                     cbor
-                }),
+                }).map(|v| v.into()),
                 map.remove(&{
                     let cbor: CborValue = ciborium::Value::Integer((-1).into())
                         .try_into()
                         .map_err(Error::CborError)?;
                     cbor
-                }),
+                }).map(|v| v.into()),
                 map.remove(&{
                     let cbor: CborValue = ciborium::Value::Integer((-2).into())
                         .try_into()
                         .map_err(Error::CborError)?;
                     cbor
-                }),
+                }).map(|v| v.into()),
             ) {
                 (
-                    Some(CborValue(ciborium::Value::Integer(i2))),
-                    Some(CborValue(ciborium::Value::Integer(crv_id))),
-                    Some(CborValue(ciborium::Value::Bytes(x))),
+                    Some(ciborium::Value::Integer(i2)),
+                    Some(ciborium::Value::Integer(crv_id)),
+                    Some(ciborium::Value::Bytes(x)),
                 ) if <ciborium::value::Integer as Into<i128>>::into(i2) == 2 => {
                     let crv_id: i128 = crv_id.into();
                     let crv = crv_id.try_into()?;
@@ -215,9 +215,9 @@ impl TryFrom<CborValue> for CoseKey {
                     Ok(Self::EC2 { crv, x, y })
                 }
                 (
-                    Some(CborValue(ciborium::Value::Integer(i1))),
-                    Some(CborValue(ciborium::Value::Integer(crv_id))),
-                    Some(CborValue(ciborium::Value::Bytes(x))),
+                    Some(ciborium::Value::Integer(i1)),
+                    Some(ciborium::Value::Integer(crv_id)),
+                    Some(ciborium::Value::Bytes(x)),
                 ) if <ciborium::value::Integer as Into<i128>>::into(i1) == 1 => {
                     let crv_id: i128 = crv_id.into();
                     let crv = crv_id.try_into()?;
@@ -226,7 +226,7 @@ impl TryFrom<CborValue> for CoseKey {
                 _ => Err(Error::UnsupportedKeyType),
             }
         } else {
-            Err(Error::NotAMap(v))
+            Err(Error::NotAMap(v.into()))
         }
     }
 }
@@ -290,7 +290,7 @@ impl TryFrom<CborValue> for EC2Y {
     type Error = Error;
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
-        match v.0 {
+        match v.clone().into() {
             ciborium::Value::Bytes(s) => Ok(EC2Y::Value(s)),
             ciborium::Value::Bool(b) => Ok(EC2Y::SignBit(b)),
             _ => Err(Error::InvalidTypeY(v)),

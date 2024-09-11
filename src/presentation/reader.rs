@@ -297,7 +297,7 @@ impl SessionManager {
 }
 
 fn parse_response(value: CborValue) -> Result<Value, Error> {
-    match value.0 {
+    match value.into() {
         ciborium::Value::Text(s) => Ok(Value::String(s)),
         ciborium::Value::Tag(_t, v) => {
             if let ciborium::Value::Text(d) = *v {
