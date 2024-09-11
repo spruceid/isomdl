@@ -92,8 +92,6 @@ mod tests {
         let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
         let mut cose_sign1: MaybeTagged<CoseSign1> =
             cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
-        cose_sign1.tagged = false;
-
         let device_auth = DeviceAuth::Signature {
             device_signature: cose_sign1
         };

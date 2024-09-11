@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::definitions::{
-    helpers::{NonEmptyMap, NonEmptyVec},
-    DeviceSigned, IssuerSigned,
+    DeviceSigned,
+    helpers::{NonEmptyMap, NonEmptyVec}, IssuerSigned,
 };
 
 /// Represents a device response.
@@ -126,17 +126,18 @@ impl TryFrom<u64> for Status {
 #[cfg(test)]
 mod test {
     use coset::{CoseMac0, CoseSign1};
-    use super::{DeviceResponse, DocumentError, DocumentErrorCode, DocumentErrors, Documents, Status};
     use hex::FromHex;
+
     use crate::cbor;
     use crate::cose::MaybeTagged;
     use crate::definitions::{DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem};
     use crate::definitions::device_signed::{DeviceNamespaces, DeviceNamespacesBytes, DeviceSignedItems};
-    use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
+    use crate::definitions::helpers::NonEmptyVec;
     use crate::definitions::issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes};
 
+    use super::{DeviceResponse, DocumentError, DocumentErrorCode, DocumentErrors, Documents, Status};
+
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
-    const RFC8392_MAC0: &str = "d18443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b715820a377dfe17a3c3c3bdb363c426f85d3c1a1f11007765965017602f207700071b0";
 
     #[test]
     fn device_response() {
@@ -158,10 +159,10 @@ mod test {
         static COSE_MAC0: &str = include_str!("../../test/definitions/cose/mac0/serialized.cbor");
 
         let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
-        let mut cose_sign1: MaybeTagged<CoseSign1> =
+        let cose_sign1: MaybeTagged<CoseSign1> =
             cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
         let bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let mut cose_mac0: MaybeTagged<CoseMac0> =
+        let cose_mac0: MaybeTagged<CoseMac0> =
             cbor::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
 
         let issuer_signed_item = IssuerSignedItem {

@@ -26,10 +26,14 @@ impl TryFrom<CborValue> for NfcOptions {
 
     fn try_from(v: CborValue) -> Result<Self, Error> {
         let map: BTreeMap<CborValue, CborValue> = match v.0 {
-            ciborium::Value::Map(map) => Ok(map
+            ciborium::Value::Map(map) => map
                 .into_iter()
-                .map(|(k, v)| (CborValue(k), CborValue(v)))
-                .collect::<BTreeMap<CborValue, CborValue>>()),
+                .map(|(k, v)| {
+                    let k = CborValue::from(k)?;
+                    let v = CborValue::from(v)?;
+                    Ok((k, v))
+                })
+                .collect::<Result<BTreeMap<CborValue, CborValue>, Error>>(),
             _ => Err(Error::InvalidNfcOptions),
         }?;
 
