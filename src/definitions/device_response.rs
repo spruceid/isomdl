@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::definitions::{
-    DeviceSigned,
-    helpers::{NonEmptyMap, NonEmptyVec}, IssuerSigned,
+    helpers::{NonEmptyMap, NonEmptyVec},
+    DeviceSigned, IssuerSigned,
 };
 
 /// Represents a device response.
@@ -130,12 +130,18 @@ mod test {
 
     use crate::cbor;
     use crate::cose::MaybeTagged;
-    use crate::definitions::{DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem};
-    use crate::definitions::device_signed::{DeviceNamespaces, DeviceNamespacesBytes, DeviceSignedItems};
+    use crate::definitions::device_signed::{
+        DeviceNamespaces, DeviceNamespacesBytes, DeviceSignedItems,
+    };
     use crate::definitions::helpers::NonEmptyVec;
     use crate::definitions::issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes};
+    use crate::definitions::{
+        DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem,
+    };
 
-    use super::{DeviceResponse, DocumentError, DocumentErrorCode, DocumentErrors, Documents, Status};
+    use super::{
+        DeviceResponse, DocumentError, DocumentErrorCode, DocumentErrors, Documents, Status,
+    };
 
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
 
@@ -175,14 +181,23 @@ mod test {
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let vec = NonEmptyVec::new(issuer_signed_item_bytes);
         let issuer_namespaces = IssuerNamespaces::new("a".to_string(), vec);
-        let device_signed_items = DeviceSignedItems::new("a".to_string(), ciborium::Value::Null.try_into().unwrap());
+        let device_signed_items =
+            DeviceSignedItems::new("a".to_string(), ciborium::Value::Null.try_into().unwrap());
         let mut device_namespaces = DeviceNamespaces::new();
         device_namespaces.insert("a".to_string(), device_signed_items);
         let device_namespaces_bytes = DeviceNamespacesBytes::new(device_namespaces).unwrap();
         let doc = Document {
             doc_type: "aaa".to_string(),
-            issuer_signed: IssuerSigned { namespaces: Some(issuer_namespaces), issuer_auth: cose_sign1.clone() },
-            device_signed: DeviceSigned { namespaces: device_namespaces_bytes, device_auth: DeviceAuth::Mac { device_mac: cose_mac0 } },
+            issuer_signed: IssuerSigned {
+                namespaces: Some(issuer_namespaces),
+                issuer_auth: cose_sign1.clone(),
+            },
+            device_signed: DeviceSigned {
+                namespaces: device_namespaces_bytes,
+                device_auth: DeviceAuth::Mac {
+                    device_mac: cose_mac0,
+                },
+            },
             errors: None,
         };
         let docs = Documents::new(doc);

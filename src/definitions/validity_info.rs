@@ -103,9 +103,9 @@ impl TryFrom<ValidityInfo> for CborValue {
             insert_date!(map, expected_update, "expectedUpdate");
         }
 
-        Ok(ciborium::Value::Map(map)
+        ciborium::Value::Map(map)
             .try_into()
-            .map_err(Error::CborError)?)
+            .map_err(Error::CborError)
     }
 }
 
@@ -124,7 +124,8 @@ impl TryFrom<CborValue> for ValidityInfo {
                 .collect::<Result<BTreeMap<CborValue, CborValue>>>()?;
             macro_rules! extract_date {
                 ($map:ident, $name:literal) => {{
-                    let key = CborValue::from(ciborium::Value::Text(String::from($name))).map_err(Error::CborError)?;
+                    let key = CborValue::from(ciborium::Value::Text(String::from($name)))
+                        .map_err(Error::CborError)?;
                     $map.remove(&key)
                         .ok_or(Error::MissingField(key.into()))
                         .and_then(cbor_to_datetime)?

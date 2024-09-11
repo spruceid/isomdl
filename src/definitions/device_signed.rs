@@ -81,9 +81,9 @@ pub enum Error {
 
 #[cfg(test)]
 mod tests {
-    use hex::FromHex;
-    use crate::cbor;
     use super::*;
+    use crate::cbor;
+    use hex::FromHex;
 
     static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
 
@@ -95,7 +95,7 @@ mod tests {
         let bytes2 = cbor::to_vec(&cose_sign1).unwrap();
         assert_eq!(bytes, bytes2);
         let device_auth = DeviceAuth::Signature {
-            device_signature: cose_sign1
+            device_signature: cose_sign1,
         };
         let bytes = cbor::to_vec(&device_auth).unwrap();
         println!("bytes {}", hex::encode(&bytes));

@@ -174,7 +174,12 @@ impl TryFrom<CborValue> for CoseKey {
         if let ciborium::Value::Map(map) = v.clone().into() {
             let mut map = map
                 .into_iter()
-                .map(|(k, v)| Ok((CborValue::from(k).map_err(Error::CborError)?, CborValue::from(v).map_err(Error::CborError)?)))
+                .map(|(k, v)| {
+                    Ok((
+                        CborValue::from(k).map_err(Error::CborError)?,
+                        CborValue::from(v).map_err(Error::CborError)?,
+                    ))
+                })
                 .collect::<Result<BTreeMap<_, _>, Error>>()?;
             match (
                 map.remove(&{
@@ -182,19 +187,22 @@ impl TryFrom<CborValue> for CoseKey {
                         .try_into()
                         .map_err(Error::CborError)?;
                     cbor
-                }).map(|v| v.into()),
+                })
+                .map(|v| v.into()),
                 map.remove(&{
                     let cbor: CborValue = ciborium::Value::Integer((-1).into())
                         .try_into()
                         .map_err(Error::CborError)?;
                     cbor
-                }).map(|v| v.into()),
+                })
+                .map(|v| v.into()),
                 map.remove(&{
                     let cbor: CborValue = ciborium::Value::Integer((-2).into())
                         .try_into()
                         .map_err(Error::CborError)?;
                     cbor
-                }).map(|v| v.into()),
+                })
+                .map(|v| v.into()),
             ) {
                 (
                     Some(ciborium::Value::Integer(i2)),
@@ -226,7 +234,7 @@ impl TryFrom<CborValue> for CoseKey {
                 _ => Err(Error::UnsupportedKeyType),
             }
         } else {
-            Err(Error::NotAMap(v.into()))
+            Err(Error::NotAMap(v))
         }
     }
 }

@@ -34,6 +34,8 @@ impl Value {
 
     /// Unsafe version of `new`.
     ///
+    /// # Safety
+    ///
     /// It will allow creating from value containing non-finite floats or NaN.
     pub unsafe fn from_unsafe(value: ciborium::Value) -> Self {
         Value(value)
@@ -176,7 +178,7 @@ impl Ord for Value {
 
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 
@@ -363,8 +365,8 @@ mod tests {
             Ok(ciborium::Value::Float(1.0f32.into()).try_into().unwrap())
         );
         assert_eq!(
-            Value::from(ciborium::Value::Float(1.0f64.into())),
-            Ok(ciborium::Value::Float(1.0f64.into()).try_into().unwrap())
+            Value::from(ciborium::Value::Float(1.0f64)),
+            Ok(ciborium::Value::Float(1.0f64).try_into().unwrap())
         );
         assert_eq!(
             Value::from(ciborium::Value::Text("foo".to_string())),

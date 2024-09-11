@@ -139,7 +139,7 @@ impl TryFrom<&CborValue> for CommandDataLength {
 
     fn try_from(v: &CborValue) -> Result<Self, Error> {
         match v.as_ref() {
-            ciborium::Value::Integer(int_val) => Ok(Self(int_val.clone().try_into().unwrap())),
+            ciborium::Value::Integer(int_val) => Ok(Self((*int_val).try_into().unwrap())),
             _ => Err(Error::InvalidNfcOptions),
         }
     }
@@ -147,7 +147,9 @@ impl TryFrom<&CborValue> for CommandDataLength {
 
 impl From<CommandDataLength> for CborValue {
     fn from(cdl: CommandDataLength) -> CborValue {
-        ciborium::Value::Integer(cdl.get().into()).try_into().unwrap()
+        ciborium::Value::Integer(cdl.get().into())
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -207,7 +209,7 @@ impl TryFrom<&CborValue> for ResponseDataLength {
 
     fn try_from(v: &CborValue) -> Result<Self, Error> {
         match v.as_ref() {
-            ciborium::Value::Integer(int_val) => Ok(Self(int_val.clone().try_into().unwrap())),
+            ciborium::Value::Integer(int_val) => Ok(Self((*int_val).try_into().unwrap())),
             _ => Err(Error::InvalidNfcOptions),
         }
     }
@@ -215,7 +217,9 @@ impl TryFrom<&CborValue> for ResponseDataLength {
 
 impl From<ResponseDataLength> for CborValue {
     fn from(rdl: ResponseDataLength) -> CborValue {
-        ciborium::Value::Integer(rdl.get().into()).try_into().unwrap()
+        ciborium::Value::Integer(rdl.get().into())
+            .try_into()
+            .unwrap()
     }
 }
 
