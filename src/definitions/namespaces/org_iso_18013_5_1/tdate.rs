@@ -54,7 +54,9 @@ impl FromJson for TDateOrFullDate {
 
 impl From<TDate> for Cbor {
     fn from(t: TDate) -> Cbor {
-        ciborium::Value::Tag(0, Box::new(t.0.into())).into()
+        ciborium::Value::Tag(0, Box::new(t.0.into()))
+            .try_into()
+            .unwrap()
     }
 }
 

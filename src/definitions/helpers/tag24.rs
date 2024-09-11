@@ -73,7 +73,9 @@ impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
 
 impl<T> From<Tag24<T>> for CborValue {
     fn from(Tag24 { inner_bytes, .. }: Tag24<T>) -> CborValue {
-        ciborium::Value::Tag(24, Box::new(ciborium::Value::Bytes(inner_bytes))).into()
+        ciborium::Value::Tag(24, Box::new(ciborium::Value::Bytes(inner_bytes)))
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -98,7 +100,9 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
     where
         D: de::Deserializer<'de>,
     {
-        let cbor: CborValue = ciborium::Value::deserialize(d)?.into();
+        let cbor: CborValue = ciborium::Value::deserialize(d)?
+            .try_into()
+            .map_err(DeError::custom)?;
         cbor.try_into().map_err(D::Error::custom)
     }
 }

@@ -258,9 +258,8 @@ mod tests {
     #[test]
     fn roundtrip() {
         let bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
-        let mut parsed: MaybeTagged<CoseMac0> =
+        let parsed: MaybeTagged<CoseMac0> =
             cbor::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
-        parsed.set_tagged();
         let roundtripped = cbor::to_vec(&parsed).expect("failed to serialize COSE_MAC0");
         assert_eq!(
             bytes, roundtripped,

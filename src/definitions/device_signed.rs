@@ -78,3 +78,29 @@ pub enum Error {
     #[error("Unable to encode value as CBOR: {0}")]
     UnableToEncode(coset::CoseError),
 }
+
+#[cfg(test)]
+mod tests {
+    use hex::FromHex;
+    use crate::cbor;
+    use super::*;
+
+    static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
+
+    #[test]
+    fn device_auth() {
+        let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
+        let mut cose_sign1: MaybeTagged<CoseSign1> =
+            cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
+        cose_sign1.tagged = false;
+
+        let device_auth = DeviceAuth::Signature {
+            device_signature: cose_sign1
+        };
+        let bytes = cbor::to_vec(&device_auth).unwrap();
+        println!("bytes {}", hex::encode(&bytes));
+        let roundtripped: DeviceAuth = cbor::from_slice(&bytes).unwrap();
+        let roundtripped_bytes = cbor::to_vec(&roundtripped).unwrap();
+        assert_eq!(bytes, roundtripped_bytes);
+    }
+}

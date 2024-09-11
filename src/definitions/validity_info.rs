@@ -27,7 +27,7 @@
 //! - [std::collections::BTreeMap]: Provides the [BTreeMap] type for storing key-value pairs in a sorted order.
 //! - [time]: Provides date and time manipulation functionality.
 //! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
-use crate::cbor::Value as CborValue;
+use crate::cbor::{CborError, Value as CborValue};
 use serde::{
     ser::{Error as SerError, Serializer},
     Deserialize, Serialize,
@@ -65,6 +65,8 @@ pub enum Error {
     UnableToFormatDate(#[from] FormatError),
     #[error("Failed to parse date string as rfc3339 date: {0}")]
     UnableToParseDate(#[from] ParseError),
+    #[error("Could not serialize to cbor: {0}")]
+    CborError(CborError),
 }
 
 impl TryFrom<ValidityInfo> for CborValue {
@@ -101,7 +103,9 @@ impl TryFrom<ValidityInfo> for CborValue {
             insert_date!(map, expected_update, "expectedUpdate");
         }
 
-        Ok(ciborium::Value::Map(map).into())
+        Ok(ciborium::Value::Map(map)
+            .try_into()
+            .map_err(Error::CborError)?)
     }
 }
 
@@ -112,8 +116,12 @@ impl TryFrom<CborValue> for ValidityInfo {
         if let ciborium::Value::Map(map) = v.0 {
             let mut map = map
                 .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect::<BTreeMap<CborValue, CborValue>>();
+                .map(|(k, v)| {
+                    let k: CborValue = k.try_into().map_err(Error::CborError)?;
+                    let v: CborValue = v.try_into().map_err(Error::CborError)?;
+                    Ok((k, v))
+                })
+                .collect::<Result<BTreeMap<CborValue, CborValue>>>()?;
             macro_rules! extract_date {
                 ($map:ident, $name:literal) => {{
                     let key = CborValue(ciborium::Value::Text(String::from($name)));
@@ -128,7 +136,9 @@ impl TryFrom<CborValue> for ValidityInfo {
             let valid_until = extract_date!(map, "validUntil");
 
             let expected_update_key: CborValue =
-                ciborium::Value::Text(String::from("expectedUpdate")).into();
+                ciborium::Value::Text(String::from("expectedUpdate"))
+                    .try_into()
+                    .map_err(Error::CborError)?;
             let expected_update = map
                 .remove(&expected_update_key)
                 .map(cbor_to_datetime)

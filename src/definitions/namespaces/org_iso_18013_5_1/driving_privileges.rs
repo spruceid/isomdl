@@ -16,7 +16,9 @@ pub struct DrivingPrivileges(Vec<DrivingPrivilege>);
 
 impl From<DrivingPrivileges> for Cbor {
     fn from(d: DrivingPrivileges) -> Cbor {
-        ciborium::Value::Array(d.0.into_iter().map(|v| v.to_cbor().into()).collect()).into()
+        ciborium::Value::Array(d.0.into_iter().map(|v| v.to_cbor().into()).collect())
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -57,7 +59,9 @@ pub enum VehicleCategoryCode {
 
 impl From<VehicleCategoryCode> for Cbor {
     fn from(c: VehicleCategoryCode) -> Cbor {
-        ciborium::Value::Text(c.as_ref().to_string()).into()
+        ciborium::Value::Text(c.as_ref().to_string())
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -91,7 +95,8 @@ impl From<Codes> for Cbor {
                 .map(|v| v.to_cbor().into())
                 .collect(),
         )
-        .into()
+        .try_into()
+        .unwrap()
     }
 }
 

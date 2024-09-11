@@ -89,11 +89,7 @@ where
     where
         S: serde::Serializer,
     {
-        let tag = if self.tagged {
-            Some(T::TAG)
-        } else {
-            None
-        };
+        let tag = if self.tagged { Some(T::TAG) } else { None };
 
         ciborium::tag::Captured(tag, SerializedAsCborValue(&self.inner)).serialize(serializer)
     }

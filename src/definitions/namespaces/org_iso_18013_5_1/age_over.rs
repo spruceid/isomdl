@@ -50,7 +50,12 @@ impl ToNamespaceMap for AgeOver {
     fn to_ns_map(self) -> BTreeMap<String, Cbor> {
         self.0
             .into_iter()
-            .map(|(Age(x, y), v)| (format!("age_over_{x}{y}"), ciborium::Value::Bool(v).into()))
+            .map(|(Age(x, y), v)| {
+                (
+                    format!("age_over_{x}{y}"),
+                    ciborium::Value::Bool(v).try_into().unwrap(),
+                )
+            })
             .collect()
     }
 }

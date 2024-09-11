@@ -19,6 +19,6 @@ impl FromJson for Present {
 
 impl ToCbor for Present {
     fn to_cbor(self) -> Cbor {
-        ciborium::Value::Integer(1.into()).into()
+        ciborium::Value::Integer(1.into()).try_into().unwrap()
     }
 }

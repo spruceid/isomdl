@@ -13,7 +13,9 @@ pub struct DomesticDrivingPrivileges(Vec<DomesticDrivingPrivilege>);
 
 impl ToCbor for DomesticDrivingPrivileges {
     fn to_cbor(self) -> Cbor {
-        ciborium::Value::Array(self.0.into_iter().map(|v| v.to_cbor().into()).collect()).into()
+        ciborium::Value::Array(self.0.into_iter().map(|v| v.to_cbor().into()).collect())
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -47,7 +49,8 @@ impl ToCbor for DomesticVehicleRestrictions {
                 .map(|v| v.to_cbor().into())
                 .collect(),
         )
-        .into()
+        .try_into()
+        .unwrap()
     }
 }
 
@@ -71,7 +74,8 @@ impl ToCbor for DomesticVehicleEndorsements {
                 .map(|v| v.to_cbor().into())
                 .collect(),
         )
-        .into()
+        .try_into()
+        .unwrap()
     }
 }
 

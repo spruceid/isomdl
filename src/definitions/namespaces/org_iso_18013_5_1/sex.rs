@@ -19,7 +19,7 @@ pub enum Error {
 
 impl From<Sex> for Cbor {
     fn from(s: Sex) -> Cbor {
-        u8::from(s).into()
+        u8::from(s).try_into().unwrap()
     }
 }
 

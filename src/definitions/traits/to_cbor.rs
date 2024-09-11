@@ -39,7 +39,7 @@ where
 
 impl ToCbor for Option<String> {
     fn to_cbor(self) -> Value {
-        self.map(|s| ciborium::Value::Text(s).into())
-            .unwrap_or_else(|| ciborium::Value::Null.into())
+        self.map(|s| ciborium::Value::Text(s).try_into().unwrap())
+            .unwrap_or_else(|| ciborium::Value::Null.try_into().unwrap())
     }
 }

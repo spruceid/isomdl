@@ -1,7 +1,7 @@
 use coset::AsCborValue;
 use serde::{Deserialize, Serialize};
 
-/// This is a small helper wrapper to deal with `coset`` types that don't
+/// This is a small helper wrapper to deal with `coset` types that don't
 /// implement `Serialize`/`Deserialize` but only `AsCborValue`.
 pub struct SerializedAsCborValue<T>(pub T);
 

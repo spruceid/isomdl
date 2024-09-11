@@ -14,7 +14,9 @@ pub struct FullDate(Date);
 
 impl From<FullDate> for Cbor {
     fn from(d: FullDate) -> Cbor {
-        ciborium::Value::Tag(1004, Box::new(ciborium::Value::Text(d.to_string()))).into()
+        ciborium::Value::Tag(1004, Box::new(ciborium::Value::Text(d.to_string())))
+            .try_into()
+            .unwrap()
     }
 }
 

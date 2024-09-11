@@ -131,3 +131,4 @@ stateDiagram
 
 You can see the full example in [simulated_device_and_reader](tests/simulated_device_and_reader.rs) and a version that
 uses `State` pattern, `Arc` and `Mutex` [simulated_device_and_reader](tests/simulated_device_and_reader_state.rs).
+

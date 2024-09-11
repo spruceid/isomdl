@@ -25,6 +25,8 @@ pub enum Error {
     Tag24Error,
     #[error("Could not deserialize from cbor")]
     CborError,
+    #[error("Could not deserialize from cbor")]
+    CborErrorWithSource(CborError),
     #[error("NFC Command Data Length must be between 255 and 65535")]
     InvalidNfcCommandDataLengthError,
     #[error("NFC Response Data Length must be between 256 and 65536")]

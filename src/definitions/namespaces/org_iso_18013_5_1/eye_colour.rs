@@ -43,7 +43,9 @@ impl EyeColour {
 
 impl From<EyeColour> for Cbor {
     fn from(h: EyeColour) -> Cbor {
-        ciborium::Value::Text(h.to_str().to_string()).into()
+        ciborium::Value::Text(h.to_str().to_string())
+            .try_into()
+            .unwrap()
     }
 }
 

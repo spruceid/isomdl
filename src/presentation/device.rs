@@ -142,6 +142,8 @@ pub enum Error {
     /// `age_over` element identifier is malformed.
     #[error("age_over element identifier is malformed")]
     PrefixError,
+    #[error("Could not serialize to cbor: {0}")]
+    CborError(CborError),
 }
 
 /// The documents the device owns.
@@ -444,8 +446,13 @@ impl SessionManager {
                     p.submit_next_signature(signature);
                     if p.is_complete() {
                         let response = p.finalize_response();
+                        let bytes = cbor::to_vec(&response)?;
+                        println!("bytes {}", hex::encode(&bytes));
+                        let response2: DeviceResponse = cbor::from_slice(&bytes).unwrap();
+                        let bytes2 = cbor::to_vec(&response2)?;
+                        assert_eq!(bytes, bytes2);
                         let mut status: Option<session::Status> = None;
-                        let response_bytes = crate::cbor::to_vec(&response)?;
+                        let response_bytes = cbor::to_vec(&response)?;
                         let encrypted_response = session::encrypt_device_data(
                             &self.sk_device.into(),
                             &response_bytes,
@@ -898,7 +905,8 @@ pub fn nearest_age_attestation(
 
     let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
         age_over_claims_numerical?.into_iter().partition(|x| {
-            x.1.to_owned().into_inner().element_value == ciborium::Value::Bool(true).into()
+            x.1.to_owned().into_inner().element_value
+                == ciborium::Value::Bool(true).try_into().unwrap()
         });
 
     let nearest_age_over = true_age_over_claims
@@ -1037,21 +1045,21 @@ mod test {
             digest_id: DigestId::new(1),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier1.clone(),
-            element_value: ciborium::Value::Bool(true).into(),
+            element_value: ciborium::Value::Bool(true).try_into().unwrap(),
         };
 
         let issuer_signed_item2 = IssuerSignedItem {
             digest_id: DigestId::new(2),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier2.clone(),
-            element_value: ciborium::Value::Bool(false).into(),
+            element_value: ciborium::Value::Bool(false).try_into().unwrap(),
         };
 
         let issuer_signed_item3 = IssuerSignedItem {
             digest_id: DigestId::new(3),
             random: ByteStr::from(random),
             element_identifier: element_identifier3.clone(),
-            element_value: ciborium::Value::Bool(false).into(),
+            element_value: ciborium::Value::Bool(false).try_into().unwrap(),
         };
 
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();

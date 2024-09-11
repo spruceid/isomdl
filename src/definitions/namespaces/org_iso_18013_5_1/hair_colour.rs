@@ -43,7 +43,9 @@ impl HairColour {
 
 impl From<HairColour> for Cbor {
     fn from(h: HairColour) -> Cbor {
-        ciborium::Value::Text(h.to_str().to_string()).into()
+        ciborium::Value::Text(h.to_str().to_string())
+            .try_into()
+            .unwrap()
     }
 }
 

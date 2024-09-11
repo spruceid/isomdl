@@ -33,7 +33,7 @@ impl AsRef<[u8]> for ByteStr {
 
 impl From<ByteStr> for CborValue {
     fn from(ByteStr(bytes): ByteStr) -> CborValue {
-        ciborium::Value::Bytes(bytes).into()
+        ciborium::Value::Bytes(bytes).try_into().unwrap()
     }
 }
 

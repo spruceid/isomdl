@@ -125,13 +125,21 @@ impl TryFrom<u64> for Status {
 
 #[cfg(test)]
 mod test {
-    use super::DeviceResponse;
+    use coset::{CoseMac0, CoseSign1};
+    use super::{DeviceResponse, DocumentError, DocumentErrorCode, DocumentErrors, Documents, Status};
     use hex::FromHex;
+    use crate::cbor;
+    use crate::cose::MaybeTagged;
+    use crate::definitions::{DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem};
+    use crate::definitions::device_signed::{DeviceNamespaces, DeviceNamespacesBytes, DeviceSignedItems};
+    use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
+    use crate::definitions::issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes};
 
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
+    const RFC8392_MAC0: &str = "d18443a10126a104524173796d6d657472696345434453413235365850a70175636f61703a2f2f61732e6578616d706c652e636f6d02656572696b77037818636f61703a2f2f6c696768742e6578616d706c652e636f6d041a5612aeb0051a5610d9f0061a5610d9f007420b715820a377dfe17a3c3c3bdb363c426f85d3c1a1f11007765965017602f207700071b0";
 
     #[test]
-    fn serde_device_response() {
+    fn device_response() {
         let cbor_bytes =
             <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");
         let response: DeviceResponse =
@@ -140,6 +148,58 @@ mod test {
             serde_cbor::to_vec(&response).expect("unable to encode DeviceResponse as cbor bytes");
         assert_eq!(
             cbor_bytes, roundtripped_bytes,
+            "original cbor and re-serialized DeviceResponse do not match"
+        );
+    }
+
+    #[test]
+    fn device_response_roundtrip() {
+        static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
+        static COSE_MAC0: &str = include_str!("../../test/definitions/cose/mac0/serialized.cbor");
+
+        let bytes = Vec::<u8>::from_hex(COSE_SIGN1).unwrap();
+        let mut cose_sign1: MaybeTagged<CoseSign1> =
+            cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
+        let bytes = Vec::<u8>::from_hex(COSE_MAC0).unwrap();
+        let mut cose_mac0: MaybeTagged<CoseMac0> =
+            cbor::from_slice(&bytes).expect("failed to parse COSE_MAC0 from bytes");
+
+        let issuer_signed_item = IssuerSignedItem {
+            digest_id: DigestId::new(42),
+            random: vec![42_u8].into(),
+            element_identifier: "42".to_string(),
+            element_value: ciborium::Value::Null.try_into().unwrap(),
+        };
+        let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
+        let vec = NonEmptyVec::new(issuer_signed_item_bytes);
+        let issuer_namespaces = IssuerNamespaces::new("a".to_string(), vec);
+        let device_signed_items = DeviceSignedItems::new("a".to_string(), ciborium::Value::Null.try_into().unwrap());
+        let mut device_namespaces = DeviceNamespaces::new();
+        device_namespaces.insert("a".to_string(), device_signed_items);
+        let device_namespaces_bytes = DeviceNamespacesBytes::new(device_namespaces).unwrap();
+        let doc = Document {
+            doc_type: "aaa".to_string(),
+            issuer_signed: IssuerSigned { namespaces: Some(issuer_namespaces), issuer_auth: cose_sign1.clone() },
+            device_signed: DeviceSigned { namespaces: device_namespaces_bytes, device_auth: DeviceAuth::Mac { device_mac: cose_mac0 } },
+            errors: None,
+        };
+        let docs = Documents::new(doc);
+        let document_error_code = DocumentErrorCode::DataNotReturned;
+        let mut error = DocumentError::new();
+        error.insert("a".to_string(), document_error_code);
+        let errors = DocumentErrors::new(error);
+        let res = DeviceResponse {
+            version: "1.0".to_string(),
+            documents: Some(docs),
+            document_errors: Some(errors),
+            status: Status::OK,
+        };
+        let bytes = cbor::to_vec(&res).unwrap();
+        eprintln!("bytes {}", hex::encode(&bytes));
+        let res: DeviceResponse = cbor::from_slice(&bytes).unwrap();
+        let roundtripped_bytes = cbor::to_vec(&res).unwrap();
+        assert_eq!(
+            bytes, roundtripped_bytes,
             "original cbor and re-serialized DeviceResponse do not match"
         );
     }

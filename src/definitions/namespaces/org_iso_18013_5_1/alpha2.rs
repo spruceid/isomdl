@@ -266,7 +266,7 @@ pub enum Error {
 impl From<Alpha2> for Cbor {
     fn from(a: Alpha2) -> Cbor {
         let cbor: ciborium::Value = a.as_str().to_string().into();
-        cbor.into()
+        cbor.try_into().unwrap()
     }
 }
 

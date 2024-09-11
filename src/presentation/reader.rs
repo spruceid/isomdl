@@ -83,6 +83,8 @@ pub enum Error {
     /// Request for data is invalid.
     #[error("Request for data is invalid.")]
     InvalidRequest,
+    #[error("Could not serialize to cbor: {0}")]
+    CborError(CborError),
 }
 
 impl From<coset::CoseError> for Error {
@@ -307,7 +309,7 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
         ciborium::Value::Array(v) => {
             let mut array_response = Vec::<Value>::new();
             for a in v {
-                let r = parse_response(a.into())?;
+                let r = parse_response(a.try_into()?)?;
                 array_response.push(r);
             }
             Ok(json!(array_response))
@@ -316,7 +318,7 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             let mut map_response = serde_json::Map::<String, Value>::new();
             for (key, value) in m {
                 if let ciborium::Value::Text(k) = key {
-                    let parsed = parse_response(value.into())?;
+                    let parsed = parse_response(value.try_into()?)?;
                     map_response.insert(k, parsed);
                 }
             }

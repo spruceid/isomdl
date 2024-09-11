@@ -102,9 +102,9 @@ fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenSt
                 fn to_cbor(self) -> Value {
                     let map = self.to_ns_map()
                         .into_iter()
-                        .map(|(k, v)| (ciborium::Value::Text(k), v.into()))
+                        .map(|(k, v)| (ciborium::Value::Text(k), v.try_into().unwrap()))
                         .collect();
-                    ciborium::Value::Map(map).into()
+                    ciborium::Value::Map(map).try_into().unwrap()
                 }
             }
         }
