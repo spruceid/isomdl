@@ -454,7 +454,10 @@ fn parse_namespaces(
                 }
             });
 
-        parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
+        parsed_response.insert(
+            "org.iso.18013.5.1".to_string(),
+            serde_json::to_value(core_namespace)?,
+        );
     }
 
     if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
