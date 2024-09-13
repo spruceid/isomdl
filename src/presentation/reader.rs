@@ -253,20 +253,28 @@ impl SessionManager {
             .ok_or(Error::NoMdlDataTransmission)?
             .into_inner();
 
-        namespaces
-            .remove("org.iso.18013.5.1")
-            .ok_or(Error::IncorrectNamespace)?
-            .into_inner()
-            .into_iter()
-            .map(|item| item.into_inner())
-            .for_each(|item| {
-                let value = parse_response(item.element_value.clone());
-                if let Ok(val) = value {
-                    core_namespace.insert(item.element_identifier, val);
-                }
-            });
+        // Check if at least one of the two namespaces exists
+        let namespace_1_exists = namespaces.contains_key("org.iso.18013.5.1");
+        let namespace_2_exists = namespaces.contains_key("org.iso.18013.5.1.aamva");
 
-        parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
+        if !namespace_1_exists && !namespace_2_exists {
+            return Err(Error::IncorrectNamespace);
+        }
+
+        if let Some(core_response) = namespaces.remove("org.iso.18013.5.1") {
+            core_response
+                .into_inner()
+                .into_iter()
+                .map(|item| item.into_inner())
+                .for_each(|item| {
+                    let value = parse_response(item.element_value.clone());
+                    if let Ok(val) = value {
+                        core_namespace.insert(item.element_identifier, val);
+                    }
+                });
+
+            parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
+        }
 
         if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
             aamva_response
