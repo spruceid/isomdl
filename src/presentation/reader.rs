@@ -435,10 +435,27 @@ fn parse_namespaces(
             }
         });
 
-    parsed_response.insert(
-        "org.iso.18013.5.1".to_string(),
-        serde_json::to_value(core_namespace)?,
-    );
+    // Check if at least one of the two namespaces exists
+    if !namespaces.contains_key("org.iso.18013.5.1")
+        && !namespaces.contains_key("org.iso.18013.5.1.aamva")
+    {
+        return Err(Error::IncorrectNamespace);
+    }
+
+    if let Some(core_response) = namespaces.remove("org.iso.18013.5.1") {
+        core_response
+            .into_inner()
+            .into_iter()
+            .map(|item| item.into_inner())
+            .for_each(|item| {
+                let value = parse_response(item.element_value.clone());
+                if let Ok(val) = value {
+                    core_namespace.insert(item.element_identifier, val);
+                }
+            });
+
+        parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
+    }
 
     if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
         aamva_response
@@ -462,12 +479,12 @@ fn parse_namespaces(
 
 #[cfg(test)]
 pub mod test {
+    use super::*;
     use crate::{
         definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry},
         definitions::x509::{error::Error as X509Error, x5chain::X509, X5Chain},
     };
     use anyhow::anyhow;
-    use super::*;
 
     #[test]
     fn nested_response_values() {
