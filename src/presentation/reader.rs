@@ -254,10 +254,7 @@ impl SessionManager {
             .into_inner();
 
         // Check if at least one of the two namespaces exists
-        let core_namespace_exists = namespaces.contains_key("org.iso.18013.5.1");
-        let aamva_namespace_exists = namespaces.contains_key("org.iso.18013.5.1.aamva");
-
-        if !core_namespace_exists && !aamva_namespace_exists {
+        if !namespaces.contains_key("org.iso.18013.5.1") && !namespaces.contains_key("org.iso.18013.5.1.aamva") {
             return Err(Error::IncorrectNamespace);
         }
 
