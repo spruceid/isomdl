@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use serde_json::Value as Json;
 
@@ -18,7 +17,7 @@ pub enum Error {
 }
 
 impl ToCbor for CountyCode {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         let CountyCode((a, b, c)) = self;
         format!("{a}{b}{c}").into()
     }

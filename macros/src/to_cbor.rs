@@ -86,7 +86,7 @@ fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenSt
 
     let output = quote! {
         mod #mod_name {
-            use #isomdl_path::cbor::Value;
+            use ciborium::Value;
             use super::*;
             use #isomdl_path::definitions::traits::{ToCbor, ToNamespaceMap};
             impl ToNamespaceMap for #ident {
@@ -104,7 +104,7 @@ fn named_fields(isomdl_path: Ident, ident: Ident, input: FieldsNamed) -> TokenSt
                         .into_iter()
                         .map(|(k, v)| (ciborium::Value::Text(k), v.try_into().unwrap()))
                         .collect();
-                    ciborium::Value::Map(map).try_into().unwrap()
+                    Value::Map(map)
                 }
             }
         }
@@ -140,9 +140,8 @@ fn unnamed_fields(isomdl_path: Ident, ident: Ident, mut input: FieldsUnnamed) ->
         mod #mod_name {
             use super::*;
             use #isomdl_path::definitions::traits::{ToCbor, ToCborError};
-            use #isomdl_path::cbor::Value
             impl ToCbor for #ident {
-                fn to_cbor(self) -> Value {
+                fn to_cbor(self) -> ciborium::Value {
                     <#field_type as ToCbor>::to_cbor(self)
                 }
             }

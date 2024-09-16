@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::{ops::Deref, str::FromStr};
 
@@ -27,8 +26,8 @@ impl Deref for Latin1 {
     }
 }
 
-impl From<Latin1> for Cbor {
-    fn from(l: Latin1) -> Cbor {
+impl From<Latin1> for ciborium::Value {
+    fn from(l: Latin1) -> ciborium::Value {
         l.0.into()
     }
 }

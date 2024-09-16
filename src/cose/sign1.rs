@@ -279,16 +279,15 @@ mod p384 {
 
 #[cfg(test)]
 mod tests {
+    use crate::cbor;
+    use crate::cose::sign1::{CoseSign1, Error, PreparedCoseSign1};
+    use crate::cose::{MaybeTagged, SignatureAlgorithm};
     use coset::cwt::{ClaimsSet, Timestamp};
     use coset::{iana, CborSerializable, Header};
     use hex::FromHex;
     use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
     use p256::SecretKey;
     use signature::{SignatureEncoding, Signer};
-
-    use crate::cbor;
-    use crate::cose::sign1::{CoseSign1, Error, PreparedCoseSign1};
-    use crate::cose::{MaybeTagged, SignatureAlgorithm};
 
     static COSE_SIGN1: &str = include_str!("../../test/definitions/cose/sign1/serialized.cbor");
     static COSE_KEY: &str = include_str!("../../test/definitions/cose/sign1/secret_key");

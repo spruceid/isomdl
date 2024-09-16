@@ -51,7 +51,7 @@ pub struct ItemsRequest {
 
     /// Additional information for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_info: Option<BTreeMap<String, crate::cbor::Value>>,
+    pub request_info: Option<BTreeMap<String, ciborium::Value>>,
 }
 
 impl DeviceRequest {

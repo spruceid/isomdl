@@ -125,9 +125,6 @@ impl TryFrom<u64> for Status {
 
 #[cfg(test)]
 mod test {
-    use coset::{CoseMac0, CoseSign1};
-    use hex::FromHex;
-
     use crate::cbor;
     use crate::cose::MaybeTagged;
     use crate::definitions::device_signed::{
@@ -138,6 +135,8 @@ mod test {
     use crate::definitions::{
         DeviceAuth, DeviceSigned, DigestId, Document, IssuerSigned, IssuerSignedItem,
     };
+    use coset::{CoseMac0, CoseSign1};
+    use hex::FromHex;
 
     use super::{
         DeviceResponse, DocumentError, DocumentErrorCode, DocumentErrors, Documents, Status,
@@ -146,14 +145,13 @@ mod test {
     static DEVICE_RESPONSE_CBOR: &str = include_str!("../../test/definitions/device_response.cbor");
 
     #[test]
-    #[ignore]
     fn device_response() {
         let cbor_bytes =
             <Vec<u8>>::from_hex(DEVICE_RESPONSE_CBOR).expect("unable to convert cbor hex to bytes");
         let response: DeviceResponse =
-            serde_cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as a DeviceResponse");
+            cbor::from_slice(&cbor_bytes).expect("unable to decode cbor as a DeviceResponse");
         let roundtripped_bytes =
-            serde_cbor::to_vec(&response).expect("unable to encode DeviceResponse as cbor bytes");
+            cbor::to_vec(&response).expect("unable to encode DeviceResponse as cbor bytes");
         assert_eq!(
             cbor_bytes, roundtripped_bytes,
             "original cbor and re-serialized DeviceResponse do not match"
@@ -176,13 +174,12 @@ mod test {
             digest_id: DigestId::new(42),
             random: vec![42_u8].into(),
             element_identifier: "42".to_string(),
-            element_value: ciborium::Value::Null.try_into().unwrap(),
+            element_value: ciborium::Value::Null,
         };
         let issuer_signed_item_bytes = IssuerSignedItemBytes::new(issuer_signed_item).unwrap();
         let vec = NonEmptyVec::new(issuer_signed_item_bytes);
         let issuer_namespaces = IssuerNamespaces::new("a".to_string(), vec);
-        let device_signed_items =
-            DeviceSignedItems::new("a".to_string(), ciborium::Value::Null.try_into().unwrap());
+        let device_signed_items = DeviceSignedItems::new("a".to_string(), ciborium::Value::Null);
         let mut device_namespaces = DeviceNamespaces::new();
         device_namespaces.insert("a".to_string(), device_signed_items);
         let device_namespaces_bytes = DeviceNamespacesBytes::new(device_namespaces).unwrap();
@@ -212,7 +209,6 @@ mod test {
             status: Status::OK,
         };
         let bytes = cbor::to_vec(&res).unwrap();
-        eprintln!("bytes {}", hex::encode(&bytes));
         let res: DeviceResponse = cbor::from_slice(&bytes).unwrap();
         let roundtripped_bytes = cbor::to_vec(&res).unwrap();
         assert_eq!(

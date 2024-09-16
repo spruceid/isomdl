@@ -1,7 +1,8 @@
 //! Support for embedded
 //! [CBOR Data Items](https://www.ietf.org/rfc/rfc8949.html#name-encoded-cbor-data-item),
 //! also known as a tagged data item with tag number 24.
-use crate::cbor::{from_slice, to_vec, CborError, Value as CborValue};
+use crate::cbor;
+use crate::cbor::CborError;
 use serde::{
     de::{self, Error as DeError},
     ser, Deserialize, Serialize,
@@ -39,26 +40,26 @@ impl<T> Tag24<T> {
 
 impl<T: Serialize> Tag24<T> {
     pub fn new(inner: T) -> Result<Tag24<T>> {
-        let inner_bytes = to_vec(&inner).map_err(Error::UnableToEncode)?;
+        let inner_bytes = cbor::to_vec(&inner).map_err(Error::UnableToEncode)?;
         Ok(Self { inner, inner_bytes })
     }
 }
 
 impl<T: de::DeserializeOwned> Tag24<T> {
     pub fn from_bytes(inner_bytes: Vec<u8>) -> Result<Tag24<T>> {
-        let inner = from_slice(&inner_bytes).map_err(Error::UnableToDecode)?;
+        let inner = cbor::from_slice(&inner_bytes).map_err(Error::UnableToDecode)?;
         Ok(Self { inner, inner_bytes })
     }
 }
 
-impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
+impl<T: de::DeserializeOwned> TryFrom<ciborium::Value> for Tag24<T> {
     type Error = Error;
 
-    fn try_from(v: CborValue) -> Result<Tag24<T>> {
-        match v.clone().into() {
+    fn try_from(v: ciborium::Value) -> Result<Tag24<T>> {
+        match v.clone() {
             ciborium::Value::Tag(24, inner_value) => match inner_value.as_ref() {
                 ciborium::Value::Bytes(inner_bytes) => {
-                    let inner: T = from_slice(inner_bytes).map_err(Error::UnableToDecode)?;
+                    let inner: T = cbor::from_slice(inner_bytes).map_err(Error::UnableToDecode)?;
                     Ok(Tag24 {
                         inner,
                         inner_bytes: inner_bytes.to_vec(),
@@ -66,16 +67,14 @@ impl<T: de::DeserializeOwned> TryFrom<CborValue> for Tag24<T> {
                 }
                 _ => Err(Error::InvalidTag24(inner_value)),
             },
-            _ => Err(Error::NotATag24(v.into())),
+            _ => Err(Error::NotATag24(v)),
         }
     }
 }
 
-impl<T> From<Tag24<T>> for CborValue {
-    fn from(Tag24 { inner_bytes, .. }: Tag24<T>) -> CborValue {
+impl<T> From<Tag24<T>> for ciborium::Value {
+    fn from(Tag24 { inner_bytes, .. }: Tag24<T>) -> ciborium::Value {
         ciborium::Value::Tag(24, Box::new(ciborium::Value::Bytes(inner_bytes)))
-            .try_into()
-            .unwrap()
     }
 }
 
@@ -100,9 +99,7 @@ impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Tag24<T> {
     where
         D: de::Deserializer<'de>,
     {
-        let cbor: CborValue = ciborium::Value::deserialize(d)?
-            .try_into()
-            .map_err(DeError::custom)?;
+        let cbor: ciborium::Value = ciborium::Value::deserialize(d)?;
         cbor.try_into().map_err(D::Error::custom)
     }
 }

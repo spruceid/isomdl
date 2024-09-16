@@ -1,5 +1,5 @@
 use super::FullDate;
-use crate::cbor::Value as Cbor;
+
 use crate::{
     definitions::{helpers::NonEmptyVec, traits::ToCbor},
     macros::{FromJson, ToCbor},
@@ -12,10 +12,8 @@ use crate::{
 pub struct DomesticDrivingPrivileges(Vec<DomesticDrivingPrivilege>);
 
 impl ToCbor for DomesticDrivingPrivileges {
-    fn to_cbor(self) -> Cbor {
-        ciborium::Value::Array(self.0.into_iter().map(|v| v.to_cbor().into()).collect())
-            .try_into()
-            .unwrap()
+    fn to_cbor(self) -> ciborium::Value {
+        ciborium::Value::Array(self.0.into_iter().map(|v| v.to_cbor()).collect())
     }
 }
 
@@ -41,16 +39,14 @@ pub struct DomesticVehicleClass {
 pub struct DomesticVehicleRestrictions(NonEmptyVec<DomesticVehicleRestriction>);
 
 impl ToCbor for DomesticVehicleRestrictions {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         ciborium::Value::Array(
             self.0
                 .into_inner()
                 .into_iter()
-                .map(|v| v.to_cbor().into())
+                .map(|v| v.to_cbor())
                 .collect(),
         )
-        .try_into()
-        .unwrap()
     }
 }
 
@@ -66,16 +62,14 @@ pub struct DomesticVehicleRestriction {
 pub struct DomesticVehicleEndorsements(NonEmptyVec<DomesticVehicleEndorsement>);
 
 impl ToCbor for DomesticVehicleEndorsements {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         ciborium::Value::Array(
             self.0
                 .into_inner()
                 .into_iter()
-                .map(|v| v.to_cbor().into())
+                .map(|v| v.to_cbor())
                 .collect(),
         )
-        .try_into()
-        .unwrap()
     }
 }
 

@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use signature::{SignatureEncoding, Signer};
 
-use crate::cbor::Value as CborValue;
 use crate::cose::sign1::PreparedCoseSign1;
 use crate::cose::{MaybeTagged, SignatureAlgorithm};
 use crate::{
@@ -21,7 +20,7 @@ use crate::{
     issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
 
-pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
+pub type Namespaces = BTreeMap<String, BTreeMap<String, ciborium::Value>>;
 
 /// A signed mdoc.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -371,7 +370,7 @@ fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
 }
 
 fn to_issuer_signed_items(
-    elements: BTreeMap<String, CborValue>,
+    elements: BTreeMap<String, ciborium::Value>,
 ) -> impl Iterator<Item = IssuerSignedItem> {
     let mut used_ids = HashSet::new();
     elements.into_iter().map(move |(key, value)| {

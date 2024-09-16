@@ -15,7 +15,8 @@
 //! # Conversion to and from CBOR
 //!
 //! The [ValidityInfo] struct also provides implementations of the [TryFrom] trait for converting
-//! to and from [CborValue], which is a type provided by the [serde_cbor] crate for representing CBOR values.  
+//! to and from [`ciborium::Value`],
+//! which is a type provided by the [`ciborium`] crate for representing CBOR values.
 //! These implementations allow you to convert [ValidityInfo] objects to `CBOR` format and vice versa.
 //!
 //! # Dependencies
@@ -23,11 +24,11 @@
 //! This module depends on the following external crates:
 //!
 //! - [serde]: Provides the serialization and deserialization traits and macros.
-//! - [serde_cbor]: Provides the `CBOR` serialization and deserialization functionality.
+//! - [ciborium] and [coset]: Provides the `CBOR` serialization and deserialization functionality.
 //! - [std::collections::BTreeMap]: Provides the [BTreeMap] type for storing key-value pairs in a sorted order.
 //! - [time]: Provides date and time manipulation functionality.
 //! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
-use crate::cbor::{CborError, Value as CborValue};
+use crate::cbor::CborError;
 use serde::{
     ser::{Error as SerError, Serializer},
     Deserialize, Serialize,
@@ -39,7 +40,7 @@ use time::{
 };
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(try_from = "CborValue")]
+#[serde(try_from = "ciborium::Value")]
 pub struct ValidityInfo {
     pub signed: OffsetDateTime,
     pub valid_from: OffsetDateTime,
@@ -66,13 +67,15 @@ pub enum Error {
     #[error("Failed to parse date string as rfc3339 date: {0}")]
     UnableToParseDate(#[from] ParseError),
     #[error("Could not serialize to cbor: {0}")]
-    CborError(CborError),
+    CborErrorWithSource(CborError),
+    #[error("Could not serialize to cbor")]
+    CborError,
 }
 
-impl TryFrom<ValidityInfo> for CborValue {
+impl TryFrom<ValidityInfo> for ciborium::Value {
     type Error = Error;
 
-    fn try_from(v: ValidityInfo) -> Result<CborValue> {
+    fn try_from(v: ValidityInfo) -> Result<ciborium::Value> {
         macro_rules! insert_date {
             ($map:ident, $date:ident, $name:literal) => {
                 let key = ciborium::Value::Text(String::from($name));
@@ -103,29 +106,25 @@ impl TryFrom<ValidityInfo> for CborValue {
             insert_date!(map, expected_update, "expectedUpdate");
         }
 
-        ciborium::Value::Map(map)
-            .try_into()
-            .map_err(Error::CborError)
+        Ok(ciborium::Value::Map(map))
     }
 }
 
-impl TryFrom<CborValue> for ValidityInfo {
+impl TryFrom<ciborium::Value> for ValidityInfo {
     type Error = Error;
 
-    fn try_from(v: CborValue) -> Result<ValidityInfo> {
-        if let ciborium::Value::Map(map) = v.clone().into() {
-            let mut map = map
+    fn try_from(v: ciborium::Value) -> Result<ValidityInfo> {
+        if let ciborium::Value::Map(map) = v.clone() {
+            let mut map: BTreeMap<String, ciborium::Value> = map
                 .into_iter()
                 .map(|(k, v)| {
-                    let k: CborValue = k.try_into().map_err(Error::CborError)?;
-                    let v: CborValue = v.try_into().map_err(Error::CborError)?;
+                    let k = k.into_text().map_err(|_| Error::CborError)?;
                     Ok((k, v))
                 })
-                .collect::<Result<BTreeMap<CborValue, CborValue>>>()?;
+                .collect::<Result<BTreeMap<_, _>>>()?;
             macro_rules! extract_date {
                 ($map:ident, $name:literal) => {{
-                    let key = CborValue::from(ciborium::Value::Text(String::from($name)))
-                        .map_err(Error::CborError)?;
+                    let key = String::from($name);
                     $map.remove(&key)
                         .ok_or(Error::MissingField(key.into()))
                         .and_then(cbor_to_datetime)?
@@ -136,10 +135,7 @@ impl TryFrom<CborValue> for ValidityInfo {
             let valid_from = extract_date!(map, "validFrom");
             let valid_until = extract_date!(map, "validUntil");
 
-            let expected_update_key: CborValue =
-                ciborium::Value::Text(String::from("expectedUpdate"))
-                    .try_into()
-                    .map_err(Error::CborError)?;
+            let expected_update_key = String::from("expectedUpdate");
             let expected_update = map
                 .remove(&expected_update_key)
                 .map(cbor_to_datetime)
@@ -152,7 +148,7 @@ impl TryFrom<CborValue> for ValidityInfo {
                 expected_update,
             })
         } else {
-            Err(Error::NotAMap(v.into()))
+            Err(Error::NotAMap(v))
         }
     }
 }
@@ -162,21 +158,21 @@ impl Serialize for ValidityInfo {
     where
         S: Serializer,
     {
-        CborValue::try_from(self.clone())
+        ciborium::Value::try_from(self.clone())
             .map_err(S::Error::custom)?
             .serialize(s)
     }
 }
 
-fn cbor_to_datetime(v: CborValue) -> Result<OffsetDateTime> {
-    if let ciborium::Value::Tag(0, inner) = v.clone().into() {
+fn cbor_to_datetime(v: ciborium::Value) -> Result<OffsetDateTime> {
+    if let ciborium::Value::Tag(0, inner) = v.clone() {
         if let ciborium::Value::Text(date_str) = inner.as_ref() {
             Ok(OffsetDateTime::parse(date_str, &Rfc3339)?)
         } else {
             Err(Error::NotATextString(inner))
         }
     } else {
-        Err(Error::NotATag(0, v.into()))
+        Err(Error::NotATag(0, v))
     }
 }
 

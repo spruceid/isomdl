@@ -22,18 +22,20 @@
 //!     }
 //! }
 //! ```
-use crate::cbor::{CborError, Value as CborValue};
+use std::collections::BTreeMap;
+
 use aes::cipher::generic_array::{typenum::U8, GenericArray};
 use coset::iana::Algorithm;
 use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use ssi_jwk::JWK;
-use std::collections::BTreeMap;
+
+use crate::cbor::CborError;
 
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
 /// restricted to the requirements of ISO/IEC 18013-5:2021.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "CborValue", into = "CborValue")]
+#[serde(try_from = "ciborium::Value", into = "ciborium::Value")]
 pub enum CoseKey {
     EC2 { crv: EC2Curve, x: Vec<u8>, y: EC2Y },
     OKP { crv: OKPCurve, x: Vec<u8> },
@@ -72,9 +74,9 @@ pub enum Error {
     #[error("COSE_Key of kty 'EC2' missing y coordinate")]
     EC2MissingY,
     #[error("Expected to parse a CBOR bool or bstr for y-coordinate, received: '{0:?}'")]
-    InvalidTypeY(CborValue),
+    InvalidTypeY(ciborium::Value),
     #[error("Expected to parse a CBOR map, received: '{0:?}'")]
-    NotAMap(CborValue),
+    NotAMap(ciborium::Value),
     #[error("Unable to discern the elliptic curve")]
     UnknownCurve,
     #[error("This implementation of COSE_Key only supports P-256, P-384, P-521, Ed25519 and Ed448 elliptic curves"
@@ -87,7 +89,9 @@ pub enum Error {
     #[error("Constructing a JWK from CoseKey with point-compression is not supported.")]
     UnsupportedFormat,
     #[error("could not serialize from to cbor: {0}")]
-    CborError(CborError),
+    CborErrorWithSource(CborError),
+    #[error("could not serialize from to cbor")]
+    CborError,
 }
 
 impl CoseKey {
@@ -119,8 +123,8 @@ impl CoseKey {
     }
 }
 
-impl From<CoseKey> for CborValue {
-    fn from(key: CoseKey) -> CborValue {
+impl From<CoseKey> for ciborium::Value {
+    fn from(key: CoseKey) -> ciborium::Value {
         let mut map = vec![];
         match key {
             CoseKey::EC2 { crv, x, y } => {
@@ -131,8 +135,8 @@ impl From<CoseKey> for CborValue {
                 ));
                 // crv: -1
                 map.push((ciborium::Value::Integer((-1).into()), {
-                    let cbor: CborValue = crv.into();
-                    cbor.into()
+                    let cbor: ciborium::Value = crv.into();
+                    cbor
                 }));
                 // x: -2
                 map.push((
@@ -141,8 +145,8 @@ impl From<CoseKey> for CborValue {
                 ));
                 // y: -3
                 map.push((ciborium::Value::Integer((-3).into()), {
-                    let cbor: CborValue = y.into();
-                    cbor.into()
+                    let cbor: ciborium::Value = y.into();
+                    cbor
                 }));
             }
             CoseKey::OKP { crv, x } => {
@@ -153,8 +157,8 @@ impl From<CoseKey> for CborValue {
                 ));
                 // crv: -1
                 map.push((ciborium::Value::Integer((-1).into()), {
-                    let cbor: CborValue = crv.into();
-                    cbor.into()
+                    let cbor: ciborium::Value = crv.into();
+                    cbor
                 }));
                 // x: -2
                 map.push((
@@ -163,47 +167,23 @@ impl From<CoseKey> for CborValue {
                 ));
             }
         }
-        ciborium::Value::Map(map).try_into().unwrap()
+        ciborium::Value::Map(map)
     }
 }
 
-impl TryFrom<CborValue> for CoseKey {
+impl TryFrom<ciborium::Value> for CoseKey {
     type Error = Error;
 
-    fn try_from(v: CborValue) -> Result<Self, Error> {
-        if let ciborium::Value::Map(map) = v.clone().into() {
-            let mut map = map
+    fn try_from(v: ciborium::Value) -> Result<Self, Error> {
+        if let ciborium::Value::Map(map) = v.clone() {
+            let mut map: BTreeMap<i128, ciborium::Value> = map
                 .into_iter()
                 .map(|(k, v)| {
-                    Ok((
-                        CborValue::from(k).map_err(Error::CborError)?,
-                        CborValue::from(v).map_err(Error::CborError)?,
-                    ))
+                    let k = k.into_integer().map_err(|_| Error::CborError)?.into();
+                    Ok((k, v))
                 })
                 .collect::<Result<BTreeMap<_, _>, Error>>()?;
-            match (
-                map.remove(&{
-                    let cbor: CborValue = ciborium::Value::Integer(1.into())
-                        .try_into()
-                        .map_err(Error::CborError)?;
-                    cbor
-                })
-                .map(|v| v.into()),
-                map.remove(&{
-                    let cbor: CborValue = ciborium::Value::Integer((-1).into())
-                        .try_into()
-                        .map_err(Error::CborError)?;
-                    cbor
-                })
-                .map(|v| v.into()),
-                map.remove(&{
-                    let cbor: CborValue = ciborium::Value::Integer((-2).into())
-                        .try_into()
-                        .map_err(Error::CborError)?;
-                    cbor
-                })
-                .map(|v| v.into()),
-            ) {
+            match (map.remove(&1), map.remove(&-1), map.remove(&-2)) {
                 (
                     Some(ciborium::Value::Integer(i2)),
                     Some(ciborium::Value::Integer(crv_id)),
@@ -211,15 +191,7 @@ impl TryFrom<CborValue> for CoseKey {
                 ) if <ciborium::value::Integer as Into<i128>>::into(i2) == 2 => {
                     let crv_id: i128 = crv_id.into();
                     let crv = crv_id.try_into()?;
-                    let y = map
-                        .remove(&{
-                            let cbor: CborValue = ciborium::Value::Integer((-3).into())
-                                .try_into()
-                                .map_err(Error::CborError)?;
-                            cbor
-                        })
-                        .ok_or(Error::EC2MissingY)?
-                        .try_into()?;
+                    let y = map.remove(&-3).ok_or(Error::EC2MissingY)?.try_into()?;
                     Ok(Self::EC2 { crv, x, y })
                 }
                 (
@@ -285,20 +257,20 @@ impl TryFrom<CoseKey> for EncodedPoint {
     }
 }
 
-impl From<EC2Y> for CborValue {
-    fn from(y: EC2Y) -> CborValue {
+impl From<EC2Y> for ciborium::Value {
+    fn from(y: EC2Y) -> ciborium::Value {
         match y {
-            EC2Y::Value(s) => ciborium::Value::Bytes(s).try_into().unwrap(),
-            EC2Y::SignBit(b) => ciborium::Value::Bool(b).try_into().unwrap(),
+            EC2Y::Value(s) => ciborium::Value::Bytes(s),
+            EC2Y::SignBit(b) => ciborium::Value::Bool(b),
         }
     }
 }
 
-impl TryFrom<CborValue> for EC2Y {
+impl TryFrom<ciborium::Value> for EC2Y {
     type Error = Error;
 
-    fn try_from(v: CborValue) -> Result<Self, Error> {
-        match v.clone().into() {
+    fn try_from(v: ciborium::Value) -> Result<Self, Error> {
+        match v.clone() {
             ciborium::Value::Bytes(s) => Ok(EC2Y::Value(s)),
             ciborium::Value::Bool(b) => Ok(EC2Y::SignBit(b)),
             _ => Err(Error::InvalidTypeY(v)),
@@ -306,13 +278,13 @@ impl TryFrom<CborValue> for EC2Y {
     }
 }
 
-impl From<EC2Curve> for CborValue {
-    fn from(crv: EC2Curve) -> CborValue {
+impl From<EC2Curve> for ciborium::Value {
+    fn from(crv: EC2Curve) -> ciborium::Value {
         match crv {
-            EC2Curve::P256 => ciborium::Value::Integer(1.into()).try_into().unwrap(),
-            EC2Curve::P384 => ciborium::Value::Integer(2.into()).try_into().unwrap(),
-            EC2Curve::P521 => ciborium::Value::Integer(3.into()).try_into().unwrap(),
-            EC2Curve::P256K => ciborium::Value::Integer(8.into()).try_into().unwrap(),
+            EC2Curve::P256 => ciborium::Value::Integer(1.into()),
+            EC2Curve::P384 => ciborium::Value::Integer(2.into()),
+            EC2Curve::P521 => ciborium::Value::Integer(3.into()),
+            EC2Curve::P256K => ciborium::Value::Integer(8.into()),
         }
     }
 }
@@ -331,13 +303,13 @@ impl TryFrom<i128> for EC2Curve {
     }
 }
 
-impl From<OKPCurve> for CborValue {
-    fn from(crv: OKPCurve) -> CborValue {
+impl From<OKPCurve> for ciborium::Value {
+    fn from(crv: OKPCurve) -> ciborium::Value {
         match crv {
-            OKPCurve::X25519 => ciborium::Value::Integer(4.into()).try_into().unwrap(),
-            OKPCurve::X448 => ciborium::Value::Integer(5.into()).try_into().unwrap(),
-            OKPCurve::Ed25519 => ciborium::Value::Integer(6.into()).try_into().unwrap(),
-            OKPCurve::Ed448 => ciborium::Value::Integer(7.into()).try_into().unwrap(),
+            OKPCurve::X25519 => ciborium::Value::Integer(4.into()),
+            OKPCurve::X448 => ciborium::Value::Integer(5.into()),
+            OKPCurve::Ed25519 => ciborium::Value::Integer(6.into()),
+            OKPCurve::Ed448 => ciborium::Value::Integer(7.into()),
         }
     }
 }
@@ -478,9 +450,11 @@ impl TryFrom<&ssi_jwk::OctetParams> for OKPCurve {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::cbor;
     use hex::FromHex;
+
+    use crate::cbor;
+
+    use super::*;
 
     static EC_P256: &str = include_str!("../../../test/definitions/cose_key/ec_p256.cbor");
 

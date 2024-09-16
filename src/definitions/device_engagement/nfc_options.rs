@@ -1,72 +1,127 @@
-use crate::cbor::Value as CborValue;
 use crate::definitions::device_engagement::error::Error;
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
 /// The maximum length of the NFC command, as specified in ISO_18013-5 2021 Section 8.3.3.1.2
 /// Values of this type must lie between 255 and 65,535 inclusive, as specified in Note 2.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct CommandDataLength(u16);
+
+// Implement Deserialize manually to add the validation check
+impl<'de> Deserialize<'de> for CommandDataLength {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialize as an u16 first
+        let value = u16::deserialize(deserializer)?;
+
+        // Check the value
+        if value >= CommandDataLength::MIN.get() {
+            Ok(CommandDataLength(value))
+        } else {
+            Err(D::Error::custom(format!(
+                "CommandDataLength must be greater than {}",
+                CommandDataLength::MIN.get()
+            )))
+        }
+    }
+}
 
 /// The maximum length of the NFC response data, as specified in ISO_18013-5 2021 Section 8.3.3.1.2
 /// Values of this type must lie between 256 and 65,536 inclusive, as specified in Note 2.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct ResponseDataLength(u32);
 
+// Implement Deserialize manually to add the validation check
+impl<'de> Deserialize<'de> for ResponseDataLength {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialize as an u32 first
+        let value = u32::deserialize(deserializer)?;
+
+        // Check the value
+        if value >= ResponseDataLength::MIN.get() {
+            Ok(ResponseDataLength(value))
+        } else {
+            Err(D::Error::custom(format!(
+                "ResponseDataLength must be greater than {}",
+                ResponseDataLength::MIN.get()
+            )))
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(try_from = "CborValue", into = "CborValue")]
+#[serde(try_from = "ciborium::Value", into = "ciborium::Value")]
 pub struct NfcOptions {
     max_len_command_data_field: CommandDataLength,
     max_len_response_data_field: ResponseDataLength,
 }
 
-impl TryFrom<CborValue> for NfcOptions {
+impl TryFrom<ciborium::Value> for NfcOptions {
     type Error = Error;
 
-    fn try_from(v: CborValue) -> Result<Self, Error> {
-        let map: BTreeMap<CborValue, CborValue> = match v.into() {
+    fn try_from(v: ciborium::Value) -> Result<Self, Error> {
+        let mut map: BTreeMap<i128, ciborium::Value> = match v {
             ciborium::Value::Map(map) => map
                 .into_iter()
                 .map(|(k, v)| {
-                    let k = CborValue::from(k)?;
-                    let v = CborValue::from(v)?;
+                    let k = k.into_integer().map_err(|_| Error::CborError)?.into();
                     Ok((k, v))
                 })
-                .collect::<Result<BTreeMap<CborValue, CborValue>, Error>>(),
-            _ => Err(Error::InvalidNfcOptions),
-        }?;
+                .collect::<Result<BTreeMap<_, _>, Error>>()?,
+            _ => return Err(Error::InvalidNfcOptions),
+        };
 
         Ok(NfcOptions::default())
             .and_then(|nfc_opts| {
-                map.get(&{
-                    let cbor: CborValue = ciborium::Value::Integer(0.into()).try_into()?;
-                    cbor
-                })
-                .ok_or(Error::InvalidNfcOptions)
-                .and_then(CommandDataLength::try_from)
-                .map(|max_len_command_data_field| NfcOptions {
-                    max_len_command_data_field,
-                    ..nfc_opts
-                })
+                map.remove(&0)
+                    .ok_or(Error::InvalidNfcOptions)
+                    .and_then(|v| {
+                        let v: u16 = v
+                            .into_integer()
+                            .map_err(|_| Error::CborError)?
+                            .try_into()
+                            .map_err(|_| Error::CborError)?;
+                        if v < CommandDataLength::MIN.get() {
+                            return Err(Error::InvalidNfcCommandDataLengthError);
+                        }
+                        Ok(CommandDataLength(v))
+                    })
+                    .map(|max_len_command_data_field| NfcOptions {
+                        max_len_command_data_field,
+                        ..nfc_opts
+                    })
             })
             .and_then(|nfc_opts| {
-                map.get(&{
-                    let cbor: CborValue = ciborium::Value::Integer(1.into()).try_into()?;
-                    cbor
-                })
-                .ok_or(Error::InvalidNfcOptions)
-                .and_then(ResponseDataLength::try_from)
-                .map(|max_len_response_data_field| NfcOptions {
-                    max_len_response_data_field,
-                    ..nfc_opts
-                })
+                map.remove(&1)
+                    .ok_or(Error::InvalidNfcOptions)
+                    .and_then(|v| {
+                        let v: u32 = v
+                            .into_integer()
+                            .map_err(|_| Error::CborError)?
+                            .try_into()
+                            .map_err(|_| Error::CborError)?;
+                        if v < ResponseDataLength::MIN.get() {
+                            return Err(Error::InvalidNfcResponseDataLengthError);
+                        }
+                        Ok(ResponseDataLength(v))
+                    })
+                    .map(|max_len_response_data_field| NfcOptions {
+                        max_len_response_data_field,
+                        ..nfc_opts
+                    })
             })
     }
 }
 
-impl From<NfcOptions> for CborValue {
-    fn from(o: NfcOptions) -> CborValue {
+impl From<NfcOptions> for ciborium::Value {
+    fn from(o: NfcOptions) -> ciborium::Value {
         let map = vec![
             (
                 ciborium::Value::Integer(0.into()),
@@ -77,7 +132,7 @@ impl From<NfcOptions> for CborValue {
                 ciborium::Value::Integer(o.max_len_response_data_field.get().into()),
             ),
         ];
-        ciborium::Value::Map(map).try_into().unwrap()
+        ciborium::Value::Map(map)
     }
 }
 
@@ -134,22 +189,9 @@ command_data_length_try_from! {
     CommandDataLength(usize);
 }
 
-impl TryFrom<&CborValue> for CommandDataLength {
-    type Error = Error;
-
-    fn try_from(v: &CborValue) -> Result<Self, Error> {
-        match v.as_ref() {
-            ciborium::Value::Integer(int_val) => Ok(Self((*int_val).try_into().unwrap())),
-            _ => Err(Error::InvalidNfcOptions),
-        }
-    }
-}
-
-impl From<CommandDataLength> for CborValue {
-    fn from(cdl: CommandDataLength) -> CborValue {
+impl From<CommandDataLength> for ciborium::Value {
+    fn from(cdl: CommandDataLength) -> ciborium::Value {
         ciborium::Value::Integer(cdl.get().into())
-            .try_into()
-            .unwrap()
     }
 }
 
@@ -204,22 +246,9 @@ response_data_length_try_from! {
     ResponseDataLength(usize);
 }
 
-impl TryFrom<&CborValue> for ResponseDataLength {
-    type Error = Error;
-
-    fn try_from(v: &CborValue) -> Result<Self, Error> {
-        match v.as_ref() {
-            ciborium::Value::Integer(int_val) => Ok(Self((*int_val).try_into().unwrap())),
-            _ => Err(Error::InvalidNfcOptions),
-        }
-    }
-}
-
-impl From<ResponseDataLength> for CborValue {
-    fn from(rdl: ResponseDataLength) -> CborValue {
+impl From<ResponseDataLength> for ciborium::Value {
+    fn from(rdl: ResponseDataLength) -> ciborium::Value {
         ciborium::Value::Integer(rdl.get().into())
-            .try_into()
-            .unwrap()
     }
 }
 
@@ -356,14 +385,14 @@ mod test {
     #[test]
     fn response_data_length_cbor_roundtrip_test() {
         let rdl: ResponseDataLength = ResponseDataLength::new(512).unwrap();
-        let bytes: Vec<u8> = crate::cbor::to_vec(&rdl).unwrap();
-        let deserialized: ResponseDataLength = crate::cbor::from_slice(&bytes).unwrap();
+        let bytes: Vec<u8> = cbor::to_vec(&rdl).unwrap();
+        let deserialized: ResponseDataLength = cbor::from_slice(&bytes).unwrap();
         assert_eq!(rdl, deserialized);
     }
 
     fn nfc_options_cbor_roundtrip_test(nfc_options: NfcOptions) {
-        let bytes: Vec<u8> = crate::cbor::to_vec(&nfc_options).unwrap();
-        let deserialized: NfcOptions = crate::cbor::from_slice(&bytes).unwrap();
+        let bytes: Vec<u8> = cbor::to_vec(&nfc_options).unwrap();
+        let deserialized: NfcOptions = cbor::from_slice(&bytes).unwrap();
         assert_eq!(nfc_options, deserialized);
     }
 
@@ -388,7 +417,6 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     fn nfc_options_cbor_roundtrip_command_length_error_test() {
         let nfc_options: NfcOptions = NfcOptions {
             max_len_command_data_field: CommandDataLength(0), //This should not work in non-tests
@@ -398,12 +426,10 @@ mod test {
         let bytes: Vec<u8> = cbor::to_vec(&nfc_options).unwrap();
         let deserialized_result: Result<NfcOptions, Error> =
             cbor::from_slice(&bytes).map_err(Error::from);
-        println!("{:?}", deserialized_result);
         assert_eq!(Err(Error::CborError), deserialized_result);
     }
 
     #[test]
-    #[ignore]
     fn nfc_options_cbor_roundtrip_response_data_error_test() {
         let nfc_options: NfcOptions = NfcOptions {
             max_len_command_data_field: CommandDataLength(0), //This should not work in non-tests

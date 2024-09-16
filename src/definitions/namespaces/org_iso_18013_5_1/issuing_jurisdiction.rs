@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use crate::definitions::{
     namespaces::org_iso_18013_5_1::Alpha2,
     traits::{FromJson, FromJsonError, FromJsonMap},
@@ -23,8 +22,8 @@ impl Error {
     }
 }
 
-impl From<IssuingJurisdiction> for Cbor {
-    fn from(i: IssuingJurisdiction) -> Cbor {
+impl From<IssuingJurisdiction> for ciborium::Value {
+    fn from(i: IssuingJurisdiction) -> ciborium::Value {
         i.0.into()
     }
 }

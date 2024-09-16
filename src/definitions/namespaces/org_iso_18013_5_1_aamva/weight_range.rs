@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use serde_json::Value as Json;
 
@@ -42,7 +41,7 @@ impl From<WeightRange> for u8 {
 }
 
 impl ToCbor for WeightRange {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         u8::from(self).into()
     }
 }

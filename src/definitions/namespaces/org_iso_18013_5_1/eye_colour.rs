@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value as Json;
 use std::str::FromStr;
@@ -41,11 +40,9 @@ impl EyeColour {
     }
 }
 
-impl From<EyeColour> for Cbor {
-    fn from(h: EyeColour) -> Cbor {
+impl From<EyeColour> for ciborium::Value {
+    fn from(h: EyeColour) -> ciborium::Value {
         ciborium::Value::Text(h.to_str().to_string())
-            .try_into()
-            .unwrap()
     }
 }
 

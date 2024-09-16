@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use serde_json::Value as Json;
 use std::str::FromStr;
@@ -29,7 +28,7 @@ impl NameTruncation {
 }
 
 impl ToCbor for NameTruncation {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         self.to_str().to_string().into()
     }
 }

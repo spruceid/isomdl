@@ -2,24 +2,24 @@
 //! represented as a `bytestr` instead of an `array` in `cbor`.
 
 use crate::cbor;
-use crate::cbor::{CborError, Value};
+use crate::cbor::CborError;
 use std::collections::BTreeMap;
 
 pub type Bytes = Vec<u8>;
 
 pub trait ToCbor: Sized {
-    fn to_cbor(self) -> Value;
+    fn to_cbor(self) -> ciborium::Value;
     fn to_cbor_bytes(self) -> Result<Bytes, ToCborError> {
         cbor::to_vec(&self.to_cbor()).map_err(Into::into)
     }
 }
 
 pub trait ToCborMap {
-    fn to_cbor_map(self) -> BTreeMap<Value, Value>;
+    fn to_cbor_map(self) -> BTreeMap<ciborium::Value, ciborium::Value>;
 }
 
 pub trait ToNamespaceMap {
-    fn to_ns_map(self) -> BTreeMap<String, Value>;
+    fn to_ns_map(self) -> BTreeMap<String, ciborium::Value>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -30,16 +30,9 @@ pub enum ToCborError {
 
 impl<T> ToCbor for T
 where
-    T: Into<Value>,
+    T: Into<ciborium::Value>,
 {
-    fn to_cbor(self) -> Value {
+    fn to_cbor(self) -> ciborium::Value {
         self.into()
-    }
-}
-
-impl ToCbor for Option<String> {
-    fn to_cbor(self) -> Value {
-        self.map(|s| ciborium::Value::Text(s).try_into().unwrap())
-            .unwrap_or_else(|| ciborium::Value::Null.try_into().unwrap())
     }
 }

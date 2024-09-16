@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use crate::definitions::traits::{FromJson, FromJsonError};
 use serde_json::Value as Json;
 use std::str::FromStr;
@@ -263,10 +262,10 @@ pub enum Error {
     Unrecognized(String),
 }
 
-impl From<Alpha2> for Cbor {
-    fn from(a: Alpha2) -> Cbor {
+impl From<Alpha2> for ciborium::Value {
+    fn from(a: Alpha2) -> ciborium::Value {
         let cbor: ciborium::Value = a.as_str().to_string().into();
-        cbor.try_into().unwrap()
+        cbor
     }
 }
 

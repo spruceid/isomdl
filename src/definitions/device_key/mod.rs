@@ -41,7 +41,6 @@
 //! assert!(result.is_err());
 //! assert_eq!(result.unwrap_err(), Error::DoubleAuthorized("namespace1".to_string()));
 //! ```
-use crate::cbor::Value as CborValue;
 use crate::definitions::helpers::{NonEmptyMap, NonEmptyVec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -63,7 +62,7 @@ pub struct DeviceKeyInfo {
 
     /// Optional key information.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_info: Option<BTreeMap<i128, CborValue>>,
+    pub key_info: Option<BTreeMap<i128, ciborium::Value>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]

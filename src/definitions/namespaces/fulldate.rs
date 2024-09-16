@@ -1,4 +1,3 @@
-use crate::cbor::Value as Cbor;
 use anyhow::Error;
 use serde_json::Value as Json;
 use std::{fmt, str::FromStr};
@@ -12,11 +11,9 @@ const FORMAT: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]
 #[derive(Clone, Debug)]
 pub struct FullDate(Date);
 
-impl From<FullDate> for Cbor {
-    fn from(d: FullDate) -> Cbor {
+impl From<FullDate> for ciborium::Value {
+    fn from(d: FullDate) -> ciborium::Value {
         ciborium::Value::Tag(1004, Box::new(ciborium::Value::Text(d.to_string())))
-            .try_into()
-            .unwrap()
     }
 }
 

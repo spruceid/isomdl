@@ -4,7 +4,6 @@
 //!
 //! The [Error] enum represents the possible errors that can occur in this module.  
 //! - [Error::UnableToEncode]: Indicates an error when encoding a value as CBOR.
-use crate::cbor::Value as CborValue;
 use crate::cose::MaybeTagged;
 use crate::definitions::{
     helpers::{NonEmptyMap, Tag24},
@@ -28,7 +27,7 @@ pub struct DeviceSigned {
 
 pub type DeviceNamespacesBytes = Tag24<DeviceNamespaces>;
 pub type DeviceNamespaces = BTreeMap<String, DeviceSignedItems>;
-pub type DeviceSignedItems = NonEmptyMap<String, CborValue>;
+pub type DeviceSignedItems = NonEmptyMap<String, ciborium::Value>;
 
 /// Represents a device signature.
 ///

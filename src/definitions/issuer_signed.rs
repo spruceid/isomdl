@@ -10,7 +10,6 @@
 //! - [IssuerSignedItem] struct represents a signed item within the [IssuerSigned] object, including information such as digest ID, random bytes, element identifier, and element value.
 //! - [IssuerSigned] struct also includes a test module with a unit test for serialization and deserialization.
 
-use crate::cbor::Value as CborValue;
 use crate::cose::MaybeTagged;
 use crate::definitions::{
     helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
@@ -50,7 +49,7 @@ pub struct IssuerSignedItem {
     pub element_identifier: String,
 
     /// The value of the element.
-    pub element_value: CborValue,
+    pub element_value: ciborium::Value,
 }
 
 #[cfg(test)]

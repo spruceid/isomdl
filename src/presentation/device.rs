@@ -16,7 +16,7 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use crate::cbor::{CborError, Value as CborValue};
+use crate::cbor::CborError;
 use crate::cose::mac0::PreparedCoseMac0;
 use crate::cose::sign1::PreparedCoseSign1;
 use crate::cose::MaybeTagged;
@@ -316,12 +316,12 @@ impl SessionManagerEngaged {
 
 impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
-        let request: CborValue = cbor::from_slice(request).map_err(|_| {
+        let request: ciborium::Value = cbor::from_slice(request).map_err(|_| {
             // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborDecodingError)
         })?;
 
-        cbor::from_value2(request).map_err(|_| {
+        cbor::from_value(request).map_err(|_| {
             // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborValidationError)
         })
@@ -447,7 +447,6 @@ impl SessionManager {
                     if p.is_complete() {
                         let response = p.finalize_response();
                         let bytes = cbor::to_vec(&response)?;
-                        println!("bytes {}", hex::encode(&bytes));
                         let response2: DeviceResponse = cbor::from_slice(&bytes).unwrap();
                         let bytes2 = cbor::to_vec(&response2)?;
                         assert_eq!(bytes, bytes2);
@@ -905,8 +904,7 @@ pub fn nearest_age_attestation(
 
     let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
         age_over_claims_numerical?.into_iter().partition(|x| {
-            x.1.to_owned().into_inner().element_value
-                == ciborium::Value::Bool(true).try_into().unwrap()
+            x.1.to_owned().into_inner().element_value == ciborium::Value::Bool(true)
         });
 
     let nearest_age_over = true_age_over_claims
@@ -1045,21 +1043,21 @@ mod test {
             digest_id: DigestId::new(1),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier1.clone(),
-            element_value: ciborium::Value::Bool(true).try_into().unwrap(),
+            element_value: ciborium::Value::Bool(true),
         };
 
         let issuer_signed_item2 = IssuerSignedItem {
             digest_id: DigestId::new(2),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier2.clone(),
-            element_value: ciborium::Value::Bool(false).try_into().unwrap(),
+            element_value: ciborium::Value::Bool(false),
         };
 
         let issuer_signed_item3 = IssuerSignedItem {
             digest_id: DigestId::new(3),
             random: ByteStr::from(random),
             element_identifier: element_identifier3.clone(),
-            element_value: ciborium::Value::Bool(false).try_into().unwrap(),
+            element_value: ciborium::Value::Bool(false),
         };
 
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();

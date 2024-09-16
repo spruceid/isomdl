@@ -14,7 +14,7 @@
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use crate::cbor;
-use crate::cbor::{CborError, Value as CborValue};
+use crate::cbor::CborError;
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
@@ -296,8 +296,8 @@ impl SessionManager {
     }
 }
 
-fn parse_response(value: CborValue) -> Result<Value, Error> {
-    match value.into() {
+fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
+    match value {
         ciborium::Value::Text(s) => Ok(Value::String(s)),
         ciborium::Value::Tag(_t, v) => {
             if let ciborium::Value::Text(d) = *v {
@@ -309,7 +309,7 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
         ciborium::Value::Array(v) => {
             let mut array_response = Vec::<Value>::new();
             for a in v {
-                let r = parse_response(a.try_into()?)?;
+                let r = parse_response(a)?;
                 array_response.push(r);
             }
             Ok(json!(array_response))
@@ -318,7 +318,7 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             let mut map_response = serde_json::Map::<String, Value>::new();
             for (key, value) in m {
                 if let ciborium::Value::Text(k) = key {
-                    let parsed = parse_response(value.try_into()?)?;
+                    let parsed = parse_response(value)?;
                     map_response.insert(k, parsed);
                 }
             }
