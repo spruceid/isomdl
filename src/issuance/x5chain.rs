@@ -93,7 +93,7 @@ impl X5Chain {
     }
 
     /// Converts the [X5Chain] object into a [ciborium::Value].
-    pub fn into_cbor(&self) -> ciborium::Value {
+    pub fn into_cbor(self) -> ciborium::Value {
         match &self.0.as_ref() {
             &[cert] => ciborium::Value::Bytes(cert.bytes.clone()),
             certs => ciborium::Value::Array(
