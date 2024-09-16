@@ -422,19 +422,6 @@ fn parse_namespaces(
         .clone()
         .into_inner();
 
-    namespaces
-        .remove("org.iso.18013.5.1")
-        .ok_or(Error::IncorrectNamespace)?
-        .into_inner()
-        .into_iter()
-        .map(|item| item.into_inner())
-        .for_each(|item| {
-            let value = parse_response(item.element_value.clone());
-            if let Ok(val) = value {
-                core_namespace.insert(item.element_identifier, val);
-            }
-        });
-
     // Check if at least one of the two namespaces exists
     if !namespaces.contains_key("org.iso.18013.5.1")
         && !namespaces.contains_key("org.iso.18013.5.1.aamva")
