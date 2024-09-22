@@ -87,12 +87,6 @@ pub enum Error {
     CborError(CborError),
 }
 
-impl From<coset::CoseError> for Error {
-    fn from(_: coset::CoseError) -> Self {
-        Error::CborDecodingError
-    }
-}
-
 impl From<CborError> for Error {
     fn from(_: CborError) -> Self {
         Error::CborDecodingError
@@ -234,7 +228,7 @@ impl SessionManager {
         &mut self,
         response: &[u8],
     ) -> Result<BTreeMap<String, BTreeMap<String, Value>>, Error> {
-        let session_data: SessionData = crate::cbor::from_slice(response)?;
+        let session_data: SessionData = cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
             Some(r) => r,

@@ -30,6 +30,16 @@ where
     pub fn new(tagged: bool, inner: T) -> Self {
         Self { tagged, inner }
     }
+
+    /// If we are serialized as tagged.
+    pub fn is_tagged(&self) -> bool {
+        self.tagged
+    }
+
+    /// Set serialization to tagged.
+    pub fn set_tagged(&mut self) {
+        self.tagged = true;
+    }
 }
 
 impl<T> Deref for MaybeTagged<T>

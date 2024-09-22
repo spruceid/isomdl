@@ -209,16 +209,6 @@ impl MaybeTagged<CoseMac0> {
             ),
         }
     }
-
-    /// If we are serialized as tagged.
-    pub fn is_tagged(&self) -> bool {
-        self.tagged
-    }
-
-    /// Set serialization to tagged.
-    pub fn set_tagged(&mut self) {
-        self.tagged = true;
-    }
 }
 
 mod hmac {

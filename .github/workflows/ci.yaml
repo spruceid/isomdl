@@ -18,6 +18,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        if: ${{ github.event.act }}
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
       - name: Build
         run: cargo build --all-targets
 

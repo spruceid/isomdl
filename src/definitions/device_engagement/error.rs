@@ -25,8 +25,6 @@ pub enum Error {
     Tag24Error,
     #[error("Could not deserialize from cbor")]
     CborError,
-    #[error("Could not deserialize from cbor")]
-    CborErrorWithSource(CborError),
     #[error("NFC Command Data Length must be between 255 and 65535")]
     InvalidNfcCommandDataLengthError,
     #[error("NFC Response Data Length must be between 256 and 65536")]
@@ -42,12 +40,6 @@ impl From<CoseKeyError> for Error {
 impl From<Tag24Error> for Error {
     fn from(_: Tag24Error) -> Self {
         Error::Tag24Error
-    }
-}
-
-impl From<coset::CoseError> for Error {
-    fn from(_: coset::CoseError) -> Self {
-        Error::CborError
     }
 }
 

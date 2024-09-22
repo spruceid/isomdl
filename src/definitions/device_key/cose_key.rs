@@ -30,8 +30,6 @@ use p256::EncodedPoint;
 use serde::{Deserialize, Serialize};
 use ssi_jwk::JWK;
 
-use crate::cbor::CborError;
-
 /// An implementation of RFC-8152 [COSE_Key](https://datatracker.ietf.org/doc/html/rfc8152#section-13)
 /// restricted to the requirements of ISO/IEC 18013-5:2021.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,8 +86,6 @@ pub enum Error {
     InvalidCoseKey,
     #[error("Constructing a JWK from CoseKey with point-compression is not supported.")]
     UnsupportedFormat,
-    #[error("could not serialize from to cbor: {0}")]
-    CborErrorWithSource(CborError),
     #[error("could not serialize from to cbor")]
     CborError,
 }
@@ -270,7 +266,7 @@ impl TryFrom<ciborium::Value> for EC2Y {
     type Error = Error;
 
     fn try_from(v: ciborium::Value) -> Result<Self, Error> {
-        match v.clone() {
+        match v {
             ciborium::Value::Bytes(s) => Ok(EC2Y::Value(s)),
             ciborium::Value::Bool(b) => Ok(EC2Y::SignBit(b)),
             _ => Err(Error::InvalidTypeY(v)),

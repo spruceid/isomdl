@@ -4,6 +4,8 @@
 use crate::cbor;
 use crate::cbor::CborError;
 use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
 
 pub type Bytes = Vec<u8>;
 
@@ -22,10 +24,35 @@ pub trait ToNamespaceMap {
     fn to_ns_map(self) -> BTreeMap<String, ciborium::Value>;
 }
 
-#[derive(Debug, thiserror::Error)]
+// Define your error enum with just the CoseError variant
+#[derive(Debug)]
 pub enum ToCborError {
-    #[error("cbor error: {0}")]
-    CoseError(#[from] CborError),
+    CborError(CborError),
+}
+
+// Implement Display for ToCborError
+impl fmt::Display for ToCborError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ToCborError::CborError(err) => write!(f, "COSE error: {}", err),
+        }
+    }
+}
+
+// Implement Error for ToCborError
+impl Error for ToCborError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            ToCborError::CborError(err) => Some(err),
+        }
+    }
+}
+
+// Implement From<CoseError> to easily convert CoseError into ToCborError
+impl From<CborError> for ToCborError {
+    fn from(err: CborError) -> ToCborError {
+        ToCborError::CborError(err)
+    }
 }
 
 impl<T> ToCbor for T

@@ -132,7 +132,7 @@ pub enum Error {
     SharedSecretGeneration(anyhow::Error),
     /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
-    CborEncoding(CborError),
+    CborEncoding(coset::CoseError),
     /// Session manager was used incorrectly.
     #[error("session manager was used incorrectly")]
     ApiMisuse,
@@ -143,7 +143,7 @@ pub enum Error {
     #[error("age_over element identifier is malformed")]
     PrefixError,
     #[error("Could not serialize to cbor: {0}")]
-    CborError(CborError),
+    CborError(coset::CoseError),
 }
 
 /// The documents the device owns.

@@ -28,7 +28,6 @@
 //! - [std::collections::BTreeMap]: Provides the [BTreeMap] type for storing key-value pairs in a sorted order.
 //! - [time]: Provides date and time manipulation functionality.
 //! - [thiserror]: Provides the [thiserror::Error] trait for defining custom error types.
-use crate::cbor::CborError;
 use serde::{
     ser::{Error as SerError, Serializer},
     Deserialize, Serialize,
@@ -67,7 +66,7 @@ pub enum Error {
     #[error("Failed to parse date string as rfc3339 date: {0}")]
     UnableToParseDate(#[from] ParseError),
     #[error("Could not serialize to cbor: {0}")]
-    CborErrorWithSource(CborError),
+    CborErrorWithSource(coset::CoseError),
     #[error("Could not serialize to cbor")]
     CborError,
 }
