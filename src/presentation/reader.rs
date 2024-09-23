@@ -13,6 +13,8 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
+use crate::cbor;
+use crate::cbor::CborError;
 use crate::definitions::{
     device_engagement::DeviceRetrievalMethod,
     device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
@@ -25,7 +27,6 @@ use crate::definitions::{
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -82,10 +83,12 @@ pub enum Error {
     /// Request for data is invalid.
     #[error("Request for data is invalid.")]
     InvalidRequest,
+    #[error("Could not serialize to cbor: {0}")]
+    CborError(CborError),
 }
 
-impl From<serde_cbor::Error> for Error {
-    fn from(_: serde_cbor::Error) -> Self {
+impl From<CborError> for Error {
+    fn from(_: CborError) -> Self {
         Error::CborDecodingError
     }
 }
@@ -153,7 +156,7 @@ impl SessionManager {
             data: request.into(),
             e_reader_key: e_reader_key_public,
         };
-        let session_request = serde_cbor::to_vec(&session)?;
+        let session_request = cbor::to_vec(&session)?;
 
         Ok((session_manager, session_request, ble_ident))
     }
@@ -184,7 +187,7 @@ impl SessionManager {
             data: Some(request.into()),
             status: None,
         };
-        serde_cbor::to_vec(&session).map_err(Into::into)
+        cbor::to_vec(&session).map_err(Into::into)
     }
 
     fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
@@ -206,7 +209,7 @@ impl SessionManager {
             version: DeviceRequest::VERSION.to_string(),
             doc_requests: NonEmptyVec::new(doc_request),
         };
-        let device_request_bytes = serde_cbor::to_vec(&device_request)?;
+        let device_request_bytes = cbor::to_vec(&device_request)?;
         session::encrypt_reader_data(
             &self.sk_reader.into(),
             &device_request_bytes,
@@ -225,7 +228,7 @@ impl SessionManager {
         &mut self,
         response: &[u8],
     ) -> Result<BTreeMap<String, BTreeMap<String, Value>>, Error> {
-        let session_data: SessionData = serde_cbor::from_slice(response)?;
+        let session_data: SessionData = cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
             Some(r) => r,
@@ -236,7 +239,7 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
-        let response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
+        let response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
         let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
         let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
         let mut parsed_response = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
@@ -294,17 +297,17 @@ impl SessionManager {
     }
 }
 
-fn parse_response(value: CborValue) -> Result<Value, Error> {
+fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     match value {
-        CborValue::Text(s) => Ok(Value::String(s)),
-        CborValue::Tag(_t, v) => {
-            if let CborValue::Text(d) = *v {
+        ciborium::Value::Text(s) => Ok(Value::String(s)),
+        ciborium::Value::Tag(_t, v) => {
+            if let ciborium::Value::Text(d) = *v {
                 Ok(Value::String(d))
             } else {
                 Err(Error::ParsingError)
             }
         }
-        CborValue::Array(v) => {
+        ciborium::Value::Array(v) => {
             let mut array_response = Vec::<Value>::new();
             for a in v {
                 let r = parse_response(a)?;
@@ -312,10 +315,10 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             }
             Ok(json!(array_response))
         }
-        CborValue::Map(m) => {
+        ciborium::Value::Map(m) => {
             let mut map_response = serde_json::Map::<String, Value>::new();
             for (key, value) in m {
-                if let CborValue::Text(k) = key {
+                if let ciborium::Value::Text(k) = key {
                     let parsed = parse_response(value)?;
                     map_response.insert(k, parsed);
                 }
@@ -323,9 +326,9 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             let json = json!(map_response);
             Ok(json)
         }
-        CborValue::Bytes(b) => Ok(json!(b)),
-        CborValue::Bool(b) => Ok(json!(b)),
-        CborValue::Integer(i) => Ok(json!(i)),
+        ciborium::Value::Bytes(b) => Ok(json!(b)),
+        ciborium::Value::Bool(b) => Ok(json!(b)),
+        ciborium::Value::Integer(i) => Ok(json!(<ciborium::value::Integer as Into<i128>>::into(i))),
         _ => Err(Error::ParsingError),
     }
 }
@@ -356,7 +359,7 @@ mod test {
 
     #[test]
     fn nested_response_values() {
-        let domestic_driving_privileges = serde_cbor::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
+        let domestic_driving_privileges = crate::cbor::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
         let json = parse_response(domestic_driving_privileges).unwrap();
         let expected = serde_json::json!(
           [

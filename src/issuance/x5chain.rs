@@ -59,7 +59,6 @@
 //! The [X5Chain] struct also provides a [X5Chain::builder] method for creating a new [Builder] instance.
 use crate::definitions::helpers::NonEmptyVec;
 use anyhow::{anyhow, Result};
-use serde_cbor::Value as CborValue;
 use std::{fs::File, io::Read};
 use x509_cert::{
     certificate::Certificate,
@@ -93,17 +92,17 @@ impl X5Chain {
         Builder::default()
     }
 
-    /// Converts the [X5Chain] object into a [CborValue].
-    pub fn into_cbor(&self) -> CborValue {
+    /// Converts the [X5Chain] object into a [`ciborium::Value`].
+    pub fn into_cbor(self) -> ciborium::Value {
         match &self.0.as_ref() {
-            &[cert] => CborValue::Bytes(cert.bytes.clone()),
-            certs => CborValue::Array(
+            &[cert] => ciborium::Value::Bytes(cert.bytes.clone()),
+            certs => ciborium::Value::Array(
                 certs
                     .iter()
                     .cloned()
                     .map(|x509| x509.bytes)
-                    .map(CborValue::Bytes)
-                    .collect::<Vec<CborValue>>(),
+                    .map(ciborium::Value::Bytes)
+                    .collect::<Vec<ciborium::Value>>(),
             ),
         }
     }

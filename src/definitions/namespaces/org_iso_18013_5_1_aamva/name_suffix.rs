@@ -1,5 +1,4 @@
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::str::FromStr;
 
@@ -63,7 +62,7 @@ impl NameSuffix {
 }
 
 impl ToCbor for NameSuffix {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         self.to_str().to_string().into()
     }
 }

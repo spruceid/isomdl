@@ -1,5 +1,4 @@
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 
 /// `county_code` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
@@ -18,7 +17,7 @@ pub enum Error {
 }
 
 impl ToCbor for CountyCode {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         let CountyCode((a, b, c)) = self;
         format!("{a}{b}{c}").into()
     }

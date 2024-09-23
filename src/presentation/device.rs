@@ -16,8 +16,14 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
+use crate::cbor::CborError;
+use crate::cose::mac0::PreparedCoseMac0;
+use crate::cose::sign1::PreparedCoseSign1;
+use crate::cose::MaybeTagged;
+use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::IssuerSignedItem;
 use crate::{
+    cbor,
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
@@ -35,10 +41,9 @@ use crate::{
     },
     issuance::Mdoc,
 };
-use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
+use coset::{CoseMac0Builder, CoseSign1, CoseSign1Builder};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
@@ -98,6 +103,7 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     state: State,
+    device_auth_type: DeviceAuthType,
 }
 
 /// The internal states of the [SessionManager].
@@ -126,7 +132,7 @@ pub enum Error {
     SharedSecretGeneration(anyhow::Error),
     /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
-    CborEncoding(serde_cbor::Error),
+    CborEncoding(coset::CoseError),
     /// Session manager was used incorrectly.
     #[error("session manager was used incorrectly")]
     ApiMisuse,
@@ -136,6 +142,8 @@ pub enum Error {
     /// `age_over` element identifier is malformed.
     #[error("age_over element identifier is malformed")]
     PrefixError,
+    #[error("Could not serialize to cbor: {0}")]
+    CborError(coset::CoseError),
 }
 
 /// The documents the device owns.
@@ -146,7 +154,7 @@ type DocType = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub id: Uuid,
-    pub issuer_auth: CoseSign1,
+    pub issuer_auth: MaybeTagged<CoseSign1>,
     pub mso: Mso,
     pub namespaces: Namespaces,
 }
@@ -174,8 +182,23 @@ struct PreparedDocument {
     doc_type: String,
     issuer_signed: IssuerSigned,
     device_namespaces: DeviceNamespacesBytes,
-    prepared_cose_sign1: PreparedCoseSign1,
+    prepared_cose: PreparedCose,
     errors: Option<NamespaceErrors>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum PreparedCose {
+    Sign1(PreparedCoseSign1),
+    Mac0(PreparedCoseMac0),
+}
+
+impl PreparedCose {
+    fn signature_payload(&self) -> &[u8] {
+        match self {
+            PreparedCose::Sign1(inner) => inner.signature_payload(),
+            PreparedCose::Mac0(inner) => inner.signature_payload(),
+        }
+    }
 }
 
 /// Elements in a namespace.
@@ -279,6 +302,7 @@ impl SessionManagerEngaged {
             sk_reader,
             reader_message_counter: 0,
             state: State::AwaitingRequest,
+            device_auth_type: DeviceAuthType::Sign1,
         };
 
         let requested_data = sm.handle_decoded_request(SessionData {
@@ -292,12 +316,12 @@ impl SessionManagerEngaged {
 
 impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
-        let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
+        let request: ciborium::Value = cbor::from_slice(request).map_err(|_| {
             // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborDecodingError)
         })?;
 
-        serde_cbor::value::from_value(request).map_err(|_| {
+        cbor::from_value(request).map_err(|_| {
             // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborValidationError)
         })
@@ -378,7 +402,7 @@ impl SessionManager {
     ///
     /// It returns the requested items by the reader.
     pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
-        let session_data: SessionData = serde_cbor::from_slice(request)?;
+        let session_data: SessionData = cbor::from_slice(request).map_err(CborError::from)?;
         self.handle_decoded_request(session_data)
     }
 
@@ -422,8 +446,12 @@ impl SessionManager {
                     p.submit_next_signature(signature);
                     if p.is_complete() {
                         let response = p.finalize_response();
+                        let bytes = cbor::to_vec(&response)?;
+                        let response2: DeviceResponse = cbor::from_slice(&bytes).unwrap();
+                        let bytes2 = cbor::to_vec(&response2)?;
+                        assert_eq!(bytes, bytes2);
                         let mut status: Option<session::Status> = None;
-                        let response_bytes = serde_cbor::to_vec(&response)?;
+                        let response_bytes = cbor::to_vec(&response)?;
                         let encrypted_response = session::encrypt_device_data(
                             &self.sk_device.into(),
                             &response_bytes,
@@ -440,7 +468,7 @@ impl SessionManager {
                             Some(encrypted_response.into())
                         };
                         let session_data = SessionData { status, data };
-                        let encoded_response = serde_cbor::to_vec(&session_data)?;
+                        let encoded_response = crate::cbor::to_vec(&session_data)?;
                         self.state = State::ReadyToRespond(encoded_response);
                     } else {
                         self.state = State::Signing(p)
@@ -501,7 +529,7 @@ impl PreparedDeviceResponse {
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         self.prepared_documents
             .last()
-            .map(|doc| (doc.id, doc.prepared_cose_sign1.signature_payload()))
+            .map(|doc| (doc.id, doc.prepared_cose.signature_payload()))
     }
 
     /// Submit the externally signed signature for object
@@ -540,17 +568,22 @@ impl PreparedDocument {
         let Self {
             issuer_signed,
             device_namespaces,
-            prepared_cose_sign1,
+            prepared_cose,
             errors,
             doc_type,
             ..
         } = self;
-        let cose_sign1 = prepared_cose_sign1.finalize(signature);
+        let device_auth = match prepared_cose {
+            PreparedCose::Sign1(inner) => DeviceAuth::Signature {
+                device_signature: inner.finalize(signature),
+            },
+            PreparedCose::Mac0(inner) => DeviceAuth::Mac {
+                device_mac: inner.finalize(signature),
+            },
+        };
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,
-            device_auth: DeviceAuth::Signature {
-                device_signature: cose_sign1,
-            },
+            device_auth,
         };
         DeviceResponseDoc {
             doc_type,
@@ -570,6 +603,7 @@ pub trait DeviceSession {
     /// Get the device documents.
     fn documents(&self) -> &Documents;
     fn session_transcript(&self) -> Self::ST;
+    fn device_auth_type(&self) -> DeviceAuthType;
 
     /// Prepare the response based on the requested items and permitted ones.
     fn prepare_response(
@@ -682,7 +716,7 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
+            let device_auth_bytes = match cbor::to_vec(&device_auth) {
                 Ok(dab) => dab,
                 Err(_e) => {
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
@@ -692,19 +726,50 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let prepared_cose_sign1 = match CoseSign1::builder()
-                .detached()
-                .payload(device_auth_bytes)
-                .signature_algorithm(signature_algorithm)
-                .prepare()
-            {
-                Ok(prepared) => prepared,
-                Err(_e) => {
-                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                        .into_iter()
-                        .collect();
-                    document_errors.push(error);
-                    continue;
+            let header = coset::HeaderBuilder::new()
+                .algorithm(signature_algorithm)
+                .build();
+
+            let prepared_cose = match self.device_auth_type() {
+                DeviceAuthType::Sign1 => {
+                    let cose_sign1_builder = CoseSign1Builder::new().protected(header);
+                    let prepared_cose_sign1 = match PreparedCoseSign1::new(
+                        cose_sign1_builder,
+                        Some(&device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Sign1(prepared_cose_sign1)
+                }
+                DeviceAuthType::Mac0 => {
+                    let cose_mac0_builder = CoseMac0Builder::new().protected(header);
+                    let prepared_cose_mac0 = match PreparedCoseMac0::new(
+                        cose_mac0_builder,
+                        Some(&device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Mac0(prepared_cose_mac0)
                 }
             };
 
@@ -716,7 +781,7 @@ pub trait DeviceSession {
                     issuer_auth: document.issuer_auth.clone(),
                 },
                 device_namespaces,
-                prepared_cose_sign1,
+                prepared_cose,
                 errors: errors.try_into().ok(),
             };
             prepared_documents.push(prepared_document);
@@ -739,6 +804,10 @@ impl DeviceSession for SessionManager {
 
     fn session_transcript(&self) -> SessionTranscript180135 {
         self.session_transcript.clone()
+    }
+
+    fn device_auth_type(&self) -> DeviceAuthType {
+        self.device_auth_type
     }
 }
 
@@ -834,9 +903,9 @@ pub fn nearest_age_attestation(
             .collect();
 
     let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
-        age_over_claims_numerical?
-            .into_iter()
-            .partition(|x| x.1.to_owned().into_inner().element_value == CborValue::Bool(true));
+        age_over_claims_numerical?.into_iter().partition(|x| {
+            x.1.to_owned().into_inner().element_value == ciborium::Value::Bool(true)
+        });
 
     let nearest_age_over = true_age_over_claims
         .iter()
@@ -974,21 +1043,21 @@ mod test {
             digest_id: DigestId::new(1),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier1.clone(),
-            element_value: CborValue::Bool(true),
+            element_value: ciborium::Value::Bool(true),
         };
 
         let issuer_signed_item2 = IssuerSignedItem {
             digest_id: DigestId::new(2),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier2.clone(),
-            element_value: CborValue::Bool(false),
+            element_value: ciborium::Value::Bool(false),
         };
 
         let issuer_signed_item3 = IssuerSignedItem {
             digest_id: DigestId::new(3),
             random: ByteStr::from(random),
             element_identifier: element_identifier3.clone(),
-            element_value: CborValue::Bool(false),
+            element_value: ciborium::Value::Bool(false),
         };
 
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();

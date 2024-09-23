@@ -1,4 +1,5 @@
 use super::FullDate;
+
 use crate::{
     definitions::{
         helpers::NonEmptyVec,
@@ -6,7 +7,6 @@ use crate::{
     },
     macros::{FromJson, ToCbor},
 };
-use serde_cbor::Value as Cbor;
 use strum_macros::{AsRefStr, EnumString, EnumVariantNames};
 
 /// `driving_privileges` in the org.iso.18013.5.1 namespace.
@@ -14,9 +14,9 @@ use strum_macros::{AsRefStr, EnumString, EnumVariantNames};
 #[isomdl(crate = "crate")]
 pub struct DrivingPrivileges(Vec<DrivingPrivilege>);
 
-impl From<DrivingPrivileges> for Cbor {
-    fn from(d: DrivingPrivileges) -> Cbor {
-        Cbor::Array(d.0.into_iter().map(ToCbor::to_cbor).collect())
+impl From<DrivingPrivileges> for ciborium::Value {
+    fn from(d: DrivingPrivileges) -> ciborium::Value {
+        ciborium::Value::Array(d.0.into_iter().map(|v| v.to_cbor()).collect())
     }
 }
 
@@ -45,19 +45,19 @@ pub enum VehicleCategoryCode {
     A2,
     /// Light vehicles
     B1,
-    /// Medium sized goods vehicles
+    /// Medium-sized goods vehicles
     C1,
-    /// Medium sized passenger vehicles (e.g.minibuses)
+    /// Medium-sized passenger vehicles (e.g.minibuses)
     D1,
-    /// Medium sized goods vehicles with trailers
+    /// Medium-sized goods vehicles with trailers
     C1E,
-    /// Medium sized passenger vehicles (e.g. minibuses) with trailers
+    /// Medium-sized passenger vehicles (e.g., minibuses) with trailers
     D1E,
 }
 
-impl From<VehicleCategoryCode> for Cbor {
-    fn from(c: VehicleCategoryCode) -> Cbor {
-        Cbor::Text(c.as_ref().to_string())
+impl From<VehicleCategoryCode> for ciborium::Value {
+    fn from(c: VehicleCategoryCode) -> ciborium::Value {
+        ciborium::Value::Text(c.as_ref().to_string())
     }
 }
 
@@ -83,9 +83,9 @@ pub struct DrivingPrivilege {
 #[isomdl(crate = "crate")]
 pub struct Codes(NonEmptyVec<Code>);
 
-impl From<Codes> for Cbor {
-    fn from(c: Codes) -> Cbor {
-        Cbor::Array(c.0.into_inner().into_iter().map(ToCbor::to_cbor).collect())
+impl From<Codes> for ciborium::Value {
+    fn from(c: Codes) -> ciborium::Value {
+        ciborium::Value::Array(c.0.into_inner().into_iter().map(|v| v.to_cbor()).collect())
     }
 }
 
@@ -99,9 +99,8 @@ pub struct Code {
 
 #[cfg(test)]
 mod tests {
-    use crate::definitions::traits::{FromJson, ToCbor};
-
     use super::VehicleCategoryCode;
+    use crate::definitions::traits::{FromJson, ToCbor};
 
     #[test]
     fn vehicle_category_code() {
@@ -110,7 +109,10 @@ mod tests {
         assert_eq!(c, VehicleCategoryCode::A);
 
         let v = c.to_cbor();
-        assert_eq!(v, serde_cbor::Value::Text("A".to_string()));
+        assert_eq!(
+            <ciborium::Value as Into<ciborium::Value>>::into(v),
+            ciborium::Value::Text("A".to_string())
+        );
 
         let j = serde_json::json!("A");
         let c = VehicleCategoryCode::from_json(&j).unwrap();
