@@ -14,12 +14,6 @@ pub enum Error {
     JsonError,
 }
 
-impl From<serde_cbor::Error> for Error {
-    fn from(_: serde_cbor::Error) -> Self {
-        Error::CborDecodingError
-    }
-}
-
 impl From<serde_json::Error> for Error {
     fn from(_: serde_json::Error) -> Self {
         Error::JsonError

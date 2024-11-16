@@ -2,7 +2,6 @@ use crate::definitions::{
     namespaces::org_iso_18013_5_1::Alpha2,
     traits::{FromJson, FromJsonError, FromJsonMap},
 };
-use serde_cbor::Value as Cbor;
 use serde_json::{Map, Value as Json};
 
 /// `issuing_jurisdiction` in the org.iso.18013.5.1 namespace.
@@ -23,8 +22,8 @@ impl Error {
     }
 }
 
-impl From<IssuingJurisdiction> for Cbor {
-    fn from(i: IssuingJurisdiction) -> Cbor {
+impl From<IssuingJurisdiction> for ciborium::Value {
+    fn from(i: IssuingJurisdiction) -> ciborium::Value {
         i.0.into()
     }
 }

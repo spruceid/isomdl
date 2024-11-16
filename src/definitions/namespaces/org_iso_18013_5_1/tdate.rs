@@ -2,7 +2,6 @@ pub use super::FullDate;
 
 use crate::definitions::traits::{FromJson, FromJsonError};
 use anyhow::anyhow;
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
@@ -52,14 +51,14 @@ impl FromJson for TDateOrFullDate {
     }
 }
 
-impl From<TDate> for Cbor {
-    fn from(t: TDate) -> Cbor {
-        Cbor::Tag(0, Box::new(t.0.into()))
+impl From<TDate> for ciborium::Value {
+    fn from(t: TDate) -> ciborium::Value {
+        ciborium::Value::Tag(0, Box::new(t.0.into()))
     }
 }
 
-impl From<TDateOrFullDate> for Cbor {
-    fn from(t: TDateOrFullDate) -> Cbor {
+impl From<TDateOrFullDate> for ciborium::Value {
+    fn from(t: TDateOrFullDate) -> ciborium::Value {
         match t {
             TDateOrFullDate::TDate(t) => t.into(),
             TDateOrFullDate::FullDate(f) => f.into(),

@@ -1,5 +1,4 @@
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 
 /// `sex` in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
@@ -28,7 +27,7 @@ impl From<Sex> for u8 {
 }
 
 impl ToCbor for Sex {
-    fn to_cbor(self) -> Cbor {
+    fn to_cbor(self) -> ciborium::Value {
         u8::from(self).into()
     }
 }

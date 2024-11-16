@@ -33,7 +33,7 @@ pub fn validate(
     let bytes = pem_rfc7468::decode_vec(signer)
         .map_err(|e| anyhow!("unable to parse pem: {}", e))?
         .1;
-    let x5chain_cbor: serde_cbor::Value = serde_cbor::Value::Bytes(bytes);
+    let x5chain_cbor: ciborium::Value = ciborium::Value::Bytes(bytes);
 
     let x5chain = X5Chain::from_cbor(x5chain_cbor)?;
 

@@ -1,3 +1,5 @@
+use crate::cbor;
+use crate::cose;
 use crate::definitions::device_response::Document;
 use crate::definitions::issuer_signed;
 use crate::definitions::x509::X5Chain;
@@ -18,11 +20,11 @@ use ssi_jwk::JWK as SsiJwk;
 
 pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> Result<(), Error> {
     let signer_key = x5chain.get_signer_key()?;
-    let verification_result: cose_rs::sign1::VerificationResult =
+    let verification_result: cose::sign1::VerificationResult =
         issuer_signed
             .issuer_auth
             .verify::<VerifyingKey, Signature>(&signer_key, None, None);
-    if !verification_result.success() {
+    if !verification_result.is_success() {
         Err(ReaderError::ParsingError)?
     } else {
         Ok(())
@@ -36,9 +38,10 @@ pub fn device_authentication(
     let mso_bytes = document
         .issuer_signed
         .issuer_auth
-        .payload()
+        .payload
+        .as_ref()
         .ok_or(Error::DetachedIssuerAuth)?;
-    let mso: Tag24<Mso> = serde_cbor::from_slice(mso_bytes).map_err(|_| Error::MSOParsing)?;
+    let mso: Tag24<Mso> = cbor::from_slice(mso_bytes).map_err(|_| Error::MSOParsing)?;
     let device_key = mso.into_inner().device_key_info.device_key;
     let jwk = SsiJwk::try_from(device_key)?;
     match jwk.params {
@@ -69,13 +72,13 @@ pub fn device_authentication(
                     ))
                     .map_err(|_| ReaderError::CborDecodingError)?;
                     let external_aad = None;
-                    let cbor_payload = serde_cbor::to_vec(&detached_payload)?;
+                    let cbor_payload = cbor::to_vec(&detached_payload)?;
                     let result = device_signature.verify::<VerifyingKey, Signature>(
                         &verifying_key,
-                        Some(cbor_payload),
+                        Some(&cbor_payload),
                         external_aad,
                     );
-                    if !result.success() {
+                    if !result.is_success() {
                         Err(ReaderError::ParsingError)?
                     } else {
                         Ok(())

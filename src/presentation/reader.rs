@@ -1,4 +1,21 @@
+//! This module is responsible for the reader's interaction with the device.
+//!
+//! It handles this through [SessionManager] state
+//! which is responsible for handling the session with the device.
+//!
+//! From the reader's perspective, the flow is as follows:
+//!
+//! ```ignore
+#![doc = include_str!("../../docs/on_simulated_reader.txt")]
+//! ```
+//!
+//! ### Example
+//!
+//! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
+//! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use super::{mdoc_auth::device_authentication, mdoc_auth::issuer_authentication};
+use crate::cbor;
+use crate::cbor::CborError;
 use crate::definitions::device_key::cose_key::Error as CoseError;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use crate::definitions::x509::x5chain::X5CHAIN_HEADER_LABEL;
@@ -21,18 +38,24 @@ use crate::{
 };
 use aes::cipher::{generic_array::GenericArray, typenum::U32};
 use anyhow::{anyhow, Result};
-use cose_rs::algorithm::Algorithm;
-use cose_rs::sign1::HeaderMap;
-use cose_rs::CoseSign1;
+use coset::{CoseSign1Builder, Header, Label};
+// use cose_rs::algorithm::Algorithm;
+// use cose_rs::sign1::HeaderMap;
+// use cose_rs::CoseSign1;
 use p256::ecdsa::SigningKey;
 use sec1::DecodeEcPrivateKey;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+/// The main state of the reader.
+///
+/// The reader's [SessionManager] state machine is responsible
+/// for handling the session with the device.
+///
+/// The transition to this state is made by [SessionManager::establish_session].
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SessionManager {
     session_transcript: SessionTranscript180135,
@@ -52,32 +75,44 @@ pub struct ReaderAuthentication(
     pub ItemsRequestBytes,
 );
 
-#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+/// Various errors that can occur during the interaction with the device.
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Received IssuerAuth had a detached payload.")]
     DetachedIssuerAuth,
     #[error("Could not parse MSO.")]
     MSOParsing,
-    #[error("the qr code had the wrong prefix or the contained data could not be decoded")]
-    InvalidQrCode,
+    /// The QR code had the wrong prefix or the contained data could not be decoded.
+    #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
+    InvalidQrCode(anyhow::Error),
+    /// Device did not transmit any data.
     #[error("Device did not transmit any data.")]
     DeviceTransmissionError,
+    /// Device did not transmit an mDL.
     #[error("Device did not transmit an mDL.")]
     DocumentTypeError,
+    /// The device did not transmit any mDL data.
     #[error("the device did not transmit any mDL data.")]
     NoMdlDataTransmission,
+    /// Device did not transmit any data in the `org.iso.18013.5.1` namespace.
     #[error("device did not transmit any data in the org.iso.18013.5.1 namespace.")]
     IncorrectNamespace,
+    /// The Device responded with an error.
     #[error("device responded with an error.")]
     HolderError,
+    /// Could not decrypt the response.
     #[error("could not decrypt the response.")]
     DecryptionError,
+    /// Unexpected CBOR type for offered value.
     #[error("Unexpected CBOR type for offered value")]
     CborDecodingError,
+    /// Not a valid JSON input.
     #[error("not a valid JSON input.")]
     JsonError,
+    /// Unexpected date type for data_element.
     #[error("Unexpected date type for data_element.")]
     ParsingError,
+    /// Request for data is invalid.
     #[error("Request for data is invalid.")]
     InvalidRequest,
     #[error("Failed mdoc authentication: {0}")]
@@ -86,10 +121,12 @@ pub enum Error {
     Unsupported,
     #[error("No x5chain found for mdoc authentication")]
     X5Chain,
+    #[error("Could not serialize to cbor: {0}")]
+    CborError(CborError),
 }
 
-impl From<serde_cbor::Error> for Error {
-    fn from(_: serde_cbor::Error) -> Self {
+impl From<CborError> for Error {
+    fn from(_: CborError) -> Self {
         Error::CborDecodingError
     }
 }
@@ -143,6 +180,11 @@ impl From<asn1_rs::Error> for Error {
 }
 
 impl SessionManager {
+    /// Establish a session with the device.
+    ///
+    /// Internally it generates the ephemeral keys,
+    /// derives the shared secret, and derives the session keys
+    /// (using **Diffie–Hellman key exchange**).
     pub fn establish_session(
         qr_code: String,
         namespaces: device_request::Namespaces,
@@ -203,7 +245,7 @@ impl SessionManager {
             data: request.into(),
             e_reader_key: e_reader_key_public,
         };
-        let session_request = serde_cbor::to_vec(&session)?;
+        let session_request = cbor::to_vec(&session)?;
 
         Ok((session_manager, session_request, ble_ident))
     }
@@ -227,13 +269,14 @@ impl SessionManager {
             })
     }
 
+    /// Creates a new request with specified elements to request.
     pub fn new_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
         let request = self.build_request(namespaces)?;
         let session = SessionData {
             data: Some(request.into()),
             status: None,
         };
-        serde_cbor::to_vec(&session).map_err(Into::into)
+        cbor::to_vec(&session).map_err(Into::into)
     }
 
     fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
@@ -250,10 +293,12 @@ impl SessionManager {
 
         //the certificate should be supplied by the reader
         //let certificate_cbor = serde_cbor::to_vec(&self.reader_cert_bytes)?;
-        let mut header_map = HeaderMap::default();
-        header_map.insert_i(33, self.reader_x5chain.into_cbor());
+        let mut header_map = Header::default();
+        header_map.rest.push((
+            Label::Int(X5CHAIN_HEADER_LABEL),
+            self.reader_x5chain.into_cbor(),
+        ));
 
-        let algorithm = Algorithm::ES256;
         let payload = ReaderAuthentication(
             "ReaderAuthentication".to_string(),
             self.session_transcript.clone(),
@@ -261,26 +306,27 @@ impl SessionManager {
         );
 
         let reader_signing_key = SigningKey::from_slice(&self.reader_auth_key)?; //SigningKey::from_bytes(self.reader_auth_key.to_vec());
-        let signature = reader_signing_key.sign_recoverable(&serde_cbor::to_vec(&payload)?)?;
-        let prepared_cosesign = CoseSign1::builder()
-            .detached()
-            .signature_algorithm(algorithm)
-            .payload(serde_cbor::to_vec(&payload)?)
+        let signature = reader_signing_key.sign_recoverable(&cbor::to_vec(&payload)?)?;
+        let cose_sign1 = CoseSign1Builder::new()
             .unprotected(header_map)
-            .prepare()
-            .unwrap();
-
-        let cose_sign1 = prepared_cosesign.finalize(signature.0.to_vec());
+            .payload(cbor::to_vec(&payload)?)
+            .signature(signature.0.to_vec())
+            .build();
 
         let doc_request = DocRequest {
-            reader_auth: Some(cose_sign1),
+            reader_auth: Some(crate::cose::MaybeTagged {
+                // NOTE: COSE_Sign1 is tagged with 18
+                // see: https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
+                tagged: true,
+                inner: cose_sign1,
+            }),
             items_request: Tag24::new(items_request)?,
         };
         let device_request = DeviceRequest {
             version: DeviceRequest::VERSION.to_string(),
             doc_requests: NonEmptyVec::new(doc_request),
         };
-        let device_request_bytes = serde_cbor::to_vec(&device_request)?;
+        let device_request_bytes = cbor::to_vec(&device_request)?;
         session::encrypt_reader_data(
             &self.sk_reader.into(),
             &device_request_bytes,
@@ -290,7 +336,7 @@ impl SessionManager {
     }
 
     fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, Error> {
-        let session_data: SessionData = serde_cbor::from_slice(response)?;
+        let session_data: SessionData = cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
             Some(r) => r,
@@ -301,7 +347,7 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
-        let device_response: DeviceResponse = serde_cbor::from_slice(&decrypted_response)?;
+        let device_response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
         Ok(device_response)
     }
 
@@ -309,35 +355,30 @@ impl SessionManager {
         let mut validated_response = ValidatedResponse::default();
 
         let device_response = match self.decrypt_response(response) {
-            Ok(device_response) => device_response,
+            Ok(device_response) => {
+                validated_response.decryption = Status::Valid;
+
+                device_response
+            }
             Err(e) => {
                 validated_response.decryption = Status::Invalid;
-                validated_response
-                    .errors
-                    .insert("decryption_errors".to_string(), json!(vec![e]));
+                validated_response.errors.insert(
+                    "decryption_errors".to_string(),
+                    json!(vec![format!("{e:?}")]),
+                );
                 return validated_response;
             }
         };
-        validated_response.decryption = Status::Valid;
 
-        let (document, x5chain, _parsed_response) = match parse(&device_response) {
-            Ok(res) => res,
+        match parse(&device_response) {
+            Ok((document, x5chain, namespaces)) => {
+                self.validate_response(x5chain, document.clone(), namespaces)
+            }
             Err(e) => {
                 validated_response.parsing = Status::Invalid;
                 validated_response
                     .errors
-                    .insert("parsing_errors".to_string(), json!(vec![e]));
-                return validated_response;
-            }
-        };
-        match parse_namespaces(&device_response) {
-            Ok(parsed_response) => {
-                self.validate_response(x5chain, document.clone(), parsed_response)
-            }
-            Err(e) => {
-                validated_response
-                    .errors
-                    .insert("parsing_errors".to_string(), json!(vec![e]));
+                    .insert("parsing_errors".to_string(), json!(vec![format!("{e:?}")]));
                 validated_response
             }
         }
@@ -347,10 +388,10 @@ impl SessionManager {
         &mut self,
         x5chain: X5Chain,
         document: Document,
-        parsed_response: BTreeMap<String, serde_json::Value>,
+        namespaces: BTreeMap<String, serde_json::Value>,
     ) -> ValidatedResponse {
         let mut validated_response = ValidatedResponse {
-            response: parsed_response,
+            response: namespaces,
             ..Default::default()
         };
 
@@ -360,9 +401,10 @@ impl SessionManager {
             }
             Err(e) => {
                 validated_response.device_authentication = Status::Invalid;
-                validated_response
-                    .errors
-                    .insert("device_authentication_errors".to_string(), json!(vec![e]));
+                validated_response.errors.insert(
+                    "device_authentication_errors".to_string(),
+                    json!(vec![format!("{e:?}")]),
+                );
             }
         }
 
@@ -374,9 +416,10 @@ impl SessionManager {
                 }
                 Err(e) => {
                     validated_response.issuer_authentication = Status::Invalid;
-                    validated_response
-                        .errors
-                        .insert("issuer_authentication_errors".to_string(), json!(vec![e]));
+                    validated_response.errors.insert(
+                        "issuer_authentication_errors".to_string(),
+                        serde_json::json!(vec![format!("{e:?}")]),
+                    );
                 }
             }
         } else {
@@ -394,27 +437,29 @@ fn parse(
     device_response: &DeviceResponse,
 ) -> Result<(&Document, X5Chain, BTreeMap<String, Value>), Error> {
     let document = get_document(device_response)?;
-    let header = document.issuer_signed.issuer_auth.unprotected();
+    let header = document.issuer_signed.issuer_auth.unprotected.clone();
     let x5chain = header
-        .get_i(X5CHAIN_HEADER_LABEL)
-        .cloned()
-        .ok_or(Error::X5Chain)
-        .map(X5Chain::from_cbor)??;
+        .rest
+        .iter()
+        .find(|(label, _)| label == &Label::Int(X5CHAIN_HEADER_LABEL))
+        .map(|(_, value)| value.to_owned())
+        .map(X5Chain::from_cbor)
+        .ok_or(Error::X5Chain)??;
     let parsed_response = parse_namespaces(device_response)?;
     Ok((document, x5chain, parsed_response))
 }
 
-fn parse_response(value: CborValue) -> Result<Value, Error> {
+fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     match value {
-        CborValue::Text(s) => Ok(Value::String(s)),
-        CborValue::Tag(_t, v) => {
-            if let CborValue::Text(d) = *v {
+        ciborium::Value::Text(s) => Ok(Value::String(s)),
+        ciborium::Value::Tag(_t, v) => {
+            if let ciborium::Value::Text(d) = *v {
                 Ok(Value::String(d))
             } else {
                 Err(Error::ParsingError)
             }
         }
-        CborValue::Array(v) => {
+        ciborium::Value::Array(v) => {
             let mut array_response = Vec::<Value>::new();
             for a in v {
                 let r = parse_response(a)?;
@@ -422,10 +467,10 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             }
             Ok(json!(array_response))
         }
-        CborValue::Map(m) => {
+        ciborium::Value::Map(m) => {
             let mut map_response = serde_json::Map::<String, Value>::new();
             for (key, value) in m {
-                if let CborValue::Text(k) = key {
+                if let ciborium::Value::Text(k) = key {
                     let parsed = parse_response(value)?;
                     map_response.insert(k, parsed);
                 }
@@ -433,9 +478,9 @@ fn parse_response(value: CborValue) -> Result<Value, Error> {
             let json = json!(map_response);
             Ok(json)
         }
-        CborValue::Bytes(b) => Ok(json!(b)),
-        CborValue::Bool(b) => Ok(json!(b)),
-        CborValue::Integer(i) => Ok(json!(i)),
+        ciborium::Value::Bytes(b) => Ok(json!(b)),
+        ciborium::Value::Bool(b) => Ok(json!(b)),
+        ciborium::Value::Integer(i) => Ok(json!(<ciborium::value::Integer as Into<i128>>::into(i))),
         _ => Err(Error::ParsingError),
     }
 }
@@ -553,7 +598,7 @@ pub mod test {
 
     #[test]
     fn nested_response_values() {
-        let domestic_driving_privileges = serde_cbor::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
+        let domestic_driving_privileges = crate::cbor::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
         let json = parse_response(domestic_driving_privileges).unwrap();
         let expected = serde_json::json!(
           [
@@ -587,7 +632,7 @@ pub mod test {
         let bytes = pem_rfc7468::decode_vec(signer)
             .map_err(|e| anyhow!("unable to parse pem: {}", e))?
             .1;
-        let x5chain_cbor: serde_cbor::Value = serde_cbor::Value::Bytes(bytes);
+        let x5chain_cbor: ciborium::Value = ciborium::Value::Bytes(bytes);
 
         let x5chain = X5Chain::from_cbor(x5chain_cbor)?;
 

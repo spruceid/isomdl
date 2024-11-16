@@ -8,32 +8,42 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-Dwarnings" 
+  RUSTFLAGS: "-Dwarnings"
+  RUSTDOCFLAGS: "-Dwarnings"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Build
-      run: cargo build
+      - name: setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        if: ${{ github.event.act }}
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
 
-    - name: Run tests
-      run: |
-        cargo test
-        cd macros
-        cargo test
+      - name: Build
+        run: cargo build --all-targets
 
-    - name: Clippy
-      run: |
-        cargo clippy
-        cd macros
-        cargo clippy
+      - name: Run tests
+        run: |
+          cargo test
+          cd macros
+          cargo test
 
-    - name: Fmt
-      run: |
-        cargo fmt -- --check
-        cd macros
-        cargo fmt -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets
+
+      - name: Fmt
+        run: cargo fmt --all -- --check
+      - name: Fmt
+        run: cargo fmt --all -- --check
+
+      - name: Doc
+        run: |
+          cargo doc --all-features --no-deps
+          cd macros
+          cargo doc --all-features --no-deps

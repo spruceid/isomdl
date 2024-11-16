@@ -1,3 +1,16 @@
+use std::collections::{BTreeMap, HashSet};
+
+use anyhow::{anyhow, Result};
+use async_signature::AsyncSigner;
+use coset::iana::Algorithm;
+use coset::{CoseSign1, Label};
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256, Sha384, Sha512};
+use signature::{SignatureEncoding, Signer};
+
+use crate::cose::sign1::PreparedCoseSign1;
+use crate::cose::{MaybeTagged, SignatureAlgorithm};
 use crate::{
     definitions::x509::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
     definitions::{
@@ -6,33 +19,21 @@ use crate::{
         DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, ValidityInfo,
     },
 };
-use anyhow::{anyhow, Result};
-use async_signature::AsyncSigner;
-use cose_rs::{
-    algorithm::{Algorithm, SignatureAlgorithm},
-    sign1::{CoseSign1, PreparedCoseSign1},
-};
-use rand::Rng;
-use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
-use sha2::{Digest, Sha256, Sha384, Sha512};
-use signature::{SignatureEncoding, Signer};
-use std::collections::{BTreeMap, HashSet};
 
-pub type Namespaces = BTreeMap<String, BTreeMap<String, CborValue>>;
+pub type Namespaces = BTreeMap<String, BTreeMap<String, ciborium::Value>>;
 
+/// A signed mdoc.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-/// A signed mdoc.
 pub struct Mdoc {
     pub doc_type: String,
     pub mso: Mso,
     pub namespaces: IssuerNamespaces,
-    pub issuer_auth: CoseSign1,
+    pub issuer_auth: MaybeTagged<CoseSign1>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 /// An incomplete mdoc, requiring a remotely signed signature to be completed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedMdoc {
     doc_type: String,
     mso: Mso,
@@ -82,13 +83,15 @@ impl Mdoc {
             validity_info,
         };
 
-        let mso_bytes = serde_cbor::to_vec(&Tag24::new(&mso)?)?;
+        let mso_bytes = crate::cbor::to_vec(&Tag24::new(&mso)?)?;
 
-        let prepared_sig = CoseSign1::builder()
-            .payload(mso_bytes)
-            .signature_algorithm(signature_algorithm)
-            .prepare()
-            .map_err(|e| anyhow!("error preparing cosesign1: {}", e))?;
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(signature_algorithm)
+            .build();
+        let builder = coset::CoseSign1Builder::new()
+            .protected(protected)
+            .payload(mso_bytes);
+        let prepared_sig = PreparedCoseSign1::new(builder, None, None, true)?;
 
         let preparation_mdoc = PreparedMdoc {
             doc_type,
@@ -190,9 +193,10 @@ impl PreparedMdoc {
 
         let mut issuer_auth = prepared_sig.finalize(signature);
         issuer_auth
-            .unprotected_mut()
-            .insert_i(X5CHAIN_HEADER_LABEL, x5chain.into_cbor());
-
+            .inner
+            .unprotected
+            .rest
+            .push((Label::Int(X5CHAIN_HEADER_LABEL), x5chain.into_cbor()));
         Mdoc {
             doc_type,
             mso,
@@ -366,7 +370,7 @@ fn to_issuer_namespaces(namespaces: Namespaces) -> Result<IssuerNamespaces> {
 }
 
 fn to_issuer_signed_items(
-    elements: BTreeMap<String, CborValue>,
+    elements: BTreeMap<String, ciborium::Value>,
 ) -> impl Iterator<Item = IssuerSignedItem> {
     let mut used_ids = HashSet::new();
     elements.into_iter().map(move |(key, value)| {
@@ -425,7 +429,7 @@ fn digest_namespace(
 
     elements
         .iter()
-        .map(|item| Ok((item.as_ref().digest_id, serde_cbor::to_vec(item)?)))
+        .map(|item| Ok((item.as_ref().digest_id, crate::cbor::to_vec(item)?)))
         .chain(random_digests)
         .map(|result| {
             let (digest_id, bytes) = result?;
@@ -452,18 +456,19 @@ fn generate_digest_id(used_ids: &mut HashSet<DigestId>) -> DigestId {
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
-    use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
-    use crate::definitions::namespaces::{
-        org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
-    };
-
-    use crate::definitions::traits::{FromJson, ToNamespaceMap};
     use elliptic_curve::sec1::ToEncodedPoint;
     use p256::ecdsa::{Signature, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
     use p256::SecretKey;
     use time::OffsetDateTime;
+
+    use crate::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
+    use crate::definitions::namespaces::{
+        org_iso_18013_5_1::OrgIso1801351, org_iso_18013_5_1_aamva::OrgIso1801351Aamva,
+    };
+    use crate::definitions::traits::{FromJson, ToNamespaceMap};
+
+    use super::*;
 
     static ISSUER_CERT: &[u8] = include_bytes!("../../test/issuance/issuer-cert.pem");
     static ISSUER_KEY: &str = include_str!("../../test/issuance/issuer-key.pem");

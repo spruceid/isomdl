@@ -9,13 +9,13 @@ use p256::ecdsa::VerifyingKey;
 
 use const_oid::AssociatedOid;
 
+use ciborium::Value as CborValue;
 use elliptic_curve::{
     sec1::{FromEncodedPoint, ModulusSize, ToEncodedPoint},
     AffinePoint, CurveArithmetic, FieldBytesSize, PublicKey,
 };
 use p256::NistP256;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use signature::Verifier;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -26,7 +26,8 @@ use x509_cert::{
     der::{referenced::OwnedToRef, Decode},
 };
 
-pub const X5CHAIN_HEADER_LABEL: i128 = 33;
+/// See: https://www.iana.org/assignments/cose/cose.xhtml#header-parameters
+pub const X5CHAIN_HEADER_LABEL: i64 = 0x21;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct X509 {

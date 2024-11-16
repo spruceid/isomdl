@@ -1,10 +1,34 @@
+//! This module is responsible for establishing the device's session with the reader.
+//!
+//! The device's [SessionManager] state machine is responsible
+//! for handling the session with the reader.
+//!
+//! The session is managed through a set of session management states: initialization, engaged,
+//! and established.
+//!
+//! To initialize a session management state, see the [SessionManagerInit] struct.
+//!
+//! ```ignore
+#![doc = include_str!("../../docs/on_simulated_device.txt")]
+//! ```
+//!
+//! ### Example
+//!
+//! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
+//! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
+use crate::cose::mac0::PreparedCoseMac0;
+use crate::cose::sign1::PreparedCoseSign1;
+use crate::cose::MaybeTagged;
+use crate::definitions::device_signed::DeviceAuthType;
 use crate::definitions::validated_request::Status as ValidationStatus;
 use crate::definitions::validated_request::ValidatedRequest;
 use crate::definitions::x509::error::Error as X509Error;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
+use crate::definitions::x509::x5chain::X5CHAIN_HEADER_LABEL;
 use crate::definitions::x509::X5Chain;
 use crate::definitions::IssuerSignedItem;
 use crate::{
+    cbor,
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
@@ -22,10 +46,11 @@ use crate::{
     },
     issuance::Mdoc,
 };
-use cose_rs::sign1::{CoseSign1, PreparedCoseSign1};
+use ciborium::Value as CborValue;
+use coset::Label;
+use coset::{CoseMac0Builder, CoseSign1, CoseSign1Builder};
 use p256::FieldBytes;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use serde_json::json;
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
@@ -34,6 +59,18 @@ use uuid::Uuid;
 use x509_cert::attr::AttributeTypeAndValue;
 use x509_cert::der::Decode;
 
+/// Initialisation state.
+///
+/// You enter this state using [SessionManagerInit::initialise] method, providing
+/// the documents and optional non-empty list of device [DeviceRetrievalMethod] and
+/// server [ServerRetrievalMethods] retrieval methods.
+///
+/// The [SessionManagerInit] state is restricted to creating a QR-code engagement,
+/// using the [SessionManagerInit::qr_engagement] method, which will return the
+/// [SessionManagerEngaged] Session Manager state.
+///
+/// For convenience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
+/// to provide the BLE identification string for the device.
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
@@ -41,6 +78,10 @@ pub struct SessionManagerInit {
     device_engagement: Tag24<DeviceEngagement>,
 }
 
+/// Engaged state.
+///
+/// Transition to this state is made with [SessionManagerInit::qr_engagement].
+/// That creates the `QR code` that the reader will use to establish the session.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
     documents: Documents,
@@ -49,6 +90,20 @@ pub struct SessionManagerEngaged {
     handover: Handover,
 }
 
+/// The initial state of the Session Manager.
+///
+/// The Session Manager contains the documents, ephemeral device key, and device engagement.
+///
+/// Create a new Session Manager using the [SessionManagerInit::initialise] method, providing
+/// the documents and optional non-empty list of device [DeviceRetrievalMethod] and
+/// server [ServerRetrievalMethods] retrieval methods.
+///
+/// The [SessionManagerInit] state is restricted to creating a QR-code engagement,
+/// using the [SessionManagerInit::qr_engagement] method, which will return the
+/// [SessionManagerEngaged] Session Manager state.
+///
+/// For convience, the [SessionManagerInit] state surfaces the [SessionManagerInit::ble_ident] method
+/// to provide the BLE identification string for the device.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManager {
     documents: Documents,
@@ -59,36 +114,51 @@ pub struct SessionManager {
     reader_message_counter: u32,
     state: State,
     trusted_verifiers: Option<TrustAnchorRegistry>,
+    device_auth_type: DeviceAuthType,
 }
 
+/// The internal states of the [SessionManager].
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub enum State {
+    /// This is the default one where the device is waiting for a request from the reader.
     #[default]
     AwaitingRequest,
+    /// The device is signing the response. The response could be a document or an error.
     Signing(PreparedDeviceResponse),
+    /// The device is ready to respond to the reader with a signed response.
     ReadyToRespond(Vec<u8>),
 }
 
+/// Various errors that can occur during the interaction with the reader.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Unable to generate ephemeral key.
     #[error("unable to generate ephemeral key: {0}")]
     EKeyGeneration(session::Error),
+    /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
     Tag24CborEncoding(tag24::Error),
+    /// Unable to generate shared secret.
     #[error("unable to generate shared secret: {0}")]
     SharedSecretGeneration(anyhow::Error),
+    /// Error encoding value to CBOR.
     #[error("error encoding value to CBOR: {0}")]
-    CborEncoding(serde_cbor::Error),
+    CborEncoding(coset::CoseError),
+    /// Session manager was used incorrectly.
     #[error("session manager was used incorrectly")]
     ApiMisuse,
+    /// Could not parse age attestation claim.
     #[error("could not parse age attestation claim")]
     ParsingError(#[from] ParseIntError),
+    /// `age_over` element identifier is malformed.
     #[error("age_over element identifier is malformed")]
     PrefixError,
     #[error("error decoding reader authentication certificate")]
     CertificateError,
     #[error("error while validating reader authentication certificate")]
     ValidationError,
+    #[error("Could not serialize to cbor: {0}")]
+    CborError(coset::CoseError),
 }
 
 impl From<x509_cert::der::Error> for Error {
@@ -97,6 +167,7 @@ impl From<x509_cert::der::Error> for Error {
     }
 }
 
+/// The documents the device owns.
 pub type Documents = NonEmptyMap<DocType, Document>;
 type DocType = String;
 
@@ -104,11 +175,20 @@ type DocType = String;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub id: Uuid,
-    pub issuer_auth: CoseSign1,
+    pub issuer_auth: MaybeTagged<CoseSign1>,
     pub mso: Mso,
     pub namespaces: Namespaces,
 }
 
+/// Stores the prepared response.
+///
+/// After the device parses the request from the reader,
+/// If there were errors,
+/// it will prepare a list of [DocumentErrors].
+/// If there are documents to be signed,
+/// it will keep a list of prepared documents
+/// which needs to be signed with [SessionManager::get_next_signature_payload] and [SessionManager::submit_next_signature].
+/// After those are signed, they are kept in a list of [DeviceResponseDoc]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedDeviceResponse {
     pub prepared_documents: Vec<PreparedDocument>,
@@ -123,19 +203,42 @@ pub struct PreparedDocument {
     pub doc_type: String,
     pub issuer_signed: IssuerSigned,
     pub device_namespaces: DeviceNamespacesBytes,
-    pub prepared_cose_sign1: PreparedCoseSign1,
+    pub prepared_cose: PreparedCose,
     pub errors: Option<NamespaceErrors>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PreparedCose {
+    Sign1(PreparedCoseSign1),
+    Mac0(PreparedCoseMac0),
+}
+
+impl PreparedCose {
+    fn signature_payload(&self) -> &[u8] {
+        match self {
+            PreparedCose::Sign1(inner) => inner.signature_payload(),
+            PreparedCose::Mac0(inner) => inner.signature_payload(),
+        }
+    }
+}
+
+/// Elements in a namespace.
 type Namespaces = NonEmptyMap<Namespace, NonEmptyMap<ElementIdentifier, IssuerSignedItemBytes>>;
 type Namespace = String;
 type ElementIdentifier = String;
 
+/// A list of the requested items by the reader.
 pub type RequestedItems = Vec<ItemsRequest>;
+/// The lis of items that are permitted to be shared grouped by document type and namespace.
 pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdentifier>>>;
 
 impl SessionManagerInit {
     /// Initialise the SessionManager.
+    ///
+    /// This is the first transition in the flow interaction.
+    /// Internally, it generates the ephemeral key and creates the device engagement.
+    ///
+    /// It transition to [SessionManagerInit] state.
     pub fn initialise(
         documents: Documents,
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
@@ -169,7 +272,9 @@ impl SessionManagerInit {
         super::calculate_ble_ident(&self.device_engagement.as_ref().security.1)
     }
 
-    /// Begin device engagement using QR code.
+    /// Begins the device engagement using **QR code**.
+    ///
+    /// The response contains the device's public key and engagement data.
     pub fn qr_engagement(self) -> anyhow::Result<(SessionManagerEngaged, String)> {
         let qr_code_uri = self.device_engagement.to_qr_code_uri()?;
         let sm = SessionManagerEngaged {
@@ -183,6 +288,14 @@ impl SessionManagerInit {
 }
 
 impl SessionManagerEngaged {
+    /// It transitions to [SessionManager] state
+    /// by processing the [SessionEstablishment] received from the reader.
+    ///
+    /// Internally, it generates the session keys based on the calculated shared secret
+    /// (using **Diffie–Hellman key exchange**).
+    ///
+    /// Along with transitioning to [SessionManagerEngaged] state,
+    /// it returns the requested items by the reader.
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
@@ -212,6 +325,7 @@ impl SessionManagerEngaged {
             reader_message_counter: 0,
             state: State::AwaitingRequest,
             trusted_verifiers,
+            device_auth_type: DeviceAuthType::Sign1,
         };
 
         let validated_request = sm.handle_decoded_request(SessionData {
@@ -225,19 +339,19 @@ impl SessionManagerEngaged {
 
 impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
-        let request: CborValue = serde_cbor::from_slice(request).map_err(|_| {
+        let request: ciborium::Value = cbor::from_slice(request).map_err(|_| {
             // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborDecodingError)
         })?;
 
-        serde_cbor::value::from_value(request).map_err(|_| {
+        cbor::from_value(request).map_err(|_| {
             // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborValidationError)
         })
     }
 
     fn validate_request(&self, request: DeviceRequest) -> ValidatedRequest {
-        let items_requests: Vec<ItemsRequest> = request
+        let items_request: Vec<ItemsRequest> = request
             .doc_requests
             .clone()
             .into_inner()
@@ -246,7 +360,7 @@ impl SessionManager {
             .collect();
 
         let mut validated_request = ValidatedRequest {
-            items_requests,
+            items_request,
             common_name: None,
             reader_authentication: ValidationStatus::Unchecked,
             errors: BTreeMap::new(),
@@ -275,6 +389,21 @@ impl SessionManager {
         validated_request
     }
 
+    /// When the device is ready to respond, it prepares the response specifying the permitted items.
+    ///
+    /// It changes the internal state to [State::Signing],
+    /// and you need
+    /// to call [SessionManager::get_next_signature_payload] and then [SessionManager::submit_next_signature]
+    /// to sign the documents.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// session_manager.prepare_response(&requested_items, permitted_items);
+    /// let (_, payload)) = session_manager.get_next_signature_payload()?;
+    /// let signature = sign(&payload);
+    /// session_manager.submit_next_signature(signature);
+    /// ```
     pub fn prepare_response(&mut self, requests: &RequestedItems, permitted: PermittedItems) {
         let prepared_response = DeviceSession::prepare_response(self, requests, permitted);
         self.state = State::Signing(prepared_response);
@@ -322,9 +451,15 @@ impl SessionManager {
     }
 
     /// Handle a request from the reader.
+    ///
+    /// The request is expected to be a CBOR encoded
+    /// and encrypted [SessionData].
+    ///
+    /// This method will return the [ValidatedRequest] struct, which will
+    /// include the items requested by the reader/verifier.
     pub fn handle_request(&mut self, request: &[u8]) -> ValidatedRequest {
         let mut validated_request = ValidatedRequest::default();
-        let session_data: SessionData = match serde_cbor::from_slice(request) {
+        let session_data: SessionData = match cbor::from_slice(request) {
             Ok(sd) => sd,
             Err(e) => {
                 validated_request
@@ -336,7 +471,18 @@ impl SessionManager {
         self.handle_decoded_request(session_data)
     }
 
-    /// Get next payload for signing.
+    /// When there are documents to be signed, it will return then next one for signing.
+    ///
+    /// After signed, you need to call [SessionManager::submit_next_signature].
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// while let Some((_, payload)) = session_manager.get_next_signature_payload()? {
+    ///     let signature = sign(&payload);
+    ///     session_manager.submit_next_signature(signature);
+    /// }
+    /// ```
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         match &self.state {
             State::Signing(p) => p.get_next_signature_payload(),
@@ -344,7 +490,20 @@ impl SessionManager {
         }
     }
 
-    /// Submit the externally signed signature.
+    /// Submit the externally signed signature for object
+    /// returned by [SessionManager::get_next_signature_payload].
+    ///
+    /// After all documents are signed, you can call [SessionManager::retrieve_response]
+    /// to get the response that can then be sent to the reader.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// while let Some((_, payload)) = session_manager.get_next_signature_payload()? {
+    ///     let signature = sign(&payload);
+    ///     session_manager.submit_next_signature(signature);
+    /// }
+    /// ```
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) -> anyhow::Result<()> {
         if matches!(self.state, State::Signing(_)) {
             match std::mem::take(&mut self.state) {
@@ -352,8 +511,12 @@ impl SessionManager {
                     p.submit_next_signature(signature);
                     if p.is_complete() {
                         let response = p.finalize_response();
+                        let bytes = cbor::to_vec(&response)?;
+                        let response2: DeviceResponse = cbor::from_slice(&bytes).unwrap();
+                        let bytes2 = cbor::to_vec(&response2)?;
+                        assert_eq!(bytes, bytes2);
                         let mut status: Option<session::Status> = None;
-                        let response_bytes = serde_cbor::to_vec(&response)?;
+                        let response_bytes = cbor::to_vec(&response)?;
                         let encrypted_response = session::encrypt_device_data(
                             &self.sk_device.into(),
                             &response_bytes,
@@ -370,7 +533,7 @@ impl SessionManager {
                             Some(encrypted_response.into())
                         };
                         let session_data = SessionData { status, data };
-                        let encoded_response = serde_cbor::to_vec(&session_data)?;
+                        let encoded_response = crate::cbor::to_vec(&session_data)?;
                         self.state = State::ReadyToRespond(encoded_response);
                     } else {
                         self.state = State::Signing(p)
@@ -382,12 +545,19 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Identifies that the response is ready.
+    /// Identifies if the response is ready.
+    ///
+    /// The internal state is [State::ReadyToRespond] in this returns `true`.
     pub fn response_ready(&self) -> bool {
         matches!(self.state, State::ReadyToRespond(_))
     }
 
-    /// Retrieve the completed response.
+    /// Retrieves the prepared response.
+    ///
+    /// Will return [Some] after all documents have been signed.
+    /// In that case, it will return the response
+    /// and change the internal state to [State::AwaitingRequest]
+    /// where it can accept new a request from the reader.
     pub fn retrieve_response(&mut self) -> Option<Vec<u8>> {
         if self.response_ready() {
             // Replace state with AwaitingRequest.
@@ -409,7 +579,13 @@ impl SessionManager {
         //TODO validate the reader authentication. This code only grabs the CN from the x5chain
         let mut validation_errors: Vec<X509Error> = vec![];
         if let Some(reader_auth) = doc_request.reader_auth {
-            if let Some(x5chain_cbor) = reader_auth.unprotected().get_i(33) {
+            if let Some(x5chain_cbor) = reader_auth
+                .unprotected
+                .rest
+                .iter()
+                .find(|(label, _)| label == &Label::Int(X5CHAIN_HEADER_LABEL))
+                .map(|(_, value)| value)
+            {
                 let x5c = x5chain_cbor;
 
                 let x5chain =
@@ -485,17 +661,20 @@ impl PreparedDeviceResponse {
 
     /// Identifies that the response ready to be finalized.
     ///
-    /// If false, then there are still items that need to be authorized.
+    /// If `false`, then there are still items that need to be authorized.
     pub fn is_complete(&self) -> bool {
         self.prepared_documents.is_empty()
     }
 
+    /// When there are documents to be signed, it will return then next one for signing.
     pub fn get_next_signature_payload(&self) -> Option<(Uuid, &[u8])> {
         self.prepared_documents
             .last()
-            .map(|doc| (doc.id, doc.prepared_cose_sign1.signature_payload()))
+            .map(|doc| (doc.id, doc.prepared_cose.signature_payload()))
     }
 
+    /// Submit the externally signed signature for object
+    /// returned by [PreparedDeviceResponse::get_next_signature_payload].
     pub fn submit_next_signature(&mut self, signature: Vec<u8>) {
         let signed_doc = match self.prepared_documents.pop() {
             Some(doc) => doc.finalize(signature),
@@ -509,6 +688,7 @@ impl PreparedDeviceResponse {
         self.signed_documents.push(signed_doc);
     }
 
+    /// Will finalize and prepare the device response.
     pub fn finalize_response(self) -> DeviceResponse {
         if !self.is_complete() {
             //tracing::warn!("attempt to finalize PreparedDeviceResponse before all prepared documents had been authorized");
@@ -529,17 +709,22 @@ impl PreparedDocument {
         let Self {
             issuer_signed,
             device_namespaces,
-            prepared_cose_sign1,
+            prepared_cose,
             errors,
             doc_type,
             ..
         } = self;
-        let cose_sign1 = prepared_cose_sign1.finalize(signature);
+        let device_auth = match prepared_cose {
+            PreparedCose::Sign1(inner) => DeviceAuth::Signature {
+                device_signature: inner.finalize(signature),
+            },
+            PreparedCose::Mac0(inner) => DeviceAuth::Mac {
+                device_mac: inner.finalize(signature),
+            },
+        };
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,
-            device_auth: DeviceAuth::Signature {
-                device_signature: cose_sign1,
-            },
+            device_auth,
         };
         DeviceResponseDoc {
             doc_type,
@@ -550,11 +735,18 @@ impl PreparedDocument {
     }
 }
 
+/// Keeps the device session data.
+///
+/// One implementation is [SessionManager].
 pub trait DeviceSession {
     type ST: SessionTranscript;
 
+    /// Get the device documents.
     fn documents(&self) -> &Documents;
     fn session_transcript(&self) -> Self::ST;
+    fn device_auth_type(&self) -> DeviceAuthType;
+
+    /// Prepare the response based on the requested items and permitted ones.
     fn prepare_response(
         &self,
         requests: &RequestedItems,
@@ -665,7 +857,7 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let device_auth_bytes = match serde_cbor::to_vec(&device_auth) {
+            let device_auth_bytes = match cbor::to_vec(&device_auth) {
                 Ok(dab) => dab,
                 Err(_e) => {
                     let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
@@ -675,19 +867,50 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let prepared_cose_sign1 = match CoseSign1::builder()
-                .detached()
-                .payload(device_auth_bytes)
-                .signature_algorithm(signature_algorithm)
-                .prepare()
-            {
-                Ok(prepared) => prepared,
-                Err(_e) => {
-                    let error: DocumentError = [(doc_type, DocumentErrorCode::DataNotReturned)]
-                        .into_iter()
-                        .collect();
-                    document_errors.push(error);
-                    continue;
+            let header = coset::HeaderBuilder::new()
+                .algorithm(signature_algorithm)
+                .build();
+
+            let prepared_cose = match self.device_auth_type() {
+                DeviceAuthType::Sign1 => {
+                    let cose_sign1_builder = CoseSign1Builder::new().protected(header);
+                    let prepared_cose_sign1 = match PreparedCoseSign1::new(
+                        cose_sign1_builder,
+                        Some(&device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Sign1(prepared_cose_sign1)
+                }
+                DeviceAuthType::Mac0 => {
+                    let cose_mac0_builder = CoseMac0Builder::new().protected(header);
+                    let prepared_cose_mac0 = match PreparedCoseMac0::new(
+                        cose_mac0_builder,
+                        Some(&device_auth_bytes),
+                        None,
+                        true,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(_e) => {
+                            let error: DocumentError =
+                                [(doc_type, DocumentErrorCode::DataNotReturned)]
+                                    .into_iter()
+                                    .collect();
+                            document_errors.push(error);
+                            continue;
+                        }
+                    };
+                    PreparedCose::Mac0(prepared_cose_mac0)
                 }
             };
 
@@ -699,7 +922,7 @@ pub trait DeviceSession {
                     issuer_auth: document.issuer_auth.clone(),
                 },
                 device_namespaces,
-                prepared_cose_sign1,
+                prepared_cose,
                 errors: errors.try_into().ok(),
             };
             prepared_documents.push(prepared_document);
@@ -722,6 +945,10 @@ impl DeviceSession for SessionManager {
 
     fn session_transcript(&self) -> SessionTranscript180135 {
         self.session_transcript.clone()
+    }
+
+    fn device_auth_type(&self) -> DeviceAuthType {
+        self.device_auth_type
     }
 }
 
@@ -817,9 +1044,9 @@ pub fn nearest_age_attestation(
             .collect();
 
     let (true_age_over_claims, false_age_over_claims): (Vec<_>, Vec<_>) =
-        age_over_claims_numerical?
-            .into_iter()
-            .partition(|x| x.1.to_owned().into_inner().element_value == CborValue::Bool(true));
+        age_over_claims_numerical?.into_iter().partition(|x| {
+            x.1.to_owned().into_inner().element_value == ciborium::Value::Bool(true)
+        });
 
     let nearest_age_over = true_age_over_claims
         .iter()
@@ -844,10 +1071,22 @@ pub fn nearest_age_attestation(
     Ok(None)
 }
 
+/// Will parse the corresponding age as a number from the `age_over_*` element identifier.
+///
+/// # Example
+///
+/// ```
+/// use isomdl::presentation::device::parse_age_from_element_identifier;
+///
+/// let element = "age_over_21".to_string();
+/// let age = parse_age_from_element_identifier(element).unwrap();
+/// assert_eq!(age, 21);
+/// ```
 pub fn parse_age_from_element_identifier(element_identifier: String) -> Result<u8, Error> {
     Ok(AgeOver::try_from(element_identifier)?.0)
 }
 
+/// Holds the age part from the `age_over_*` element identifier.
 pub struct AgeOver(u8);
 
 impl TryFrom<String> for AgeOver {
@@ -945,21 +1184,21 @@ mod test {
             digest_id: DigestId::new(1),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier1.clone(),
-            element_value: CborValue::Bool(true),
+            element_value: ciborium::Value::Bool(true),
         };
 
         let issuer_signed_item2 = IssuerSignedItem {
             digest_id: DigestId::new(2),
             random: ByteStr::from(random.clone()),
             element_identifier: element_identifier2.clone(),
-            element_value: CborValue::Bool(false),
+            element_value: ciborium::Value::Bool(false),
         };
 
         let issuer_signed_item3 = IssuerSignedItem {
             digest_id: DigestId::new(3),
             random: ByteStr::from(random),
             element_identifier: element_identifier3.clone(),
-            element_value: CborValue::Bool(false),
+            element_value: ciborium::Value::Bool(false),
         };
 
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();
