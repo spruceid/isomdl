@@ -58,7 +58,7 @@ pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Err
         .find(|ext| ext.extn_id.to_string() == *OID_KEY_USAGE)
     {
         x509_errors.append(&mut validate_root_key_usage(
-            key_usage.extn_value.as_bytes().to_vec(),
+            key_usage.extn_value.as_bytes(),
         ));
     } else {
         x509_errors.push(Error::ValidationError(
@@ -221,7 +221,7 @@ pub fn validate_signer_key_usage(bytes: Vec<u8>) -> Vec<Error> {
 
 /*  A root certificate should have KeyCertSign and CRLSign set for key usage,
 but no other key usages are allowed */
-pub fn validate_root_key_usage(bytes: Vec<u8>) -> Vec<Error> {
+pub fn validate_root_key_usage(bytes: &[u8]) -> Vec<Error> {
     let mut errors = vec![];
     let key_usage = KeyUsage::from_der(&bytes);
     match key_usage {
