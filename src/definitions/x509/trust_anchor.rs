@@ -151,7 +151,9 @@ pub fn validate_with_ruleset(
             };
         }
         TrustAnchor::Custom(_certificate, _ruleset) => {
-            //TODO
+            errors.push(X509Error::CustomTrustAnchorNotImplemented(
+                "Custom trust anchor validation not yet implemented".to_string(),
+            ));
         }
     }
     errors
@@ -321,14 +323,10 @@ fn apply_ruleset(
             }
             Ok(vec![])
         }
-        RuleSetType::ReaderAuth => {
-            //TODO
-
-            Ok(validate_iaca_signer_extensions(
-                leaf_extensions,
-                READER_VALUE_EXTENDED_KEY_USAGE,
-            ))
-        }
+        RuleSetType::ReaderAuth => Ok(validate_iaca_signer_extensions(
+            leaf_extensions,
+            READER_VALUE_EXTENDED_KEY_USAGE,
+        )),
     }
 }
 
