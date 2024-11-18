@@ -56,6 +56,32 @@ fn is_optional(ty: &Type) -> bool {
     }
 }
 
+// Attribute for setting the path to the isomdl crate, mostly for use
+// internally in isomdl to refer to itself as 'crate'.
+fn crate_path(attr: &Attribute) -> Option<String> {
+    get_isomdl_attributes(attr)?
+        .filter_map(|nested_meta| {
+            let meta = match nested_meta {
+                NestedMeta::Meta(meta) => meta,
+                _ => return None,
+            };
+            match meta {
+                Meta::NameValue(pair) => {
+                    if !pair.path.is_ident("crate") {
+                        return None;
+                    }
+                    if let Lit::Str(s) = pair.lit {
+                        Some(s.value())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        })
+        .next()
+}
+
 fn rename(attr: &Attribute) -> Option<String> {
     get_isomdl_attributes(attr)?
         .filter_map(|nested_meta| {

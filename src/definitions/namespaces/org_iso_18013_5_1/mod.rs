@@ -29,6 +29,7 @@ use crate::{
 
 /// The `org.iso.18013.5.1` namespace.
 #[derive(Debug, Clone, FromJson, ToCbor)]
+#[isomdl(crate = "crate")]
 pub struct OrgIso1801351 {
     pub family_name: Latin1,
     pub given_name: Latin1,

@@ -1,4 +1,3 @@
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::{ops::Deref, str::FromStr};
 
@@ -27,8 +26,8 @@ impl Deref for Latin1 {
     }
 }
 
-impl From<Latin1> for Cbor {
-    fn from(l: Latin1) -> Cbor {
+impl From<Latin1> for ciborium::Value {
+    fn from(l: Latin1) -> ciborium::Value {
         l.0.into()
     }
 }
@@ -94,6 +93,7 @@ mod test {
 
     #[test]
     fn upper_latin() {
+        #[allow(clippy::invisible_characters)]
         let upper_latin_chars = vec![
             ' ', '¡', '¢', '£', '¤', '¥', '¦', '§', '¨', '©', 'ª', '«', '¬', '\u{AD}', '®', '¯',
             '°', '±', '²', '³', '´', 'µ', '¶', '·', '¸', '¹', 'º', '»', '¼', '½', '¾', '¿', 'À',

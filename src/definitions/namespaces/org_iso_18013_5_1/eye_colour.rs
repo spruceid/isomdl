@@ -1,5 +1,4 @@
 use crate::definitions::traits::{FromJson, FromJsonError};
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 use std::str::FromStr;
 
@@ -41,9 +40,9 @@ impl EyeColour {
     }
 }
 
-impl From<EyeColour> for Cbor {
-    fn from(h: EyeColour) -> Cbor {
-        Cbor::Text(h.to_str().to_string())
+impl From<EyeColour> for ciborium::Value {
+    fn from(h: EyeColour) -> ciborium::Value {
+        ciborium::Value::Text(h.to_str().to_string())
     }
 }
 
@@ -51,7 +50,7 @@ impl FromStr for EyeColour {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Error> {
-        match s {
+        match s.to_lowercase().as_str() {
             "black" => Ok(Self::Black),
             "blue" => Ok(Self::Blue),
             "brown" => Ok(Self::Brown),

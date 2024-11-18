@@ -9,13 +9,13 @@ use p256::ecdsa::VerifyingKey;
 
 use const_oid::AssociatedOid;
 
+use ciborium::Value as CborValue;
 use elliptic_curve::{
     sec1::{FromEncodedPoint, ModulusSize, ToEncodedPoint},
     AffinePoint, CurveArithmetic, FieldBytesSize, PublicKey,
 };
 use p256::NistP256;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 use signature::Verifier;
 use std::collections::HashSet;
 use std::hash::Hash;
@@ -26,7 +26,8 @@ use x509_cert::{
     der::{referenced::OwnedToRef, Decode},
 };
 
-pub const X5CHAIN_HEADER_LABEL: i128 = 33;
+/// See: https://www.iana.org/assignments/cose/cose.xhtml#header-parameters
+pub const X5CHAIN_HEADER_LABEL: i64 = 0x21;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct X509 {
@@ -67,7 +68,7 @@ impl X509 {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct X5Chain(NonEmptyVec<X509>);
 
 impl From<NonEmptyVec<X509>> for X5Chain {
@@ -161,8 +162,7 @@ impl X5Chain {
         }
 
         //validate the last certificate in the chain against trust anchor
-        let last_in_chain = x5chain.last();
-        if let Some(x509) = last_in_chain {
+        if let Some(x509) = x5chain.last() {
             match x509_cert::Certificate::from_der(&x509.bytes) {
                 Ok(cert) => {
                     // if the issuer of the signer certificate is known in the trust anchor registry, do the validation.

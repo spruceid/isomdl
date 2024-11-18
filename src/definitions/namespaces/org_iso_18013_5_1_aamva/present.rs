@@ -1,6 +1,5 @@
 use crate::definitions::traits::{FromJson, FromJsonError, ToCbor};
 use anyhow::anyhow;
-use serde_cbor::Value as Cbor;
 use serde_json::Value as Json;
 
 /// Indicator of presence for elements in the org.iso.18013.5.1.aamva namespace, as per the AAMVA mDL Implementation
@@ -18,7 +17,7 @@ impl FromJson for Present {
 }
 
 impl ToCbor for Present {
-    fn to_cbor(self) -> Cbor {
-        Cbor::Integer(1)
+    fn to_cbor(self) -> ciborium::Value {
+        ciborium::Value::Integer(1.into())
     }
 }

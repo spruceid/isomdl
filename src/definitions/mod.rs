@@ -1,3 +1,4 @@
+//! This module contains the definitions for all components involved in the lib.
 pub mod device_engagement;
 pub mod device_key;
 pub mod device_request;
@@ -9,6 +10,7 @@ pub mod mso;
 pub mod namespaces;
 pub mod session;
 pub mod traits;
+pub mod validated_request;
 pub mod validated_response;
 pub mod validity_info;
 pub mod x509;

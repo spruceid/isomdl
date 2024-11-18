@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ValidatedResponse {
     pub response: BTreeMap<String, Value>,
     pub decryption: Status,
@@ -14,7 +14,7 @@ pub struct ValidatedResponse {
 
 pub type ValidationErrors = BTreeMap<String, serde_json::Value>;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub enum Status {
     #[default]
     Unchecked,

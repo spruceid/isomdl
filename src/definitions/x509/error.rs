@@ -12,12 +12,8 @@ pub enum Error {
     CborDecodingError,
     #[error("Error decoding json")]
     JsonError,
-}
-
-impl From<serde_cbor::Error> for Error {
-    fn from(_: serde_cbor::Error) -> Self {
-        Error::CborDecodingError
-    }
+    #[error("Custom Trust Anchor Not Implemented: {0}")]
+    CustomTrustAnchorNotImplemented(String),
 }
 
 impl From<serde_json::Error> for Error {
