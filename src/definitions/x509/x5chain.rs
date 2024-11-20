@@ -1,3 +1,4 @@
+use crate::definitions::helpers::non_empty_vec;
 use crate::definitions::helpers::NonEmptyVec;
 use crate::definitions::x509::error::Error as X509Error;
 use crate::definitions::x509::trust_anchor::check_validity_period;
@@ -77,6 +78,22 @@ impl From<NonEmptyVec<X509>> for X5Chain {
     }
 }
 
+impl TryFrom<Vec<X509>> for X5Chain {
+    type Error = non_empty_vec::Error;
+
+    fn try_from(v: Vec<X509>) -> Result<Self, Self::Error> {
+        NonEmptyVec::try_from_iter(v.into_iter()).map(Self)
+    }
+}
+
+impl TryFrom<Vec<Vec<u8>>> for X5Chain {
+    type Error = non_empty_vec::Error;
+
+    fn try_from(v: Vec<Vec<u8>>) -> Result<Self, Self::Error> {
+        NonEmptyVec::try_from_iter(v.into_iter().map(|bytes| X509 { bytes })).map(Self)
+    }
+}
+
 impl X5Chain {
     pub fn builder() -> Builder {
         Builder::default()
@@ -124,6 +141,8 @@ impl X5Chain {
         }
     }
 
+    /// Returns the first certificate in the x.509 certificate chain,
+    /// which is expected be the reader's certificate.
     pub fn get_signer_key(&self) -> Result<VerifyingKey, X509Error> {
         let leaf = self.0.first().ok_or(X509Error::CborDecodingError)?;
         leaf.public_key().map(|key| key.into())

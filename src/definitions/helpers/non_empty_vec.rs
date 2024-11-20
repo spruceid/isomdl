@@ -58,6 +58,22 @@ impl<T: Clone> NonEmptyVec<T> {
     }
 }
 
+impl<T: Clone> NonEmptyVec<T> {
+    pub fn try_from_iter<I: IntoIterator<Item = T>>(iter: I) -> Result<Self, Error> {
+        let mut v = Vec::new();
+        let mut iter = iter.into_iter();
+        if let Some(t) = iter.next() {
+            v.push(t);
+        } else {
+            return Err(Error::Empty);
+        }
+        for t in iter {
+            v.push(t);
+        }
+        Ok(NonEmptyVec(v))
+    }
+}
+
 impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {
     type Error = Error;
 
