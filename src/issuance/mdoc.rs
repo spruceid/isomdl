@@ -28,6 +28,7 @@ pub type Namespaces = BTreeMap<String, BTreeMap<String, ciborium::Value>>;
 pub struct Mdoc {
     pub doc_type: String,
     pub mso: Mso,
+    #[serde(rename = "nameSpaces")]
     pub namespaces: IssuerNamespaces,
     pub issuer_auth: MaybeTagged<CoseSign1>,
 }
