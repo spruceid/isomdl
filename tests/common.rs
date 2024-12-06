@@ -4,12 +4,13 @@ use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
 use isomdl::definitions::helpers::NonEmptyMap;
-use isomdl::definitions::validated_request::ValidatedRequest;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::x509::X5Chain;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
-use isomdl::presentation::{device, reader, Stringify};
+use isomdl::presentation::{
+    authentication::RequestAuthenticationOutcome, device, reader, Stringify,
+};
 use signature::Signer;
 use uuid::Uuid;
 
@@ -80,7 +81,7 @@ impl Device {
         state: SessionManagerEngaged,
         request: Vec<u8>,
         trusted_verifiers: Option<TrustAnchorRegistry>,
-    ) -> Result<(device::SessionManager, ValidatedRequest)> {
+    ) -> Result<(device::SessionManager, RequestAuthenticationOutcome)> {
         let (session_manager, validated_request) = {
             let session_establishment: definitions::SessionEstablishment =
                 cbor::from_slice(&request).context("could not deserialize request")?;

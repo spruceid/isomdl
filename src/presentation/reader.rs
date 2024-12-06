@@ -13,19 +13,28 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use super::{mdoc_auth::device_authentication, mdoc_auth::issuer_authentication};
-use crate::cbor;
-use crate::cbor::CborError;
-use crate::definitions::device_key::cose_key::Error as CoseError;
-use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use crate::definitions::x509::x5chain::X5CHAIN_HEADER_LABEL;
-use crate::definitions::x509::X5Chain;
-use crate::definitions::{Status, ValidatedResponse};
-use crate::presentation::reader::device_request::ItemsRequestBytes;
-use crate::presentation::reader::Error as ReaderError;
+use std::collections::BTreeMap;
+
+use aes::cipher::{generic_array::GenericArray, typenum::U32};
+use anyhow::{anyhow, Result};
+use coset::{CoseSign1Builder, Header, Label};
+use p256::ecdsa::SigningKey;
+use sec1::DecodeEcPrivateKey;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use serde_json::Value;
+use uuid::Uuid;
+
+use super::authentication::{
+    mdoc::{device_authentication, issuer_authentication},
+    AuthenticationStatus, ResponseAuthenticationOutcome,
+};
+
 use crate::{
+    cbor::{self, CborError},
     definitions::{
         device_engagement::DeviceRetrievalMethod,
+        device_key::cose_key::Error as CoseError,
         device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
         device_response::Document,
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
@@ -33,22 +42,11 @@ use crate::{
             self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
             SessionEstablishment,
         },
+        x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_HEADER_LABEL, X5Chain},
+        DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
     },
-    definitions::{DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135},
+    presentation::reader::{device_request::ItemsRequestBytes, Error as ReaderError},
 };
-use aes::cipher::{generic_array::GenericArray, typenum::U32};
-use anyhow::{anyhow, Result};
-use coset::{CoseSign1Builder, Header, Label};
-// use cose_rs::algorithm::Algorithm;
-// use cose_rs::sign1::HeaderMap;
-// use cose_rs::CoseSign1;
-use p256::ecdsa::SigningKey;
-use sec1::DecodeEcPrivateKey;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use serde_json::Value;
-use std::collections::BTreeMap;
-use uuid::Uuid;
 
 /// The main state of the reader.
 ///
@@ -351,17 +349,12 @@ impl SessionManager {
         Ok(device_response)
     }
 
-    pub fn handle_response(&mut self, response: &[u8]) -> ValidatedResponse {
-        let mut validated_response = ValidatedResponse::default();
+    pub fn handle_response(&mut self, response: &[u8]) -> ResponseAuthenticationOutcome {
+        let mut validated_response = ResponseAuthenticationOutcome::default();
 
         let device_response = match self.decrypt_response(response) {
-            Ok(device_response) => {
-                validated_response.decryption = Status::Valid;
-
-                device_response
-            }
+            Ok(device_response) => device_response,
             Err(e) => {
-                validated_response.decryption = Status::Invalid;
                 validated_response.errors.insert(
                     "decryption_errors".to_string(),
                     json!(vec![format!("{e:?}")]),
@@ -375,7 +368,6 @@ impl SessionManager {
                 self.validate_response(x5chain, document.clone(), namespaces)
             }
             Err(e) => {
-                validated_response.parsing = Status::Invalid;
                 validated_response
                     .errors
                     .insert("parsing_errors".to_string(), json!(vec![format!("{e:?}")]));
@@ -389,18 +381,18 @@ impl SessionManager {
         x5chain: X5Chain,
         document: Document,
         namespaces: BTreeMap<String, serde_json::Value>,
-    ) -> ValidatedResponse {
-        let mut validated_response = ValidatedResponse {
+    ) -> ResponseAuthenticationOutcome {
+        let mut validated_response = ResponseAuthenticationOutcome {
             response: namespaces,
             ..Default::default()
         };
 
         match device_authentication(&document, self.session_transcript.clone()) {
             Ok(_) => {
-                validated_response.device_authentication = Status::Valid;
+                validated_response.device_authentication = AuthenticationStatus::Valid;
             }
             Err(e) => {
-                validated_response.device_authentication = Status::Invalid;
+                validated_response.device_authentication = AuthenticationStatus::Invalid;
                 validated_response.errors.insert(
                     "device_authentication_errors".to_string(),
                     json!(vec![format!("{e:?}")]),
@@ -412,10 +404,10 @@ impl SessionManager {
         if validation_errors.is_empty() {
             match issuer_authentication(x5chain, &document.issuer_signed) {
                 Ok(_) => {
-                    validated_response.issuer_authentication = Status::Valid;
+                    validated_response.issuer_authentication = AuthenticationStatus::Valid;
                 }
                 Err(e) => {
-                    validated_response.issuer_authentication = Status::Invalid;
+                    validated_response.issuer_authentication = AuthenticationStatus::Invalid;
                     validated_response.errors.insert(
                         "issuer_authentication_errors".to_string(),
                         serde_json::json!(vec![format!("{e:?}")]),
@@ -426,7 +418,7 @@ impl SessionManager {
             validated_response
                 .errors
                 .insert("certificate_errors".to_string(), json!(validation_errors));
-            validated_response.issuer_authentication = Status::Invalid
+            validated_response.issuer_authentication = AuthenticationStatus::Invalid
         };
 
         validated_response

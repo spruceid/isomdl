@@ -16,19 +16,9 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use crate::cose::mac0::PreparedCoseMac0;
-use crate::cose::sign1::PreparedCoseSign1;
-use crate::cose::MaybeTagged;
-use crate::definitions::device_signed::DeviceAuthType;
-use crate::definitions::validated_request::Status as ValidationStatus;
-use crate::definitions::validated_request::ValidatedRequest;
-use crate::definitions::x509::error::Error as X509Error;
-use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use crate::definitions::x509::x5chain::X5CHAIN_HEADER_LABEL;
-use crate::definitions::x509::X5Chain;
-use crate::definitions::IssuerSignedItem;
 use crate::{
     cbor,
+    cose::{mac0::PreparedCoseMac0, sign1::PreparedCoseSign1, MaybeTagged},
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
@@ -36,13 +26,19 @@ use crate::{
             Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
             Errors as NamespaceErrors, Status,
         },
-        device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
+        device_signed::{
+            DeviceAuth, DeviceAuthType, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned,
+        },
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
             self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
         },
-        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
+        x509::{
+            error::Error as X509Error, trust_anchor::TrustAnchorRegistry,
+            x5chain::X5CHAIN_HEADER_LABEL, X5Chain,
+        },
+        CoseKey, DeviceEngagement, DeviceResponse, IssuerSignedItem, Mso, SessionEstablishment,
     },
     issuance::Mdoc,
 };
@@ -58,6 +54,8 @@ use std::num::ParseIntError;
 use uuid::Uuid;
 use x509_cert::attr::AttributeTypeAndValue;
 use x509_cert::der::Decode;
+
+use super::authentication::{AuthenticationStatus, RequestAuthenticationOutcome};
 
 /// Initialisation state.
 ///
@@ -300,7 +298,7 @@ impl SessionManagerEngaged {
         self,
         session_establishment: SessionEstablishment,
         trusted_verifiers: Option<TrustAnchorRegistry>,
-    ) -> anyhow::Result<(SessionManager, ValidatedRequest)> {
+    ) -> anyhow::Result<(SessionManager, RequestAuthenticationOutcome)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript =
             SessionTranscript180135(self.device_engagement, e_reader_key.clone(), self.handover);
@@ -350,7 +348,7 @@ impl SessionManager {
         })
     }
 
-    fn validate_request(&self, request: DeviceRequest) -> ValidatedRequest {
+    fn validate_request(&self, request: DeviceRequest) -> RequestAuthenticationOutcome {
         let items_request: Vec<ItemsRequest> = request
             .doc_requests
             .clone()
@@ -359,10 +357,10 @@ impl SessionManager {
             .map(|DocRequest { items_request, .. }| items_request.into_inner())
             .collect();
 
-        let mut validated_request = ValidatedRequest {
+        let mut validated_request = RequestAuthenticationOutcome {
             items_request,
             common_name: None,
-            reader_authentication: ValidationStatus::Unchecked,
+            reader_authentication: AuthenticationStatus::Unchecked,
             errors: BTreeMap::new(),
         };
 
@@ -380,7 +378,7 @@ impl SessionManager {
         if let Some(doc_request) = request.doc_requests.first() {
             let (validation_errors, common_name) = self.reader_authentication(doc_request.clone());
             if validation_errors.is_empty() {
-                validated_request.reader_authentication = ValidationStatus::Valid;
+                validated_request.reader_authentication = AuthenticationStatus::Valid;
             }
 
             validated_request.common_name = common_name;
@@ -409,8 +407,8 @@ impl SessionManager {
         self.state = State::Signing(prepared_response);
     }
 
-    fn handle_decoded_request(&mut self, request: SessionData) -> ValidatedRequest {
-        let mut validated_request = ValidatedRequest::default();
+    fn handle_decoded_request(&mut self, request: SessionData) -> RequestAuthenticationOutcome {
+        let mut validated_request = RequestAuthenticationOutcome::default();
         let data = match request.data {
             Some(d) => d,
             None => {
@@ -443,7 +441,7 @@ impl SessionManager {
             Ok(r) => r,
             Err(e) => {
                 self.state = State::Signing(e);
-                return ValidatedRequest::default();
+                return RequestAuthenticationOutcome::default();
             }
         };
 
@@ -457,8 +455,8 @@ impl SessionManager {
     ///
     /// This method will return the [ValidatedRequest] struct, which will
     /// include the items requested by the reader/verifier.
-    pub fn handle_request(&mut self, request: &[u8]) -> ValidatedRequest {
-        let mut validated_request = ValidatedRequest::default();
+    pub fn handle_request(&mut self, request: &[u8]) -> RequestAuthenticationOutcome {
+        let mut validated_request = RequestAuthenticationOutcome::default();
         let session_data: SessionData = match cbor::from_slice(request) {
             Ok(sd) => sd,
             Err(e) => {
