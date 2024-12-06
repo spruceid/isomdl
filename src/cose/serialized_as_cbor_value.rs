@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// implement `Serialize`/`Deserialize` but only `AsCborValue`.
 pub struct SerializedAsCborValue<T>(pub T);
 
-impl<'a, T: Clone + AsCborValue> Serialize for SerializedAsCborValue<&'a T> {
+impl<T: Clone + AsCborValue> Serialize for SerializedAsCborValue<&T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

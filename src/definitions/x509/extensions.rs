@@ -223,7 +223,7 @@ pub fn validate_signer_key_usage(bytes: Vec<u8>) -> Vec<Error> {
 but no other key usages are allowed */
 pub fn validate_root_key_usage(bytes: &[u8]) -> Vec<Error> {
     let mut errors = vec![];
-    let key_usage = KeyUsage::from_der(&bytes);
+    let key_usage = KeyUsage::from_der(bytes);
     match key_usage {
         Ok(ku) => {
             if !ku.crl_sign() {
@@ -328,7 +328,7 @@ pub fn validate_basic_constraints(bytes: Vec<u8>) -> Vec<Error> {
     let basic_constraints = BasicConstraints::from_der(&bytes);
     match basic_constraints {
         Ok(bc) => {
-            if !bc.path_len_constraint.is_some_and(|path_len| path_len == 0) && bc.ca {
+            if bc.path_len_constraint.is_none_or(|path_len| path_len != 0) && bc.ca {
                 return vec![Error::ValidationError(format!(
                     "Basic constraints expected to be CA:true, path_len:0, but found: {:?}",
                     bc

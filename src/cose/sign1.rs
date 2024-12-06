@@ -231,8 +231,6 @@ mod p256 {
 
     use crate::cose::SignatureAlgorithm;
 
-    /// Implement [`SignatureAlgorithm`].
-
     impl SignatureAlgorithm for SigningKey {
         fn algorithm(&self) -> iana::Algorithm {
             iana::Algorithm::ES256
@@ -251,8 +249,6 @@ mod p384 {
     use p384::ecdsa::{SigningKey, VerifyingKey};
 
     use crate::cose::SignatureAlgorithm;
-
-    /// Implement [`SignatureAlgorithm`].
 
     impl SignatureAlgorithm for SigningKey {
         fn algorithm(&self) -> iana::Algorithm {
