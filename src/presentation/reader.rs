@@ -107,8 +107,8 @@ pub enum Error {
     /// Not a valid JSON input.
     #[error("not a valid JSON input.")]
     JsonError,
-    /// Unexpected date type for data_element.
-    #[error("Unexpected date type for data_element.")]
+    /// Unexpected data type for data element.
+    #[error("Unexpected data type for data element.")]
     ParsingError,
     /// Request for data is invalid.
     #[error("Request for data is invalid.")]
@@ -117,10 +117,10 @@ pub enum Error {
     MdocAuth(String),
     #[error("Currently unsupported format")]
     Unsupported,
-    #[error("No x5chain found for mdoc authentication")]
+    #[error("No x5chain found for issuer authentication")]
     X5Chain,
-    #[error("Could not serialize to cbor: {0}")]
-    CborError(CborError),
+    #[error("issuer authentication failed: {0}")]
+    IssuerAuthentication(String),
 }
 
 impl From<CborError> for Error {
@@ -376,7 +376,7 @@ impl SessionManager {
         }
     }
 
-    pub fn validate_response(
+    fn validate_response(
         &mut self,
         x5chain: X5Chain,
         document: Document,

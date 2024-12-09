@@ -24,11 +24,9 @@ pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> 
         issuer_signed
             .issuer_auth
             .verify::<VerifyingKey, Signature>(&signer_key, None, None);
-    if !verification_result.is_success() {
-        Err(ReaderError::ParsingError)?
-    } else {
-        Ok(())
-    }
+    verification_result
+        .into_result()
+        .map_err(ReaderError::IssuerAuthentication)
 }
 
 pub fn device_authentication(
@@ -62,7 +60,6 @@ pub fn device_authentication(
             let namespaces_bytes = &document.device_signed.namespaces;
             let device_auth: &DeviceAuth = &document.device_signed.device_auth;
 
-            //TODO: fix for attended use case:
             match device_auth {
                 DeviceAuth::Signature { device_signature } => {
                     let detached_payload = Tag24::new(DeviceAuthentication::new(

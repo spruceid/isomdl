@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use isomdl::definitions::x509::{
     error::Error as X509Error,
-    trust_anchor::{RuleSetType, TrustAnchor, TrustAnchorRegistry, ValidationRuleSet},
+    trust_anchor::{TrustAnchor, TrustAnchorRegistry},
     x5chain::X509,
     X5Chain,
 };
@@ -17,16 +17,11 @@ pub fn validate(
         .map_err(|e| anyhow!("unable to parse pem: {}", e))?
         .1;
 
-    let ruleset = ValidationRuleSet {
-        distinguished_names: vec!["2.5.4.6".to_string(), "2.5.4.8".to_string()],
-        typ: match rules {
-            RuleSet::Iaca => RuleSetType::IACA,
-            RuleSet::Aamva => RuleSetType::AAMVA,
-            RuleSet::NamesOnly => RuleSetType::NamesOnly,
-        },
+    let trust_anchor = match rules {
+        RuleSet::Iaca => TrustAnchor::Iaca(X509 { bytes: root_bytes }),
+        RuleSet::Aamva => TrustAnchor::Aamva(X509 { bytes: root_bytes }),
     };
 
-    let trust_anchor = TrustAnchor::Custom(X509 { bytes: root_bytes }, ruleset);
     let trust_anchor_registry = TrustAnchorRegistry {
         certificates: vec![trust_anchor],
     };

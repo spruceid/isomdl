@@ -36,7 +36,6 @@ enum Action {
 enum RuleSet {
     Iaca,
     Aamva,
-    NamesOnly,
 }
 
 fn main() -> Result<(), Error> {

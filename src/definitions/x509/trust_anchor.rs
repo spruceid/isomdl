@@ -3,20 +3,17 @@ use crate::definitions::x509::extensions::{
     validate_iaca_root_extensions, validate_iaca_signer_extensions,
 };
 use crate::definitions::x509::x5chain::X509;
+use const_oid::ObjectIdentifier;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use x509_cert::attr::AttributeTypeAndValue;
 use x509_cert::certificate::CertificateInner;
 use x509_cert::der::Decode;
 
-const MDOC_VALUE_EXTENDED_KEY_USAGE: &str = "1.0.18013.5.1.2";
-const READER_VALUE_EXTENDED_KEY_USAGE: &str = "1.0.18013.5.1.6";
-
 #[derive(Serialize, Deserialize, Clone)]
 pub enum TrustAnchor {
     Iaca(X509),
     Aamva(X509),
-    Custom(X509, ValidationRuleSet),
     IacaReader(X509),
 }
 
@@ -150,9 +147,6 @@ pub fn validate_with_ruleset(
                 }
             };
         }
-        TrustAnchor::Custom(_certificate, _ruleset) => {
-            //TODO
-        }
     }
     errors
 }
@@ -280,7 +274,7 @@ fn apply_ruleset(
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
             extension_errors.append(&mut validate_iaca_signer_extensions(
                 leaf_extensions,
-                MDOC_VALUE_EXTENDED_KEY_USAGE,
+                mdoc_extended_key_usage_oid(),
             ));
             for dn in leaf_distinguished_names {
                 if dn.oid.to_string() == *"2.5.4.8" {
@@ -304,7 +298,7 @@ fn apply_ruleset(
             let mut extension_errors = validate_iaca_root_extensions(root_extensions);
             extension_errors.append(&mut validate_iaca_signer_extensions(
                 leaf_extensions,
-                MDOC_VALUE_EXTENDED_KEY_USAGE,
+                mdoc_extended_key_usage_oid(),
             ));
             for dn in leaf_distinguished_names {
                 let Some(_root_dn) = root_distinguished_names.iter().find(|r| r == &&dn) else {
@@ -321,14 +315,10 @@ fn apply_ruleset(
             }
             Ok(vec![])
         }
-        RuleSetType::ReaderAuth => {
-            //TODO
-
-            Ok(validate_iaca_signer_extensions(
-                leaf_extensions,
-                READER_VALUE_EXTENDED_KEY_USAGE,
-            ))
-        }
+        RuleSetType::ReaderAuth => Ok(validate_iaca_signer_extensions(
+            leaf_extensions,
+            reader_extended_key_usage_oid(),
+        )),
     }
 }
 
@@ -346,12 +336,6 @@ pub fn find_anchor(
         .into_iter()
         .find(|trust_anchor| match trust_anchor {
             TrustAnchor::Iaca(certificate) => {
-                match x509_cert::Certificate::from_der(&certificate.bytes) {
-                    Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
-                    Err(_) => false,
-                }
-            }
-            TrustAnchor::Custom(certificate, _ruleset) => {
                 match x509_cert::Certificate::from_der(&certificate.bytes) {
                     Ok(root_cert) => root_cert.tbs_certificate.subject == leaf_issuer,
                     Err(_) => false,
@@ -376,4 +360,27 @@ pub fn find_anchor(
         ));
     };
     Ok(Some(trust_anchor))
+}
+
+fn mdoc_extended_key_usage_oid() -> ObjectIdentifier {
+    // Unwrap safety: unit tested.
+    ObjectIdentifier::new("1.0.18013.5.1.2").unwrap()
+}
+
+fn reader_extended_key_usage_oid() -> ObjectIdentifier {
+    // Unwrap safety: unit tested.
+    ObjectIdentifier::new("1.0.18013.5.1.6").unwrap()
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn mdoc_extended_key_usage_oid_doesnt_panic() {
+        super::mdoc_extended_key_usage_oid();
+    }
+
+    #[test]
+    fn reader_extended_key_usage_oid_doesnt_panic() {
+        super::reader_extended_key_usage_oid();
+    }
 }
