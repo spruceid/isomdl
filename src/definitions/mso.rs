@@ -63,6 +63,9 @@ pub struct Mso {
 
     /// Information about the validity of the Mso object.
     pub validity_info: ValidityInfo,
+
+    #[serde(flatten)]
+    pub extra_fields: BTreeMap<String, ciborium::Value>
 }
 
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]

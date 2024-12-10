@@ -50,6 +50,7 @@ pub struct Builder {
     digest_algorithm: Option<DigestAlgorithm>,
     device_key_info: Option<DeviceKeyInfo>,
     enable_decoy_digests: Option<bool>,
+    extra_fields: Option<BTreeMap<String, ciborium::Value>>
 }
 
 impl Mdoc {
@@ -66,6 +67,7 @@ impl Mdoc {
         device_key_info: DeviceKeyInfo,
         signature_algorithm: Algorithm,
         enable_decoy_digests: bool,
+        extra_fields: BTreeMap<String, ciborium::Value>
     ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
             authorizations.validate()?;
@@ -82,6 +84,7 @@ impl Mdoc {
             device_key_info,
             doc_type: doc_type.clone(),
             validity_info,
+            extra_fields
         };
 
         let mso_bytes = crate::cbor::to_vec(&Tag24::new(&mso)?)?;
@@ -112,6 +115,7 @@ impl Mdoc {
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
+        extra_fields: BTreeMap<String, ciborium::Value>,
         x5chain: X5Chain,
         enable_decoy_digests: bool,
         signer: S,
@@ -128,6 +132,7 @@ impl Mdoc {
             device_key_info,
             signer.algorithm(),
             enable_decoy_digests,
+            extra_fields
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -147,6 +152,7 @@ impl Mdoc {
         validity_info: ValidityInfo,
         digest_algorithm: DigestAlgorithm,
         device_key_info: DeviceKeyInfo,
+        extra_fields: BTreeMap<String, ciborium::Value>,
         x5chain: X5Chain,
         enable_decoy_digests: bool,
         signer: S,
@@ -163,6 +169,7 @@ impl Mdoc {
             device_key_info,
             signer.algorithm(),
             enable_decoy_digests,
+            extra_fields
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -244,6 +251,12 @@ impl Builder {
         self
     }
 
+    /// Set MSO extra fields.
+    pub fn extra_fields(mut self, extra_fields: BTreeMap<String, ciborium::Value>) -> Self {
+        self.extra_fields = Some(extra_fields);
+        self
+    }
+
     /// Prepare the mdoc for remote signing.
     ///
     /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
@@ -265,6 +278,7 @@ impl Builder {
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
         let enable_decoy_digests = self.enable_decoy_digests.unwrap_or(true);
+        let extra_fields = self.extra_fields.unwrap_or_default();
 
         Mdoc::prepare(
             doc_type,
@@ -274,6 +288,7 @@ impl Builder {
             device_key_info,
             signature_algorithm,
             enable_decoy_digests,
+            extra_fields
         )
     }
 
@@ -299,6 +314,7 @@ impl Builder {
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
         let enable_decoy_digests = self.enable_decoy_digests.unwrap_or(true);
+        let extra_fields = self.extra_fields.unwrap_or_default();
 
         Mdoc::issue(
             doc_type,
@@ -306,6 +322,7 @@ impl Builder {
             validity_info,
             digest_algorithm,
             device_key_info,
+            extra_fields,
             x5chain,
             enable_decoy_digests,
             signer,
@@ -334,6 +351,7 @@ impl Builder {
             .device_key_info
             .ok_or_else(|| anyhow!("missing parameter: 'device_key_info'"))?;
         let enable_decoy_digests = self.enable_decoy_digests.unwrap_or(true);
+        let extra_fields = self.extra_fields.unwrap_or_default();
 
         Mdoc::issue_async(
             doc_type,
@@ -341,6 +359,7 @@ impl Builder {
             validity_info,
             digest_algorithm,
             device_key_info,
+            extra_fields,
             x5chain,
             enable_decoy_digests,
             signer,
