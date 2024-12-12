@@ -591,8 +591,7 @@ impl SessionManager {
                 match x5chain {
                     Ok(x5c) => {
                         if let Some(trusted_verifiers) = &self.trusted_verifiers {
-                            validation_errors
-                                .append(&mut x5c.validate(Some(trusted_verifiers.clone())));
+                            validation_errors.append(&mut x5c.validate(Some(&trusted_verifiers)));
                         }
                     }
                     Err(e) => {

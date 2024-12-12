@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, Namespaces};
-use isomdl::definitions::x509::X5Chain;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Documents, RequestedItems};
 use isomdl::presentation::{device, reader};
@@ -98,19 +97,10 @@ fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u
         DataElements::new(AGE_OVER_21_ELEMENT.to_string(), false),
     );
     let trust_anchor_registry = None; // Option<TrustAnchorRegistry>,;
-    let reader_x5chain = X5Chain::builder()
-        .with_der(include_bytes!("../test/issuance/256-cert.der"))?
-        .build()?;
-    let reader_key = include_str!("data/sec1.pem");
 
-    let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
-        qr,
-        requested_elements,
-        trust_anchor_registry,
-        reader_x5chain,
-        reader_key,
-    )
-    .context("failed to establish reader session")?;
+    let (reader_sm, session_request, _ble_ident) =
+        reader::SessionManager::establish_session(qr, requested_elements, trust_anchor_registry)
+            .context("failed to establish reader session")?;
     Ok((reader_sm, session_request))
 }
 

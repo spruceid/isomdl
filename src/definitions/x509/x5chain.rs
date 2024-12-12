@@ -2,7 +2,6 @@ use crate::definitions::helpers::NonEmptyVec;
 use crate::definitions::x509::error::Error as X509Error;
 use crate::definitions::x509::trust_anchor::check_validity_period;
 use crate::definitions::x509::trust_anchor::find_anchor;
-use crate::definitions::x509::trust_anchor::validate_with_trust_anchor;
 use crate::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use anyhow::{anyhow, Result};
 use p256::ecdsa::VerifyingKey;
@@ -15,10 +14,8 @@ use elliptic_curve::{
     AffinePoint, CurveArithmetic, FieldBytesSize, PublicKey,
 };
 use p256::NistP256;
-use serde::{Deserialize, Serialize};
 use signature::Verifier;
 use std::collections::HashSet;
-use std::hash::Hash;
 use std::{fs::File, io::Read};
 use x509_cert::der::Encode;
 use x509_cert::{
@@ -26,12 +23,15 @@ use x509_cert::{
     der::{referenced::OwnedToRef, Decode},
 };
 
+use super::trust_anchor::validate_with_ruleset;
+
 /// See: https://www.iana.org/assignments/cose/cose.xhtml#header-parameters
 pub const X5CHAIN_HEADER_LABEL: i64 = 0x21;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct X509 {
-    pub bytes: Vec<u8>,
+    pub inner: Certificate,
+    der: Vec<u8>,
 }
 
 impl X509 {
@@ -41,8 +41,8 @@ impl X509 {
         AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
         FieldBytesSize<C>: ModulusSize,
     {
-        let cert = x509_cert::Certificate::from_der(&self.bytes)?;
-        cert.tbs_certificate
+        self.inner
+            .tbs_certificate
             .subject_public_key_info
             .owned_to_ref()
             .try_into()
@@ -60,15 +60,24 @@ impl X509 {
     }
 
     pub fn from_der(bytes: &[u8]) -> Result<Self> {
-        let _ = Certificate::from_der(bytes)
+        let inner = Certificate::from_der(bytes)
             .map_err(|e| anyhow!("unable to parse certificate from der encoding: {}", e))?;
-        Ok(X509 {
-            bytes: bytes.to_vec(),
+        Ok(Self {
+            inner,
+            der: bytes.to_vec(),
+        })
+    }
+
+    pub fn from_cert(certificate: Certificate) -> Result<Self> {
+        let der = certificate.to_der()?;
+        Ok(Self {
+            inner: certificate,
+            der,
         })
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct X5Chain(NonEmptyVec<X509>);
 
 impl From<NonEmptyVec<X509>> for X5Chain {
@@ -84,12 +93,11 @@ impl X5Chain {
 
     pub fn into_cbor(&self) -> CborValue {
         match &self.0.as_ref() {
-            &[cert] => CborValue::Bytes(cert.bytes.clone()),
+            &[cert] => CborValue::Bytes(cert.der.clone()),
             certs => CborValue::Array(
                 certs
                     .iter()
-                    .cloned()
-                    .map(|x509| x509.bytes)
+                    .map(|x509| x509.der.clone())
                     .map(CborValue::Bytes)
                     .collect::<Vec<CborValue>>(),
             ),
@@ -129,11 +137,11 @@ impl X5Chain {
         leaf.public_key().map(|key| key.into())
     }
 
-    pub fn validate(&self, trust_anchor_registry: Option<TrustAnchorRegistry>) -> Vec<X509Error> {
+    pub fn validate(&self, trust_anchor_registry: Option<&TrustAnchorRegistry>) -> Vec<X509Error> {
         let x5chain = self.0.as_ref();
         let mut errors: Vec<X509Error> = vec![];
 
-        if !has_unique_elements(x5chain) {
+        if !self.has_unique_elements() {
             errors.push(X509Error::ValidationError(
                 "x5chain contains duplicate certificates".to_string(),
             ))
@@ -152,38 +160,25 @@ impl X5Chain {
 
         //make sure all submitted certificates are valid
         for x509 in x5chain {
-            let cert = x509_cert::Certificate::from_der(&x509.bytes);
-            match cert {
-                Ok(c) => {
-                    errors.append(&mut check_validity_period(&c));
-                }
-                Err(e) => errors.push(e.into()),
-            }
+            errors.append(&mut check_validity_period(&x509.inner));
         }
 
         //validate the last certificate in the chain against trust anchor
         if let Some(x509) = x5chain.last() {
-            match x509_cert::Certificate::from_der(&x509.bytes) {
-                Ok(cert) => {
-                    // if the issuer of the signer certificate is known in the trust anchor registry, do the validation.
-                    // otherwise, report an error and skip.
-                    match find_anchor(cert, trust_anchor_registry) {
-                        Ok(anchor) => {
-                            if let Some(trust_anchor) = anchor {
-                                errors.append(&mut validate_with_trust_anchor(
-                                    x509.clone(),
-                                    trust_anchor,
-                                ));
-                            } else {
-                                errors.push(X509Error::ValidationError(
-                                    "No matching trust anchor found".to_string(),
-                                ));
-                            }
-                        }
-                        Err(e) => errors.push(e),
+            let cert = &x509.inner;
+            // if the issuer of the signer certificate is known in the trust anchor registry, do the validation.
+            // otherwise, report an error and skip.
+            match find_anchor(cert, trust_anchor_registry) {
+                Ok(anchor) => {
+                    if let Some(trust_anchor) = anchor {
+                        errors.append(&mut validate_with_ruleset(cert, trust_anchor));
+                    } else {
+                        errors.push(X509Error::ValidationError(
+                            "No matching trust anchor found".to_string(),
+                        ));
                     }
                 }
-                Err(e) => errors.push(e.into()),
+                Err(e) => errors.push(e),
             }
         } else {
             errors.push(X509Error::ValidationError(
@@ -193,24 +188,20 @@ impl X5Chain {
 
         errors
     }
+
+    fn has_unique_elements(&self) -> bool {
+        let mut uniq = HashSet::new();
+        self.0.iter().all(move |x| uniq.insert(&x.der))
+    }
 }
 
 pub fn check_signature(target: &X509, issuer: &X509) -> Result<(), X509Error> {
     let parent_public_key = ecdsa::VerifyingKey::from(issuer.public_key()?);
-    let child_cert = x509_cert::Certificate::from_der(&target.bytes)?;
+    let child_cert = &target.inner;
     let sig: ecdsa::Signature<NistP256> =
         ecdsa::Signature::from_der(child_cert.signature.raw_bytes())?;
     let bytes = child_cert.tbs_certificate.to_der()?;
     Ok(parent_public_key.verify(&bytes, &sig)?)
-}
-
-fn has_unique_elements<T>(iter: T) -> bool
-where
-    T: IntoIterator,
-    T::Item: Eq + Hash,
-{
-    let mut uniq = HashSet::new();
-    iter.into_iter().all(move |x| uniq.insert(x))
 }
 
 #[derive(Default, Debug, Clone)]
@@ -219,6 +210,15 @@ pub struct Builder {
 }
 
 impl Builder {
+    pub fn with_certificate(mut self, cert: Certificate) -> Result<Builder> {
+        let x509 = X509::from_cert(cert)?;
+        self.certs.push(x509);
+        Ok(self)
+    }
+    pub fn with_x509(mut self, x509: X509) -> Builder {
+        self.certs.push(x509);
+        self
+    }
     pub fn with_pem(mut self, data: &[u8]) -> Result<Builder> {
         let x509 = X509::from_pem(data)?;
         self.certs.push(x509);

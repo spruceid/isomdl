@@ -16,14 +16,14 @@ path = "src/bin/utils.rs"
 
 [dependencies]
 anyhow = "1.0"
-ecdsa = { version = "0.16.0", features = ["serde", "verifying"] }
+ecdsa = { version = "0.16.9", features = ["serde", "verifying"] }
 p256 = { version = "0.13.0", features = ["serde", "ecdh"] }
 p384 = { version = "0.13.0", features = ["serde", "ecdh"] }
 rand = { version = "0.8.5", features = ["getrandom"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_bytes = "0.11.0"
-sha2 = "0.10.6"
+sha2 = { version = "0.10.8", features = ["oid"] }
 thiserror = "1.0"
 elliptic-curve = "0.13.1"
 hkdf = "0.12.3"
@@ -56,8 +56,12 @@ strum_macros = "0.24"
 coset = "0.3.8"
 ciborium = "0.2.2"
 digest = "0.10.7"
+tracing = "0.1.41"
 
 [dev-dependencies]
 hex = "0.4.3"
 p256 = "0.13.0"
+rstest = "0.23.0"
 serde_json = "*"
+test-log = { version = "0.2.16", features = ["trace"] }
+x509-cert = { version = "0.2.4", features = ["pem", "builder", "hazmat"] }

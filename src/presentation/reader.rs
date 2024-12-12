@@ -15,11 +15,9 @@
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use std::collections::BTreeMap;
 
-use aes::cipher::{generic_array::GenericArray, typenum::U32};
+use anyhow::Context;
 use anyhow::{anyhow, Result};
-use coset::{CoseSign1Builder, Header, Label};
-use p256::ecdsa::SigningKey;
-use sec1::DecodeEcPrivateKey;
+use coset::Label;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
@@ -62,8 +60,6 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     trust_anchor_registry: Option<TrustAnchorRegistry>,
-    reader_auth_key: [u8; 32],
-    reader_x5chain: X5Chain,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -187,29 +183,30 @@ impl SessionManager {
         qr_code: String,
         namespaces: device_request::Namespaces,
         trust_anchor_registry: Option<TrustAnchorRegistry>,
-        reader_x5chain: X5Chain,
-        reader_key: &str,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
-        let device_engagement_bytes =
-            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(|e| anyhow!(e))?;
+        let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
+            .context("failed to construct QR code")?;
 
         //generate own keys
-        let key_pair = create_p256_ephemeral_keys()?;
+        let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
         let e_reader_key_private = key_pair.0;
-        let e_reader_key_public = Tag24::new(key_pair.1)?;
+        let e_reader_key_public =
+            Tag24::new(key_pair.1).context("failed to encode public cose key")?;
 
         //decode device_engagement
         let device_engagement = device_engagement_bytes.as_ref();
         let e_device_key = &device_engagement.security.1;
 
         // calculate ble Ident value
-        let ble_ident = super::calculate_ble_ident(e_device_key)?;
+        let ble_ident =
+            super::calculate_ble_ident(e_device_key).context("failed to calculate BLE Ident")?;
 
         // derive shared secret
         let shared_secret = get_shared_secret(
             e_device_key.clone().into_inner(),
             &e_reader_key_private.into(),
-        )?;
+        )
+        .context("failed to derive shared session secret")?;
 
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
@@ -217,15 +214,16 @@ impl SessionManager {
             Handover::QR,
         );
 
-        let session_transcript_bytes = Tag24::new(session_transcript.clone())?;
+        let session_transcript_bytes = Tag24::new(session_transcript.clone())
+            .context("failed to encode session transcript")?;
 
         //derive session keys
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();
-        let sk_device =
-            derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
-
-        let reader_signing_key: SigningKey = ecdsa::SigningKey::from_sec1_pem(reader_key)?;
-        let reader_auth_key: GenericArray<u8, U32> = reader_signing_key.to_bytes();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)
+            .context("failed to derive reader session key")?
+            .into();
+        let sk_device = derive_session_key(&shared_secret, &session_transcript_bytes, false)
+            .context("failed to derive device session key")?
+            .into();
 
         let mut session_manager = Self {
             session_transcript,
@@ -234,16 +232,17 @@ impl SessionManager {
             sk_reader,
             reader_message_counter: 0,
             trust_anchor_registry,
-            reader_auth_key: reader_auth_key.into(),
-            reader_x5chain,
         };
 
-        let request = session_manager.build_request(namespaces)?;
+        let request = session_manager
+            .build_request(namespaces)
+            .context("failed to build device request")?;
         let session = SessionEstablishment {
             data: request.into(),
             e_reader_key: e_reader_key_public,
         };
-        let session_request = cbor::to_vec(&session)?;
+        let session_request =
+            cbor::to_vec(&session).context("failed to encode session establishment")?;
 
         Ok((session_manager, session_request, ble_ident))
     }
@@ -289,35 +288,8 @@ impl SessionManager {
             request_info: None,
         };
 
-        //the certificate should be supplied by the reader
-        //let certificate_cbor = serde_cbor::to_vec(&self.reader_cert_bytes)?;
-        let mut header_map = Header::default();
-        header_map.rest.push((
-            Label::Int(X5CHAIN_HEADER_LABEL),
-            self.reader_x5chain.into_cbor(),
-        ));
-
-        let payload = ReaderAuthentication(
-            "ReaderAuthentication".to_string(),
-            self.session_transcript.clone(),
-            Tag24::new(items_request.clone())?,
-        );
-
-        let reader_signing_key = SigningKey::from_slice(&self.reader_auth_key)?; //SigningKey::from_bytes(self.reader_auth_key.to_vec());
-        let signature = reader_signing_key.sign_recoverable(&cbor::to_vec(&payload)?)?;
-        let cose_sign1 = CoseSign1Builder::new()
-            .unprotected(header_map)
-            .payload(cbor::to_vec(&payload)?)
-            .signature(signature.0.to_vec())
-            .build();
-
         let doc_request = DocRequest {
-            reader_auth: Some(crate::cose::MaybeTagged {
-                // NOTE: COSE_Sign1 is tagged with 18
-                // see: https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-                tagged: true,
-                inner: cose_sign1,
-            }),
+            reader_auth: None,
             items_request: Tag24::new(items_request)?,
         };
         let device_request = DeviceRequest {
@@ -400,7 +372,7 @@ impl SessionManager {
             }
         }
 
-        let validation_errors = x5chain.validate(self.trust_anchor_registry.clone());
+        let validation_errors = x5chain.validate(self.trust_anchor_registry.as_ref());
         if validation_errors.is_empty() {
             match issuer_authentication(x5chain, &document.issuer_signed) {
                 Ok(_) => {
@@ -569,24 +541,6 @@ fn parse_namespaces(
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::{
-        definitions::x509::trust_anchor::{TrustAnchor, TrustAnchorRegistry},
-        definitions::x509::{error::Error as X509Error, x5chain::X509, X5Chain},
-    };
-    use anyhow::anyhow;
-
-    static IACA_ROOT: &[u8] = include_bytes!("../../test/presentation/isomdl_iaca_root_cert.pem");
-    //TODO fix this cert to contain issuer alternative name
-    // static IACA_INTERMEDIATE: &[u8] =
-    // include_bytes!("../../test/presentation/isomdl_iaca_intermediate.pem");
-    // signed by the intermediate certificate
-    //TODO fix this cert to contain issuer alternative name
-    // static IACA_LEAF_SIGNER: &[u8] =
-    // include_bytes!("../../test/presentation/isomdl_iaca_leaf_signer.pem");
-    // signed directly by the root certificate
-    static IACA_SIGNER: &[u8] = include_bytes!("../../test/presentation/isomdl_iaca_signer.pem");
-    static INCORRECT_IACA_SIGNER: &[u8] =
-        include_bytes!("../../test/presentation/isomdl_incorrect_iaca_signer.pem");
 
     #[test]
     fn nested_response_values() {
@@ -612,65 +566,4 @@ pub mod test {
         );
         assert_eq!(json, expected)
     }
-
-    fn validate(signer: &[u8], root: &[u8]) -> Result<Vec<X509Error>, anyhow::Error> {
-        let root_bytes = pem_rfc7468::decode_vec(root)
-            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
-            .1;
-        let trust_anchor = TrustAnchor::Iaca(X509 { bytes: root_bytes });
-        let trust_anchor_registry = TrustAnchorRegistry {
-            certificates: vec![trust_anchor],
-        };
-        let bytes = pem_rfc7468::decode_vec(signer)
-            .map_err(|e| anyhow!("unable to parse pem: {}", e))?
-            .1;
-        let x5chain_cbor: ciborium::Value = ciborium::Value::Bytes(bytes);
-
-        let x5chain = X5Chain::from_cbor(x5chain_cbor)?;
-
-        Ok(x5chain.validate(Some(trust_anchor_registry)))
-    }
-
-    #[test]
-    fn validate_x509_with_trust_anchor() {
-        let result = validate(IACA_SIGNER, IACA_ROOT).unwrap();
-        assert!(result.is_empty(), "{result:?}");
-    }
-
-    #[test]
-    fn validate_incorrect_x509_with_trust_anchor() {
-        let result = validate(INCORRECT_IACA_SIGNER, IACA_ROOT).unwrap();
-        assert!(!result.is_empty(), "{result:?}");
-    }
-
-    // TODO: Fix test -- intermediate and leaf are not in a chain.
-    // #[test]
-    // fn validate_x5chain_with_trust_anchor() {
-    //     let root_bytes = pem_rfc7468::decode_vec(IACA_ROOT)
-    //         .map_err(|e| anyhow!("unable to parse pem: {}", e))
-    //         .unwrap()
-    //         .1;
-    //     let trust_anchor = TrustAnchor::Iaca(X509 { bytes: root_bytes });
-    //     let trust_anchor_registry = TrustAnchorRegistry {
-    //         certificates: vec![trust_anchor],
-    //     };
-
-    //     let intermediate_bytes = pem_rfc7468::decode_vec(IACA_INTERMEDIATE)
-    //         .map(|(_, bytes)| bytes)
-    //         .map(serde_cbor::Value::Bytes)
-    //         .expect("unable to parse pem");
-
-    //     let leaf_signer_bytes = pem_rfc7468::decode_vec(IACA_LEAF_SIGNER)
-    //         .map(|(_, bytes)| bytes)
-    //         .map(serde_cbor::Value::Bytes)
-    //         .expect("unable to parse pem");
-
-    //     let x5chain_cbor: serde_cbor::Value =
-    //         serde_cbor::Value::Array(vec![leaf_signer_bytes, intermediate_bytes]);
-
-    //     let x5chain = X5Chain::from_cbor(x5chain_cbor).unwrap();
-
-    //     let result = x5chain.validate(Some(trust_anchor_registry));
-    //     assert!(result.len() == 0, "{result:?}")
-    // }
 }

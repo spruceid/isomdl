@@ -5,7 +5,6 @@ use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalM
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
 use isomdl::definitions::helpers::NonEmptyMap;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use isomdl::definitions::x509::X5Chain;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
 use isomdl::presentation::{
@@ -57,22 +56,10 @@ impl Device {
         );
 
         let trust_anchor = None;
-        let reader_x5chain =
-            // NOTE: Should we be using a different certificate here for the reader?
-            // I didn't see one in the test data.
-            X5Chain::builder().with_der(include_bytes!("../test/issuance/256-cert.der"))?.build()?;
-        // TODO: We should be using a typed key to pass to establish the session below instead of &str.
-        // let reader_key = p256::ecdsa::SigningKey::from_sec1_pem(include_str!("data/sec1.pem"))?;
-        let reader_key = include_str!("data/sec1.pem");
 
-        let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
-            qr,
-            requested_elements,
-            trust_anchor,
-            reader_x5chain,
-            reader_key,
-        )
-        .context("failed to establish reader session")?;
+        let (reader_sm, session_request, _ble_ident) =
+            reader::SessionManager::establish_session(qr, requested_elements, trust_anchor)
+                .context("failed to establish reader session")?;
         Ok((reader_sm, session_request))
     }
 

@@ -6,7 +6,9 @@ use std::fmt;
 use std::ops::Deref;
 
 use crate::definitions::x509::error::Error;
+use const_oid::AssociatedOid;
 use const_oid::ObjectIdentifier;
+use der::flagset::FlagSet;
 use der::Decode;
 use x509_cert::ext::pkix::name::DistributionPointName;
 use x509_cert::ext::pkix::name::GeneralName;
@@ -15,25 +17,19 @@ use x509_cert::ext::pkix::{
 };
 use x509_cert::ext::Extension;
 
-// -- IACA X509 Extension OIDs -- //
-const OID_KEY_USAGE: &str = "2.5.29.15";
-const OID_ISSUER_ALTERNATIVE_NAME: &str = "2.5.29.18";
-const OID_BASIC_CONSTRAINTS: &str = "2.5.29.19";
-const OID_CRL_DISTRIBUTION_POINTS: &str = "2.5.29.31";
-const OID_EXTENDED_KEY_USAGE: &str = "2.5.29.37";
-
 /// 18013-5 IACA root certificate extension checks
 /// * Key Usage: 5, 6 (keyCertSign, crlSign)
 /// * Basic Constraints: Pathlen:0
 /// * CRL Distribution Points must have tag 0
 /// * Issuer Alternative Name must be of type rfc822Name or a URI (tag 1 and tag 6)
-pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Error> {
+pub fn validate_iaca_root_extensions(root_extensions: &[Extension]) -> Vec<Error> {
+    tracing::debug!("validating root certificate extensions...");
     //A specific subset of x509 extensions is not allowed in IACA certificates.
     //We enter an error for every present disallowed x509 extension
     let disallowed = iaca_disallowed_x509_extensions();
     let mut x509_errors: Vec<Error> = vec![];
 
-    for extension in root_extensions.clone() {
+    for extension in root_extensions {
         if let Some(disallowed_extension) = disallowed
             .iter()
             .find(|oid| extension.extn_id.to_string() == **oid)
@@ -45,14 +41,14 @@ pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Err
         }
     }
 
-    let critical_extension_errors = ExtensionValidators::default()
+    let extension_errors = ExtensionValidators::default()
         .with(RootKeyUsageValidator)
         .with(BasicConstraintsValidator)
         .with(CrlDistributionPointsValidator { kind: Kind::Root })
         .with(IssuerAlternativeNameValidator { kind: Kind::Root })
-        .validate_critical_extensions(root_extensions.iter());
+        .validate_extensions(root_extensions.iter());
 
-    x509_errors.extend(critical_extension_errors);
+    x509_errors.extend(extension_errors);
 
     x509_errors
 }
@@ -63,13 +59,15 @@ pub fn validate_iaca_root_extensions(root_extensions: Vec<Extension>) -> Vec<Err
 /// * CRL Distribution Points must have tag 0
 /// * Issuer Alternative Name must be of type rfc822Name or a URI (tag 1 and tag 6)
 pub fn validate_iaca_signer_extensions(
-    leaf_extensions: Vec<Extension>,
+    leaf_extensions: &[Extension],
     value_extended_key_usage: ObjectIdentifier,
 ) -> Vec<Error> {
+    tracing::debug!("validating signer certificate extensions...");
+
     let disallowed = iaca_disallowed_x509_extensions();
     let mut x509_errors: Vec<Error> = vec![];
 
-    for extension in leaf_extensions.clone() {
+    for extension in leaf_extensions {
         if let Some(disallowed_extension) = disallowed
             .iter()
             .find(|oid| extension.extn_id.to_string() == **oid)
@@ -81,16 +79,16 @@ pub fn validate_iaca_signer_extensions(
         }
     }
 
-    let critical_extension_errors = ExtensionValidators::default()
+    let extension_errors = ExtensionValidators::default()
         .with(ExtendedKeyUsageValidator {
             expected_oid: value_extended_key_usage,
         })
         .with(SignerKeyUsageValidator)
         .with(CrlDistributionPointsValidator { kind: Kind::Signer })
         .with(IssuerAlternativeNameValidator { kind: Kind::Signer })
-        .validate_critical_extensions(leaf_extensions.iter());
+        .validate_extensions(leaf_extensions.iter());
 
-    x509_errors.extend(critical_extension_errors);
+    x509_errors.extend(extension_errors);
 
     x509_errors
 }
@@ -105,12 +103,12 @@ impl ExtensionValidators {
     }
 }
 
-struct CriticalExtensionValidator {
+struct RequiredExtension {
     found: bool,
     validator: Box<dyn ExtensionValidator>,
 }
 
-impl CriticalExtensionValidator {
+impl RequiredExtension {
     fn new(validator: Box<dyn ExtensionValidator>) -> Self {
         Self {
             found: false,
@@ -119,7 +117,7 @@ impl CriticalExtensionValidator {
     }
 }
 
-impl Deref for CriticalExtensionValidator {
+impl Deref for RequiredExtension {
     type Target = Box<dyn ExtensionValidator>;
 
     fn deref(&self) -> &Self::Target {
@@ -134,32 +132,43 @@ trait ExtensionValidator {
 }
 
 impl ExtensionValidators {
-    fn validate_critical_extensions<'a, Extensions>(self, extensions: Extensions) -> Vec<Error>
+    fn validate_extensions<'a, Extensions>(self, extensions: Extensions) -> Vec<Error>
     where
         Extensions: Iterator<Item = &'a Extension>,
     {
         let mut validation_errors = vec![];
 
-        let mut validators: Vec<CriticalExtensionValidator> = self
-            .0
-            .into_iter()
-            .map(CriticalExtensionValidator::new)
-            .collect();
-        let mut validators_mut = validators.iter_mut();
+        let mut validators: Vec<RequiredExtension> =
+            self.0.into_iter().map(RequiredExtension::new).collect();
 
-        for ext in extensions.filter(|ext| ext.critical) {
-            if let Some(validator) = validators_mut.find(|validator| validator.matches(ext)) {
+        for ext in extensions {
+            if let Some(validator) = validators.iter_mut().find(|validator| {
+                tracing::debug!("searching for ext: '{}'", ext.extn_id);
+                validator.matches(ext)
+            }) {
+                tracing::debug!("validating required extension: {}", ext.extn_id);
                 validation_errors.extend(validator.validate(ext));
                 validator.found = true;
-            } else {
+            } else if ext.critical {
+                tracing::debug!(
+                    "critical, non-required extension causing an error: {}",
+                    ext.extn_id
+                );
                 validation_errors.push(Error::ValidationError(format!(
-                    "certificate contains unknown critical extension: {:?}",
+                    "certificate contains unknown critical extension: {}",
                     ext.extn_id
                 )));
+            } else {
+                tracing::debug!("non-critical, non-required extension ignored: {ext:?}")
             }
         }
 
-        validation_errors.extend(validators_mut.filter(|v| !v.found).map(|v| v.not_found()));
+        validation_errors.extend(
+            validators
+                .iter()
+                .filter(|v| !v.found)
+                .map(|v| v.not_found()),
+        );
 
         validation_errors
     }
@@ -171,7 +180,7 @@ struct ExtendedKeyUsageValidator {
 
 impl ExtensionValidator for ExtendedKeyUsageValidator {
     fn matches(&self, extension: &Extension) -> bool {
-        extension.extn_id.to_string() == OID_EXTENDED_KEY_USAGE
+        extension.extn_id == ExtendedKeyUsage::OID
     }
 
     /*  A root certificate should have KeyCertSign and CRLSign set for key usage,
@@ -179,6 +188,13 @@ impl ExtensionValidator for ExtendedKeyUsageValidator {
     fn validate(&self, extension: &Extension) -> Vec<Error> {
         let bytes = extension.extn_value.as_bytes();
         let extended_key_usage = ExtendedKeyUsage::from_der(&bytes);
+
+        if !extension.critical {
+            tracing::warn!(
+                "expected ExtendedKeyUsage extension to be critical on signer certificate",
+            )
+        }
+
         match extended_key_usage {
             Ok(eku) => {
                 if !eku.0.into_iter().all(|oid| oid == self.expected_oid) {
@@ -206,7 +222,7 @@ struct SignerKeyUsageValidator;
 
 impl ExtensionValidator for SignerKeyUsageValidator {
     fn matches(&self, extension: &Extension) -> bool {
-        extension.extn_id.to_string() == OID_KEY_USAGE
+        extension.extn_id == KeyUsage::OID
     }
 
     /*  A root certificate should have KeyCertSign and CRLSign set for key usage,
@@ -216,20 +232,16 @@ impl ExtensionValidator for SignerKeyUsageValidator {
         let mut errors: Vec<Error> = vec![];
         let key_usage = KeyUsage::from_der(&bytes);
 
+        if !extension.critical {
+            tracing::warn!("expected KeyUsage extension to be critical on signer certificate",)
+        }
+
         match key_usage {
             Ok(ku) => {
-                if !ku.digital_signature() {
+                let expected_flagset: FlagSet<KeyUsages> = KeyUsages::DigitalSignature.into();
+                if ku.0 != expected_flagset {
                     errors.push(Error::ValidationError(
-                        "Signer key usage should be set to digital signature".to_string(),
-                    ))
-                }
-                if ku
-                    .0
-                    .into_iter()
-                    .any(|flag| flag != KeyUsages::DigitalSignature)
-                {
-                    errors.push(Error::ValidationError(
-                        "Key usage is set beyond scope of IACA signer certificates".to_string(),
+                        "Signer KeyUsage should be set to DigitalSignature only".into(),
                     ))
                 }
             }
@@ -251,7 +263,7 @@ struct RootKeyUsageValidator;
 
 impl ExtensionValidator for RootKeyUsageValidator {
     fn matches(&self, extension: &Extension) -> bool {
-        extension.extn_id.to_string() == OID_KEY_USAGE
+        extension.extn_id == KeyUsage::OID
     }
 
     /*  A root certificate should have KeyCertSign and CRLSign set for key usage,
@@ -260,6 +272,11 @@ impl ExtensionValidator for RootKeyUsageValidator {
         let bytes = extension.extn_value.as_bytes();
         let mut errors = vec![];
         let key_usage = KeyUsage::from_der(bytes);
+
+        if !extension.critical {
+            tracing::warn!("expected KeyUsage extension to be critical on root certificate",)
+        }
+
         match key_usage {
             Ok(ku) => {
                 if !ku.crl_sign() {
@@ -297,33 +314,52 @@ impl ExtensionValidator for RootKeyUsageValidator {
 
 struct BasicConstraintsValidator;
 
+impl BasicConstraintsValidator {
+    fn check(constraints: BasicConstraints) -> Option<Error> {
+        if constraints
+            .path_len_constraint
+            .is_none_or(|path_len| path_len != 0)
+            || !constraints.ca
+        {
+            Some(Error::ValidationError(format!(
+                "Basic constraints expected to be CA:true, path_len:0, but found: {:?}",
+                constraints
+            )))
+        } else {
+            None
+        }
+    }
+}
+
 impl ExtensionValidator for BasicConstraintsValidator {
     fn matches(&self, extension: &Extension) -> bool {
-        extension.extn_id.to_string() == OID_BASIC_CONSTRAINTS
+        extension.extn_id == BasicConstraints::OID
     }
 
     fn validate(&self, extension: &Extension) -> Vec<Error> {
+        let mut errors = vec![];
+
+        if !extension.critical {
+            tracing::warn!("expected BasicConstraints extension to be critical on root certificate",)
+        }
+
         let bytes = extension.extn_value.as_bytes();
         let basic_constraints = BasicConstraints::from_der(&bytes);
         match basic_constraints {
             Ok(bc) => {
-                if bc.path_len_constraint.is_none_or(|path_len| path_len != 0) && bc.ca {
-                    return vec![Error::ValidationError(format!(
-                        "Basic constraints expected to be CA:true, path_len:0, but found: {:?}",
-                        bc
-                    ))];
+                if let Some(e) = Self::check(bc) {
+                    errors.push(e);
                 }
-                vec![]
             }
-            Err(e) => {
-                vec![Error::DecodingError(e.to_string())]
-            }
+            Err(e) => errors.push(Error::DecodingError(e.to_string())),
         }
+
+        errors
     }
 
     fn not_found(&self) -> Error {
         Error::ValidationError(
-            "The root certificate is expected to have critical basic constraints specificied, but the extensions was not found".to_string()
+            "The root certificate is expected to have BasicConstraints, but the extension was not found".to_string()
         )
     }
 }
@@ -334,7 +370,7 @@ struct CrlDistributionPointsValidator {
 
 impl ExtensionValidator for CrlDistributionPointsValidator {
     fn matches(&self, extension: &Extension) -> bool {
-        extension.extn_id.to_string() == OID_CRL_DISTRIBUTION_POINTS
+        extension.extn_id == CrlDistributionPoints::OID
     }
 
     fn validate(&self, extension: &Extension) -> Vec<Error> {
@@ -343,14 +379,25 @@ impl ExtensionValidator for CrlDistributionPointsValidator {
         let crl_distribution_point = CrlDistributionPoints::from_der(&bytes);
         match crl_distribution_point {
             Ok(crl_dp) => {
+                if crl_dp.0.is_empty() {
+                    errors.push(Error::ValidationError(
+                        "expected one or more CRL distribution points".into(),
+                    ));
+                }
                 for point in crl_dp.0.into_iter() {
-                    if point.crl_issuer.is_some() || point.reasons.is_some() {
-                        errors.push(Error::ValidationError(format!("crl_issuer and reasons may not be set on CrlDistributionPoints, but is set for: {:?}", point)))
+                    if point.crl_issuer.is_some() {
+                        errors.push(Error::ValidationError(format!("crl_issuer may not be set on CrlDistributionPoints, but is set for: {point:?}")))
+                    }
+
+                    if point.reasons.is_some() {
+                        errors.push(Error::ValidationError(format!(
+                            "reasons may not be set on CrlDistributionPoints, but is set for: {point:?}",
+                        )))
                     }
 
                     if !point
                         .distribution_point
-                        .clone()
+                        .as_ref()
                         .is_some_and(|dpn| match dpn {
                             DistributionPointName::FullName(names) => {
                                 let type_errors: Vec<Error> = check_general_name_types(names);
@@ -373,7 +420,7 @@ impl ExtensionValidator for CrlDistributionPointsValidator {
     }
 
     fn not_found(&self) -> Error {
-        Error::ValidationError(format!("The {} certificate is expected to have a crl distribution point specificied, but the extension was not found", self.kind))
+        Error::ValidationError(format!("The {} certificate is expected to have CRLDistributionPoints, but the extension was not found", self.kind))
     }
 }
 
@@ -383,14 +430,14 @@ struct IssuerAlternativeNameValidator {
 
 impl ExtensionValidator for IssuerAlternativeNameValidator {
     fn matches(&self, extension: &Extension) -> bool {
-        extension.extn_id.to_string() == OID_ISSUER_ALTERNATIVE_NAME
+        extension.extn_id == IssuerAltName::OID
     }
 
     fn validate(&self, extension: &Extension) -> Vec<Error> {
         let bytes = extension.extn_value.as_bytes();
         let iss_altname = IssuerAltName::from_der(bytes);
         match iss_altname {
-            Ok(ian) => check_general_name_types(ian.0),
+            Ok(ian) => check_general_name_types(&ian.0),
             Err(e) => {
                 vec![Error::DecodingError(e.to_string())]
             }
@@ -399,7 +446,7 @@ impl ExtensionValidator for IssuerAlternativeNameValidator {
 
     fn not_found(&self) -> Error {
         Error::ValidationError(format!(
-            "The {} certificate is expected to have issuer alternative name specificied, but the extension was not found", self.kind)
+            "The {} certificate is expected to have issuer alternative name specified, but the extension was not found", self.kind)
         )
     }
 }
@@ -422,7 +469,7 @@ impl fmt::Display for Kind {
     }
 }
 
-fn check_general_name_types(names: Vec<GeneralName>) -> Vec<Error> {
+fn check_general_name_types(names: &[GeneralName]) -> Vec<Error> {
     let valid_types: Vec<bool> = names
         .iter()
         .map(|name| {
@@ -455,7 +502,19 @@ fn iaca_disallowed_x509_extensions() -> Vec<String> {
 
 #[cfg(test)]
 pub mod test {
+    use rstest::rstest;
+    use x509_cert::ext::pkix::BasicConstraints;
 
-    #[test]
-    fn test_key_usage() {}
+    use super::BasicConstraintsValidator;
+
+    #[rstest]
+    #[case::ok(BasicConstraints { ca: true, path_len_constraint: Some(0) }, true)]
+    #[case::ca_false(BasicConstraints { ca: false, path_len_constraint: Some(0) }, false)]
+    #[case::path_none(BasicConstraints { ca: true, path_len_constraint: None }, false)]
+    #[case::path_too_long(BasicConstraints { ca: true, path_len_constraint: Some(1) }, false)]
+    #[case::both_wrong(BasicConstraints { ca: false, path_len_constraint: None }, false)]
+    fn basic_constraints(#[case] bc: BasicConstraints, #[case] valid: bool) {
+        let outcome = BasicConstraintsValidator::check(bc);
+        assert_eq!(outcome.is_none(), valid)
+    }
 }
