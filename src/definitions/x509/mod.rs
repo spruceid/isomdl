@@ -30,7 +30,7 @@ mod test {
         Certificate,
     };
 
-    fn prepare_root_certificate<'s, S>(root_key: &'s S, issuer: Name) -> CertificateBuilder<'s, S>
+    fn prepare_root_certificate<S>(root_key: &S, issuer: Name) -> CertificateBuilder<'_, S>
     where
         S: KeypairRef + DynSignatureAlgorithmIdentifier,
         S::VerifyingKey: EncodePublicKey,

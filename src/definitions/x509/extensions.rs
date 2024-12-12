@@ -187,7 +187,7 @@ impl ExtensionValidator for ExtendedKeyUsageValidator {
     but no other key usages are allowed */
     fn validate(&self, extension: &Extension) -> Vec<Error> {
         let bytes = extension.extn_value.as_bytes();
-        let extended_key_usage = ExtendedKeyUsage::from_der(&bytes);
+        let extended_key_usage = ExtendedKeyUsage::from_der(bytes);
 
         if !extension.critical {
             tracing::warn!(
@@ -230,7 +230,7 @@ impl ExtensionValidator for SignerKeyUsageValidator {
     fn validate(&self, extension: &Extension) -> Vec<Error> {
         let bytes = extension.extn_value.as_bytes();
         let mut errors: Vec<Error> = vec![];
-        let key_usage = KeyUsage::from_der(&bytes);
+        let key_usage = KeyUsage::from_der(bytes);
 
         if !extension.critical {
             tracing::warn!("expected KeyUsage extension to be critical on signer certificate",)
@@ -344,7 +344,7 @@ impl ExtensionValidator for BasicConstraintsValidator {
         }
 
         let bytes = extension.extn_value.as_bytes();
-        let basic_constraints = BasicConstraints::from_der(&bytes);
+        let basic_constraints = BasicConstraints::from_der(bytes);
         match basic_constraints {
             Ok(bc) => {
                 if let Some(e) = Self::check(bc) {
@@ -376,7 +376,7 @@ impl ExtensionValidator for CrlDistributionPointsValidator {
     fn validate(&self, extension: &Extension) -> Vec<Error> {
         let bytes = extension.extn_value.as_bytes();
         let mut errors: Vec<Error> = vec![];
-        let crl_distribution_point = CrlDistributionPoints::from_der(&bytes);
+        let crl_distribution_point = CrlDistributionPoints::from_der(bytes);
         match crl_distribution_point {
             Ok(crl_dp) => {
                 if crl_dp.0.is_empty() {
