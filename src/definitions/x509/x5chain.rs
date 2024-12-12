@@ -25,7 +25,7 @@ use x509_cert::{
 
 use super::trust_anchor::validate_with_ruleset;
 
-/// See: https://www.iana.org/assignments/cose/cose.xhtml#header-parameters
+/// See: <https://www.iana.org/assignments/cose/cose.xhtml#header-parameters>
 pub const X5CHAIN_HEADER_LABEL: i64 = 0x21;
 
 #[derive(Debug, Clone, Eq, PartialEq)]

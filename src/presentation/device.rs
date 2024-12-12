@@ -453,7 +453,7 @@ impl SessionManager {
     /// The request is expected to be a CBOR encoded
     /// and encrypted [SessionData].
     ///
-    /// This method will return the [ValidatedRequest] struct, which will
+    /// This method will return the [RequestAuthenticationOutcome] struct, which will
     /// include the items requested by the reader/verifier.
     pub fn handle_request(&mut self, request: &[u8]) -> RequestAuthenticationOutcome {
         let mut validated_request = RequestAuthenticationOutcome::default();
