@@ -34,29 +34,13 @@ pub struct OrgIso1901351Vical {
 mod tests {
     use super::*;
     use crate::definitions::traits::FromJson;
+
+    static JSON_VICAL: &str = include_str!("../../../../test/definitions/namespaces/org_iso_18013_5_1_vical/vical.json");
     #[test]
     fn all() {
-        let json = serde_json::json!({
-            "version": "1.0.0",
-            "vical_provider": "Spruce",
-            "date": "2024-12-31T12:00:00Z",
-            "vical_issue_id": 1,
-            "next_update": "2022-03-21T13:30:00Z",
-            "certificate_infos": [
-                {
-                    "certificate": "57c92077664146e876760c9520d054aa93c3afb04e306705db6090308507b4d3",
-                    "serial_number": "57c92077664146e876760c9520d054aa93c3afb04e306705db6090308507b4d3",
-                    "ski": "57c92077664146e876760c9520d054aa93c3afb04e306705db6090308507b4d3",
-                    "doc_type": ["somedoc"],
-                    "certificate_profile": ["profile"],
-                    "extensions": {"extension_name": "57c92077664146e876760c9520d054aa93c3afb04e306705db6090308507b4d3"},
-                }
-            ]
-        });
-
-        let ns = OrgIso1901351Vical::from_json(&json).unwrap();
-
-        assert!(ns.vical_issue_id.is_some());
-        assert!(ns.next_update.is_some());
+        let json_vical: serde_json::Value = serde_json::from_str(JSON_VICAL).unwrap();
+        let vical = OrgIso1901351Vical::from_json(&json_vical).unwrap();
+        assert!(vical.vical_issue_id.is_some());
+        assert!(vical.next_update.is_some());
     }
 }

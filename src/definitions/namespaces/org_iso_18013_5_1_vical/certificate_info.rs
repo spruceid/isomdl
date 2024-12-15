@@ -1,3 +1,13 @@
+use crate::{
+    definitions::{
+        helpers::ByteStr,
+        namespaces::{
+            latin1::Latin1,
+            org_iso_18013_5_1::{Alpha2, TDate},
+            org_iso_18013_5_1_vical::{Extensions, certificate_profile::CertificateProfiles, doc_type::DocTypes}},
+        traits::ToCbor},
+    macros::{FromJson, ToCbor},
+};
 //CertificateInfo = {
 // "certificate" : bstr
 // "serialNumber" : biguint
@@ -14,30 +24,6 @@
 // ? "extensions" : Extensions
 // * tstr => any ;
 // }
-
-use crate::{
-    definitions::{
-        helpers::ByteStr,
-        namespaces::{
-            latin1::Latin1,
-            org_iso_18013_5_1::{
-                Alpha2,
-                TDate
-            },
-            org_iso_18013_5_1_vical::{
-                Extensions,
-                certificate_profile::CertificateProfiles,
-                doc_type::DocTypes
-            }
-        },
-        traits::ToCbor
-    },
-    macros::{
-        FromJson,
-        ToCbor
-    },
-};
-
 #[derive(Clone, Debug, FromJson)]
 #[isomdl(crate = "crate")]
 pub struct CertificateInfos(Vec<CertificateInfo>);
