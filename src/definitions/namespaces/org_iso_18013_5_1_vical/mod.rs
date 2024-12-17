@@ -4,9 +4,11 @@ mod certificate_profile;
 mod doc_type;
 mod vical_cose_sign1;
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 pub use certificate_info::{CertificateInfos, CertificateInfo};
 pub use extension::Extensions;
+use crate::definitions::helpers::ByteStr;
 pub use super::latin1::Latin1;
 pub use super::org_iso_18013_5_1::TDate;
 use crate::macros::{FromJson, ToCbor};
@@ -39,7 +41,7 @@ pub struct VicalBuilder {
     certificate_infos: Vec<CertificateInfo>,
     vical_issue_id: Option<u32>,
     next_update: Option<String>,
-    extensions: Option<Extensions>,
+    extensions: Option<BTreeMap<String, ByteStr>>,
 }
 
 impl VicalBuilder {
@@ -66,8 +68,8 @@ impl VicalBuilder {
         self.certificate_infos = certificate_infos;
         self
     }
-    pub fn extensions(mut self, extensions: Option<Extensions>) -> Self {
-        self.extensions = extensions;
+    pub fn extensions(mut self, extensions: BTreeMap<String, ByteStr>) -> Self {
+        self.extensions = Some(extensions);
         self
     }
     pub fn build(self) -> OrgIso1901351Vical {
@@ -77,10 +79,14 @@ impl VicalBuilder {
             date: TDate::from_str(self.date.as_str()).unwrap(),
             vical_issue_id: self.vical_issue_id,
             certificate_infos: CertificateInfos::new(self.certificate_infos),
-            extensions: self.extensions,
+            extensions: match self.extensions {
+                Some(s) => Some(Extensions::new(s)),
+                None => None,
+            },
             next_update: match self.next_update {
                 Some(s) => Some(TDate::from_str(s.as_str()).unwrap()),
-                None => None,},
+                None => None,
+            },
         }
     }
 }

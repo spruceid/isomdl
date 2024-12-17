@@ -7,6 +7,11 @@ use crate::definitions::traits::ToCbor;
 #[isomdl(crate = "crate")]
 pub struct Extensions(BTreeMap<String, ByteStr>);
 
+impl Extensions {
+    pub fn new(extensions: BTreeMap<String, ByteStr>) -> Self {
+        Self(extensions)
+    }
+}
 impl From<Extensions> for ciborium::Value {
     fn from(extensions: Extensions) -> ciborium::Value {
         ciborium::Value::Map(extensions.0.into_iter().map(|(k, v)| (k.to_cbor(), v.to_cbor())).collect())
