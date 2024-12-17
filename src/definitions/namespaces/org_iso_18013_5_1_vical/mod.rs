@@ -4,7 +4,8 @@ mod certificate_profile;
 mod doc_type;
 mod vical_cose_sign1;
 
-pub use certificate_info::CertificateInfos;
+use std::str::FromStr;
+pub use certificate_info::{CertificateInfos, CertificateInfo};
 pub use extension::Extensions;
 pub use super::latin1::Latin1;
 pub use super::org_iso_18013_5_1::TDate;
@@ -29,6 +30,57 @@ pub struct OrgIso1901351Vical {
     pub next_update: Option<TDate>,
     pub certificate_infos: CertificateInfos,
     pub extensions: Option<Extensions>,
+}
+
+pub struct VicalBuilder {
+    version: String,
+    vical_provider: String,
+    date: String,
+    certificate_infos: Vec<CertificateInfo>,
+    vical_issue_id: Option<u32>,
+    next_update: Option<TDate>,
+    extensions: Option<Extensions>,
+}
+
+impl VicalBuilder {
+    pub fn new(version: String, vical_provider: String, date: String) -> Self {
+        VicalBuilder {
+            version,
+            vical_provider,
+            date,
+            certificate_infos: Vec::new(),//TODO: should be a part of a struct constructor
+            vical_issue_id: None,
+            next_update: None,
+            extensions: None,
+        }
+    }
+    pub fn vical_issue_id(mut self, vical_issue_id: u32) -> Self {
+        self.vical_issue_id = Some(vical_issue_id);
+        self
+    }
+    pub fn next_update(mut self, next_update: Option<TDate>) -> Self {
+        self.next_update = next_update;
+        self
+    }
+    pub fn certificate_infos(mut self, certificate_infos: Vec<CertificateInfo>) -> Self {
+        self.certificate_infos = certificate_infos;
+        self
+    }
+    pub fn extensions(mut self, extensions: Option<Extensions>) -> Self {
+        self.extensions = extensions;
+        self
+    }
+    pub fn build(self) -> OrgIso1901351Vical {
+        OrgIso1901351Vical {
+            version: Latin1::from_str(self.version.as_str()).unwrap(),
+            vical_provider: Latin1::from_str(self.vical_provider.as_str()).unwrap(),
+            date: TDate::from_str(self.date.as_str()).unwrap(),
+            vical_issue_id: self.vical_issue_id,
+            next_update: self.next_update,
+            certificate_infos: CertificateInfos::new(self.certificate_infos),
+            extensions: self.extensions,
+        }
+    }
 }
 #[cfg(test)]
 mod tests {

@@ -28,6 +28,12 @@ use crate::{
 #[isomdl(crate = "crate")]
 pub struct CertificateInfos(Vec<CertificateInfo>);
 
+impl CertificateInfos {
+    pub fn new(infos: Vec<CertificateInfo>) -> Self {
+        Self(infos)
+    }
+}
+
 impl From<CertificateInfos> for ciborium::Value {
     fn from(ci: CertificateInfos) -> ciborium::Value {
         ciborium::Value::Array(ci.0.into_iter().map(|value| value.to_cbor()).collect())

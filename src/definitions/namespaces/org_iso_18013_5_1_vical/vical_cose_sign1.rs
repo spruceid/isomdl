@@ -16,6 +16,7 @@ where
         .build();
 
     coset::CoseSign1Builder::new()
+        // .unprotected()
         .protected(protected)
         .payload(vical.to_cbor_bytes().unwrap())
         .create_signature(aad, |pt| signer.sign(pt).to_vec())
