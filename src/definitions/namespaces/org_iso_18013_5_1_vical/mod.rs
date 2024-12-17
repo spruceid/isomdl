@@ -38,7 +38,7 @@ pub struct VicalBuilder {
     date: String,
     certificate_infos: Vec<CertificateInfo>,
     vical_issue_id: Option<u32>,
-    next_update: Option<TDate>,
+    next_update: Option<String>,
     extensions: Option<Extensions>,
 }
 
@@ -58,8 +58,8 @@ impl VicalBuilder {
         self.vical_issue_id = Some(vical_issue_id);
         self
     }
-    pub fn next_update(mut self, next_update: Option<TDate>) -> Self {
-        self.next_update = next_update;
+    pub fn next_update(mut self, next_update: String) -> Self {
+        self.next_update = next_update.into();
         self
     }
     pub fn certificate_infos(mut self, certificate_infos: Vec<CertificateInfo>) -> Self {
@@ -76,9 +76,11 @@ impl VicalBuilder {
             vical_provider: Latin1::from_str(self.vical_provider.as_str()).unwrap(),
             date: TDate::from_str(self.date.as_str()).unwrap(),
             vical_issue_id: self.vical_issue_id,
-            next_update: self.next_update,
             certificate_infos: CertificateInfos::new(self.certificate_infos),
             extensions: self.extensions,
+            next_update: match self.next_update {
+                Some(s) => Some(TDate::from_str(s.as_str()).unwrap()),
+                None => None,},
         }
     }
 }
