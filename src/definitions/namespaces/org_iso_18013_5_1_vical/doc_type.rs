@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use isomdl_macros::FromJson;
 use crate::definitions::helpers::NonEmptyVec;
 use crate::definitions::namespaces::latin1::Latin1;
@@ -7,6 +8,12 @@ use crate::definitions::traits::ToCbor;
 #[isomdl(crate = "crate")]
 pub struct DocTypes(NonEmptyVec<Latin1>);
 
+impl DocTypes {
+    pub fn new(doc_types: Vec<String>) -> Self {
+        let v: Vec<Latin1> = doc_types.iter().map(|s| Latin1::from_str(s.as_str()).unwrap()).collect();
+        Self(NonEmptyVec::try_from(v).unwrap())
+    }
+}
 impl From<DocTypes> for ciborium::Value {
     fn from(value: DocTypes) -> ciborium::Value {
         ciborium::Value::Array(value.0.into_inner().into_iter().map(|v| v.to_cbor()).collect())

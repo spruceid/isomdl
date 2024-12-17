@@ -8,8 +8,9 @@ use crate::definitions::traits::ToCbor;
 pub struct Extensions(BTreeMap<String, ByteStr>);
 
 impl Extensions {
-    pub fn new(extensions: BTreeMap<String, ByteStr>) -> Self {
-        Self(extensions)
+    pub fn new(extensions: BTreeMap<String, Vec<u8>>) -> Self {
+        let v = extensions.iter().map( | (k, v)| (k.clone(), ByteStr::from(v.clone()))).collect();
+        Self(v)
     }
 }
 impl From<Extensions> for ciborium::Value {

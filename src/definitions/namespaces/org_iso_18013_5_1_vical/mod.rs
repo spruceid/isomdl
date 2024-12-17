@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 pub use certificate_info::{CertificateInfos, CertificateInfo};
 pub use extension::Extensions;
-use crate::definitions::helpers::ByteStr;
 pub use super::latin1::Latin1;
 pub use super::org_iso_18013_5_1::TDate;
 use crate::macros::{FromJson, ToCbor};
@@ -41,7 +40,7 @@ pub struct VicalBuilder {
     certificate_infos: Vec<CertificateInfo>,
     vical_issue_id: Option<u32>,
     next_update: Option<String>,
-    extensions: Option<BTreeMap<String, ByteStr>>,
+    extensions: Option<BTreeMap<String, Vec<u8>>>,
 }
 
 impl VicalBuilder {
@@ -68,7 +67,7 @@ impl VicalBuilder {
         self.certificate_infos = certificate_infos;
         self
     }
-    pub fn extensions(mut self, extensions: BTreeMap<String, ByteStr>) -> Self {
+    pub fn extensions(mut self, extensions: BTreeMap<String, Vec<u8>>) -> Self {
         self.extensions = Some(extensions);
         self
     }
