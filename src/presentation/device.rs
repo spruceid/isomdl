@@ -35,27 +35,27 @@ use crate::{
             self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
         },
         x509::{
-            error::Error as X509Error, trust_anchor::TrustAnchorRegistry,
-            x5chain::X5CHAIN_HEADER_LABEL, X5Chain,
+            self, trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
         },
         CoseKey, DeviceEngagement, DeviceResponse, IssuerSignedItem, Mso, SessionEstablishment,
     },
     issuance::Mdoc,
 };
-use ciborium::Value as CborValue;
 use coset::Label;
 use coset::{CoseMac0Builder, CoseSign1, CoseSign1Builder};
-use p256::FieldBytes;
+use ecdsa::VerifyingKey;
+use p256::{FieldBytes, NistP256};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
-use x509_cert::attr::AttributeTypeAndValue;
-use x509_cert::der::Decode;
 
-use super::authentication::{AuthenticationStatus, RequestAuthenticationOutcome};
+use super::{
+    authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
+    reader::ReaderAuthentication,
+};
 
 /// Initialisation state.
 ///
@@ -111,7 +111,7 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     state: State,
-    trusted_verifiers: Option<TrustAnchorRegistry>,
+    trusted_verifiers: TrustAnchorRegistry,
     device_auth_type: DeviceAuthType,
 }
 
@@ -203,6 +203,12 @@ pub struct PreparedDocument {
     pub device_namespaces: DeviceNamespacesBytes,
     pub prepared_cose: PreparedCose,
     pub errors: Option<NamespaceErrors>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReaderAuthOutcome {
+    pub common_name: Option<String>,
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,7 +303,7 @@ impl SessionManagerEngaged {
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
-        trusted_verifiers: Option<TrustAnchorRegistry>,
+        trusted_verifiers: TrustAnchorRegistry,
     ) -> anyhow::Result<(SessionManager, RequestAuthenticationOutcome)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript =
@@ -337,13 +343,13 @@ impl SessionManagerEngaged {
 
 impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
-        let request: ciborium::Value = cbor::from_slice(request).map_err(|_| {
-            // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
+        let request: ciborium::Value = cbor::from_slice(request).map_err(|error| {
+            tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborDecodingError)
         })?;
 
-        cbor::from_value(request).map_err(|_| {
-            // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
+        cbor::from_value(request).map_err(|error| {
+            tracing::error!("unable to validate DeviceRequest cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborValidationError)
         })
     }
@@ -365,23 +371,26 @@ impl SessionManager {
         };
 
         if request.version != DeviceRequest::VERSION {
-            // tracing::error!(
-            //     "unsupported DeviceRequest version: {} ({} is supported)",
-            //     request.version,
-            //     DeviceRequest::VERSION
-            // );
+            tracing::error!(
+                "unsupported DeviceRequest version: {} ({} is supported)",
+                request.version,
+                DeviceRequest::VERSION
+            );
             validated_request.errors.insert(
                 "parsing_errors".to_string(),
                 json!(vec!["unsupported DeviceRequest version".to_string()]),
             );
         }
         if let Some(doc_request) = request.doc_requests.first() {
-            let (validation_errors, common_name) = self.reader_authentication(doc_request.clone());
-            if validation_errors.is_empty() {
+            let outcome = self.reader_authentication(doc_request.clone());
+            if outcome.errors.is_empty() {
                 validated_request.reader_authentication = AuthenticationStatus::Valid;
+            } else {
+                validated_request.reader_authentication = AuthenticationStatus::Invalid;
+                tracing::error!("Reader authentication errors: {:#?}", outcome.errors);
             }
 
-            validated_request.common_name = common_name;
+            validated_request.common_name = outcome.common_name;
         }
 
         validated_request
@@ -570,79 +579,95 @@ impl SessionManager {
         }
     }
 
-    pub fn reader_authentication(
-        &self,
-        doc_request: DocRequest,
-    ) -> (Vec<X509Error>, Option<String>) {
-        //TODO validate the reader authentication. This code only grabs the CN from the x5chain
-        let mut validation_errors: Vec<X509Error> = vec![];
-        if let Some(reader_auth) = doc_request.reader_auth {
-            if let Some(x5chain_cbor) = reader_auth
-                .unprotected
-                .rest
-                .iter()
-                .find(|(label, _)| label == &Label::Int(X5CHAIN_HEADER_LABEL))
-                .map(|(_, value)| value)
-            {
-                let x5c = x5chain_cbor;
+    pub fn reader_authentication(&self, doc_request: DocRequest) -> ReaderAuthOutcome {
+        let mut outcome = ReaderAuthOutcome::default();
 
-                let x5chain =
-                    X5Chain::from_cbor(x5chain_cbor.clone()).map_err(|_| Error::CertificateError);
-                match x5chain {
-                    Ok(x5c) => {
-                        if let Some(trusted_verifiers) = &self.trusted_verifiers {
-                            validation_errors.append(&mut x5c.validate(Some(trusted_verifiers)));
-                        }
-                    }
-                    Err(e) => {
-                        validation_errors.push(X509Error::ValidationError(e.to_string()));
-                    }
-                }
+        let Some(reader_auth) = doc_request.reader_auth else {
+            outcome
+                .errors
+                .push("Processing: request does not contain reader auth".into());
+            return outcome;
+        };
 
-                match x5c {
-                    CborValue::Bytes(x509) => {
-                        match x509_cert::Certificate::from_der(x509) {
-                            Ok(cert) => {
-                                let distinguished_names: Vec<AttributeTypeAndValue> = cert
-                                    .tbs_certificate
-                                    .subject
-                                    .0
-                                    .into_iter()
-                                    .map(|rdn| {
-                                        rdn.0
-                                            .into_vec()
-                                            .into_iter()
-                                            .filter(|atv| {
-                                                //common name
-                                                atv.oid.to_string() == *"2.5.4.3"
-                                            })
-                                            .collect::<Vec<AttributeTypeAndValue>>()
-                                    })
-                                    .collect::<Vec<Vec<AttributeTypeAndValue>>>()
-                                    .into_iter()
-                                    .flatten()
-                                    .collect();
+        let Some(x5chain_cbor) = reader_auth
+            .unprotected
+            .rest
+            .iter()
+            .find(|(label, _)| label == &Label::Int(X5CHAIN_COSE_HEADER_LABEL))
+            .map(|(_, value)| value)
+        else {
+            outcome
+                .errors
+                .push("Processing: reader auth does not contain x5chain".into());
+            return outcome;
+        };
 
-                                if let Some(common_name) = distinguished_names.first() {
-                                    (validation_errors, Some(common_name.to_string()))
-                                } else {
-                                    (validation_errors, None)
-                                }
-                            }
-                            Err(e) => {
-                                validation_errors.push(X509Error::ValidationError(e.to_string()));
-                                (validation_errors, None)
-                            }
-                        }
-                    }
-                    _ => (validation_errors, None),
-                }
-            } else {
-                (validation_errors, None)
+        let x5chain = match X5Chain::from_cbor(x5chain_cbor.clone()) {
+            Ok(x5c) => x5c,
+            Err(e) => {
+                outcome
+                    .errors
+                    .push(format!("Processing: x5chain cannot be decoded: {e}"));
+                return outcome;
             }
-        } else {
-            (validation_errors, None)
+        };
+
+        outcome.common_name = Some(x5chain.end_entity_common_name().to_string());
+
+        let x5chain_validation_outcome = x509::validation::ValidationRuleset::MdlReaderOneStep
+            .validate(&x5chain, &self.trusted_verifiers);
+
+        outcome.errors.extend(x5chain_validation_outcome.errors);
+
+        // TODO: Support more than P-256.
+        let verifier: VerifyingKey<NistP256> = match x5chain.end_entity_public_key() {
+            Ok(verifier) => verifier,
+            Err(e) => {
+                outcome.errors.push(format!(
+                    "Processing: reader public key cannot be decoded: {e}"
+                ));
+                return outcome;
+            }
+        };
+
+        let detached_payload = match Tag24::new(ReaderAuthentication(
+            "ReaderAuthentication".into(),
+            self.session_transcript.clone(),
+            doc_request.items_request,
+        )) {
+            Ok(tagged) => tagged,
+            Err(e) => {
+                outcome.errors.push(format!(
+                    "Processing: failed to construct reader auth payload: {e}"
+                ));
+                return outcome;
+            }
+        };
+
+        let detached_payload = match cbor::to_vec(&detached_payload) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                outcome.errors.push(format!(
+                    "Processing: failed to encode reader auth payload: {e}"
+                ));
+                return outcome;
+            }
+        };
+
+        let verification_outcome = reader_auth
+            .verify::<VerifyingKey<NistP256>, p256::ecdsa::Signature>(
+                &verifier,
+                Some(&detached_payload),
+                None,
+            );
+
+        if let Err(e) = verification_outcome.into_result() {
+            outcome.errors.push(format!(
+                "Verification: failed to verify reader auth signature: {e}"
+            ))
         }
+
+        outcome
     }
 }
 

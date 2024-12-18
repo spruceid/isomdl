@@ -9,7 +9,6 @@ use crate::definitions::{
     device_signed::DeviceAuthentication, helpers::Tag24, SessionTranscript180135,
 };
 use crate::presentation::reader::Error;
-use crate::presentation::reader::Error as ReaderError;
 use anyhow::Result;
 use elliptic_curve::generic_array::GenericArray;
 use issuer_signed::IssuerSigned;
@@ -19,14 +18,16 @@ use ssi_jwk::Params;
 use ssi_jwk::JWK as SsiJwk;
 
 pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> Result<(), Error> {
-    let signer_key = x5chain.get_signer_key()?;
+    let signer_key = x5chain
+        .end_entity_public_key()
+        .map_err(Error::IssuerPublicKey)?;
     let verification_result: cose::sign1::VerificationResult =
         issuer_signed
             .issuer_auth
             .verify::<VerifyingKey, Signature>(&signer_key, None, None);
     verification_result
         .into_result()
-        .map_err(ReaderError::IssuerAuthentication)
+        .map_err(Error::IssuerAuthentication)
 }
 
 pub fn device_authentication(
@@ -47,7 +48,7 @@ pub fn device_authentication(
             let x_coordinate = p.x_coordinate.clone();
             let y_coordinate = p.y_coordinate.clone();
             let (Some(x), Some(y)) = (x_coordinate, y_coordinate) else {
-                return Err(ReaderError::MdocAuth(
+                return Err(Error::MdocAuth(
                     "device key jwk is missing coordinates".to_string(),
                 ));
             };
@@ -67,7 +68,7 @@ pub fn device_authentication(
                         document.doc_type.clone(),
                         namespaces_bytes.clone(),
                     ))
-                    .map_err(|_| ReaderError::CborDecodingError)?;
+                    .map_err(|_| Error::CborDecodingError)?;
                     let external_aad = None;
                     let cbor_payload = cbor::to_vec(&detached_payload)?;
                     let result = device_signature.verify::<VerifyingKey, Signature>(
@@ -76,13 +77,13 @@ pub fn device_authentication(
                         external_aad,
                     );
                     if !result.is_success() {
-                        Err(ReaderError::ParsingError)?
+                        Err(Error::ParsingError)?
                     } else {
                         Ok(())
                     }
                 }
                 DeviceAuth::Mac { .. } => {
-                    Err(ReaderError::Unsupported)
+                    Err(Error::Unsupported)
                     // send not yet supported error
                 }
             }

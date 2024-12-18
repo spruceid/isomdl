@@ -55,10 +55,10 @@ impl Device {
             DataElements::new(AGE_OVER_21_ELEMENT.to_string(), false),
         );
 
-        let trust_anchor = None;
+        let trust_anchors = TrustAnchorRegistry::default();
 
         let (reader_sm, session_request, _ble_ident) =
-            reader::SessionManager::establish_session(qr, requested_elements, trust_anchor)
+            reader::SessionManager::establish_session(qr, requested_elements, trust_anchors)
                 .context("failed to establish reader session")?;
         Ok((reader_sm, session_request))
     }
@@ -67,7 +67,7 @@ impl Device {
     pub fn handle_request(
         state: SessionManagerEngaged,
         request: Vec<u8>,
-        trusted_verifiers: Option<TrustAnchorRegistry>,
+        trusted_verifiers: TrustAnchorRegistry,
     ) -> Result<(device::SessionManager, RequestAuthenticationOutcome)> {
         let (session_manager, validated_request) = {
             let session_establishment: definitions::SessionEstablishment =

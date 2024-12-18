@@ -18,7 +18,7 @@ pub fn simulated_device_and_reader_interaction() {
 
     // Device accepting request
     let (device_session_manager, validated_request) =
-        Device::handle_request(engaged_state, request, None).unwrap();
+        Device::handle_request(engaged_state, request, Default::default()).unwrap();
 
     // Prepare response with required elements
     let response = Device::create_response(

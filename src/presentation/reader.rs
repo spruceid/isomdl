@@ -28,6 +28,7 @@ use super::authentication::{
     AuthenticationStatus, ResponseAuthenticationOutcome,
 };
 
+use crate::definitions::x509;
 use crate::{
     cbor::{self, CborError},
     definitions::{
@@ -40,7 +41,7 @@ use crate::{
             self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
             SessionEstablishment,
         },
-        x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_HEADER_LABEL, X5Chain},
+        x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain},
         DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
     },
     presentation::reader::{device_request::ItemsRequestBytes, Error as ReaderError},
@@ -59,7 +60,7 @@ pub struct SessionManager {
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
-    trust_anchor_registry: Option<TrustAnchorRegistry>,
+    trust_anchor_registry: TrustAnchorRegistry,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -114,20 +115,18 @@ pub enum Error {
     #[error("Currently unsupported format")]
     Unsupported,
     #[error("No x5chain found for issuer authentication")]
-    X5Chain,
+    X5ChainMissing,
+    #[error("Failed to parse x5chain: {0}")]
+    X5ChainParsing(anyhow::Error),
     #[error("issuer authentication failed: {0}")]
     IssuerAuthentication(String),
+    #[error("Unable to parse issuer public key")]
+    IssuerPublicKey(anyhow::Error),
 }
 
 impl From<CborError> for Error {
     fn from(_: CborError) -> Self {
         Error::CborDecodingError
-    }
-}
-
-impl From<crate::definitions::x509::error::Error> for Error {
-    fn from(value: crate::definitions::x509::error::Error) -> Self {
-        Error::MdocAuth(value.to_string())
     }
 }
 
@@ -182,7 +181,7 @@ impl SessionManager {
     pub fn establish_session(
         qr_code: String,
         namespaces: device_request::Namespaces,
-        trust_anchor_registry: Option<TrustAnchorRegistry>,
+        trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
             .context("failed to construct QR code")?;
@@ -372,7 +371,9 @@ impl SessionManager {
             }
         }
 
-        let validation_errors = x5chain.validate(self.trust_anchor_registry.as_ref());
+        let validation_errors = x509::validation::ValidationRuleset::Mdl
+            .validate(&x5chain, &self.trust_anchor_registry)
+            .errors;
         if validation_errors.is_empty() {
             match issuer_authentication(x5chain, &document.issuer_signed) {
                 Ok(_) => {
@@ -405,10 +406,11 @@ fn parse(
     let x5chain = header
         .rest
         .iter()
-        .find(|(label, _)| label == &Label::Int(X5CHAIN_HEADER_LABEL))
+        .find(|(label, _)| label == &Label::Int(X5CHAIN_COSE_HEADER_LABEL))
         .map(|(_, value)| value.to_owned())
         .map(X5Chain::from_cbor)
-        .ok_or(Error::X5Chain)??;
+        .ok_or(Error::X5ChainMissing)?
+        .map_err(Error::X5ChainParsing)?;
     let parsed_response = parse_namespaces(device_response)?;
     Ok((document, x5chain, parsed_response))
 }
@@ -460,6 +462,8 @@ fn get_document(device_response: &DeviceResponse) -> Result<&Document, Error> {
 }
 
 fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Error> {
+    // TODO: Check country name of certificate matches mdl
+
     // Check if request follows ISO18013-5 restrictions
     // A valid mdoc request can contain a maximum of 2 age_over_NN fields
     let age_over_nn_requested: Vec<(String, bool)> = namespaces
