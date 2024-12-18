@@ -93,8 +93,7 @@ fn test(
             .extensions
             .iter()
             .flatten()
-            .filter(|ext| ext.extn_id == skiv.oid())
-            .next()
+            .find(|ext| ext.extn_id == skiv.oid())
             .unwrap(),
     );
     assert_eq!(outcome.is_empty(), valid)
