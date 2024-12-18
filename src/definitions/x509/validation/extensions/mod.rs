@@ -139,13 +139,6 @@ pub fn validate_mdoc_reader_certificate_extensions(certificate: &Certificate) ->
 #[derive(Default)]
 struct ExtensionValidators(Vec<Box<dyn ExtensionValidator>>);
 
-impl ExtensionValidators {
-    fn with<V: ExtensionValidator + 'static>(mut self, validator: V) -> Self {
-        self.0.push(Box::new(validator));
-        self
-    }
-}
-
 struct RequiredExtension {
     found: bool,
     validator: Box<dyn ExtensionValidator>,
@@ -175,6 +168,11 @@ trait ExtensionValidator {
 }
 
 impl ExtensionValidators {
+    fn with<V: ExtensionValidator + 'static>(mut self, validator: V) -> Self {
+        self.0.push(Box::new(validator));
+        self
+    }
+
     fn validate_extensions<'a, Extensions>(self, extensions: Extensions) -> Vec<Error>
     where
         Extensions: IntoIterator<Item = &'a Extension>,
