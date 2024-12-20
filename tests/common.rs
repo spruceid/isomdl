@@ -4,9 +4,12 @@ use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
 use isomdl::definitions::helpers::NonEmptyMap;
+use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
-use isomdl::presentation::{device, reader, Stringify};
+use isomdl::presentation::{
+    authentication::RequestAuthenticationOutcome, device, reader, Stringify,
+};
 use signature::Signer;
 use uuid::Uuid;
 
@@ -51,8 +54,11 @@ impl Device {
             NAMESPACE.into(),
             DataElements::new(AGE_OVER_21_ELEMENT.to_string(), false),
         );
+
+        let trust_anchors = TrustAnchorRegistry::default();
+
         let (reader_sm, session_request, _ble_ident) =
-            reader::SessionManager::establish_session(qr, requested_elements)
+            reader::SessionManager::establish_session(qr, requested_elements, trust_anchors)
                 .context("failed to establish reader session")?;
         Ok((reader_sm, session_request))
     }
@@ -61,24 +67,25 @@ impl Device {
     pub fn handle_request(
         state: SessionManagerEngaged,
         request: Vec<u8>,
-    ) -> Result<(device::SessionManager, RequestedItems)> {
-        let (session_manager, items_requests) = {
+        trusted_verifiers: TrustAnchorRegistry,
+    ) -> Result<(device::SessionManager, RequestAuthenticationOutcome)> {
+        let (session_manager, validated_request) = {
             let session_establishment: definitions::SessionEstablishment =
                 cbor::from_slice(&request).context("could not deserialize request")?;
             state
-                .process_session_establishment(session_establishment)
+                .process_session_establishment(session_establishment, trusted_verifiers)
                 .context("could not process process session establishment")?
         };
         if session_manager.get_next_signature_payload().is_some() {
             anyhow::bail!("there were errors processing request");
         }
-        Ok((session_manager, items_requests))
+        Ok((session_manager, validated_request))
     }
 
     /// Prepare response with required elements.
     pub fn create_response(
         mut session_manager: device::SessionManager,
-        requested_items: RequestedItems,
+        requested_items: &RequestedItems,
         key: &p256::ecdsa::SigningKey,
     ) -> Result<Vec<u8>> {
         let permitted_items = [(
@@ -89,7 +96,7 @@ impl Device {
         )]
         .into_iter()
         .collect();
-        session_manager.prepare_response(&requested_items, permitted_items);
+        session_manager.prepare_response(requested_items, permitted_items);
         let (_, sign_payload) = session_manager.get_next_signature_payload().unwrap();
         let signature: p256::ecdsa::Signature = key.sign(sign_payload);
         session_manager
@@ -113,8 +120,8 @@ impl Reader {
         reader_sm: &mut reader::SessionManager,
         response: Vec<u8>,
     ) -> Result<()> {
-        let res = reader_sm.handle_response(&response)?;
-        println!("{:?}", res);
+        let validated = reader_sm.handle_response(&response);
+        println!("Validated Response: {validated:?}");
         Ok(())
     }
 }

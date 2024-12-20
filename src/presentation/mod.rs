@@ -39,6 +39,7 @@
 //!
 //! You can see the example in `simulated_device_and_reader.rs` from `examples` directory or a version that
 //! uses **State pattern**, `Arc` and `Mutex` `simulated_device_and_reader_state.rs`.
+pub mod authentication;
 pub mod device;
 pub mod reader;
 

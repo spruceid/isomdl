@@ -218,8 +218,6 @@ mod hmac {
 
     use super::super::SignatureAlgorithm;
 
-    /// Implement [`SignatureAlgorithm`].
-
     impl SignatureAlgorithm for Hmac<Sha256> {
         fn algorithm(&self) -> iana::Algorithm {
             iana::Algorithm::HMAC_256_256

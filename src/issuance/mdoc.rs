@@ -12,12 +12,12 @@ use signature::{SignatureEncoding, Signer};
 use crate::cose::sign1::PreparedCoseSign1;
 use crate::cose::{MaybeTagged, SignatureAlgorithm};
 use crate::{
+    definitions::x509::x5chain::{X5Chain, X5CHAIN_COSE_HEADER_LABEL},
     definitions::{
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
         DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, ValidityInfo,
     },
-    issuance::x5chain::{X5Chain, X5CHAIN_HEADER_LABEL},
 };
 
 pub type Namespaces = BTreeMap<String, BTreeMap<String, ciborium::Value>>;
@@ -196,7 +196,7 @@ impl PreparedMdoc {
             .inner
             .unprotected
             .rest
-            .push((Label::Int(X5CHAIN_HEADER_LABEL as i64), x5chain.into_cbor()));
+            .push((Label::Int(X5CHAIN_COSE_HEADER_LABEL), x5chain.into_cbor()));
         Mdoc {
             doc_type,
             mso,
@@ -629,7 +629,7 @@ pub mod test {
         let mdoc_builder = minimal_test_mdoc_builder();
 
         let x5chain = X5Chain::builder()
-            .with_pem(ISSUER_CERT)
+            .with_pem_certificate(ISSUER_CERT)
             .unwrap()
             .build()
             .unwrap();
@@ -646,7 +646,7 @@ pub mod test {
     fn decoy_digests() {
         let mdoc_builder = minimal_test_mdoc_builder();
         let x5chain = X5Chain::builder()
-            .with_pem(ISSUER_CERT)
+            .with_pem_certificate(ISSUER_CERT)
             .unwrap()
             .build()
             .unwrap();

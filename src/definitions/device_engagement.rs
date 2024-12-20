@@ -1,6 +1,6 @@
 //! This module contains the definitions for the [DeviceEngagement] struct and related types.
 //!
-//! The [DeviceEngagement] struct represents a device engagement object, which contains information about a device's engagement with a server.  
+//! The [DeviceEngagement] struct represents a device engagement object, which contains information about a device's engagement with a server.
 //! It includes fields such as the `version`, `security details, `device retrieval methods, `server retrieval methods, and `protocol information.
 //!
 //! The module also provides implementations for conversions between [DeviceEngagement] and [ciborium::Value], as well as other utility functions.
@@ -76,7 +76,7 @@ pub enum DeviceRetrievalMethod {
 
     /// Represents the BLE options for device engagement.
     ///
-    /// This struct is used to configure the BLE options for device engagement.  
+    /// This struct is used to configure the BLE options for device engagement.
     /// It contains the necessary parameters and settings for BLE communication.
     BLE(BleOptions),
 

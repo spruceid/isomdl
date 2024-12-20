@@ -16,14 +16,9 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use crate::cbor::CborError;
-use crate::cose::mac0::PreparedCoseMac0;
-use crate::cose::sign1::PreparedCoseSign1;
-use crate::cose::MaybeTagged;
-use crate::definitions::device_signed::DeviceAuthType;
-use crate::definitions::IssuerSignedItem;
 use crate::{
     cbor,
+    cose::{mac0::PreparedCoseMac0, sign1::PreparedCoseSign1, MaybeTagged},
     definitions::{
         device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
@@ -31,23 +26,36 @@ use crate::{
             Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
             Errors as NamespaceErrors, Status,
         },
-        device_signed::{DeviceAuth, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned},
+        device_signed::{
+            DeviceAuth, DeviceAuthType, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned,
+        },
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
             self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
         },
-        CoseKey, DeviceEngagement, DeviceResponse, Mso, SessionEstablishment,
+        x509::{
+            self, trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
+        },
+        CoseKey, DeviceEngagement, DeviceResponse, IssuerSignedItem, Mso, SessionEstablishment,
     },
     issuance::Mdoc,
 };
+use coset::Label;
 use coset::{CoseMac0Builder, CoseSign1, CoseSign1Builder};
-use p256::FieldBytes;
+use ecdsa::VerifyingKey;
+use p256::{FieldBytes, NistP256};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use session::SessionTranscript180135;
 use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use uuid::Uuid;
+
+use super::{
+    authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
+    reader::ReaderAuthentication,
+};
 
 /// Initialisation state.
 ///
@@ -70,7 +78,7 @@ pub struct SessionManagerInit {
 
 /// Engaged state.
 ///
-/// Transition to this state is made with [SessionManagerInit::qr_engagement].  
+/// Transition to this state is made with [SessionManagerInit::qr_engagement].
 /// That creates the `QR code` that the reader will use to establish the session.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
@@ -103,6 +111,7 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     state: State,
+    trusted_verifiers: TrustAnchorRegistry,
     device_auth_type: DeviceAuthType,
 }
 
@@ -142,8 +151,18 @@ pub enum Error {
     /// `age_over` element identifier is malformed.
     #[error("age_over element identifier is malformed")]
     PrefixError,
+    #[error("error decoding reader authentication certificate")]
+    CertificateError,
+    #[error("error while validating reader authentication certificate")]
+    ValidationError,
     #[error("Could not serialize to cbor: {0}")]
     CborError(coset::CoseError),
+}
+
+impl From<x509_cert::der::Error> for Error {
+    fn from(_value: x509_cert::der::Error) -> Self {
+        Error::CertificateError
+    }
 }
 
 /// The documents the device owns.
@@ -170,24 +189,30 @@ pub struct Document {
 /// After those are signed, they are kept in a list of [DeviceResponseDoc]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedDeviceResponse {
-    prepared_documents: Vec<PreparedDocument>,
-    signed_documents: Vec<DeviceResponseDoc>,
-    document_errors: Option<DocumentErrors>,
-    status: Status,
+    pub prepared_documents: Vec<PreparedDocument>,
+    pub signed_documents: Vec<DeviceResponseDoc>,
+    pub document_errors: Option<DocumentErrors>,
+    pub status: Status,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PreparedDocument {
-    id: Uuid,
-    doc_type: String,
-    issuer_signed: IssuerSigned,
-    device_namespaces: DeviceNamespacesBytes,
-    prepared_cose: PreparedCose,
-    errors: Option<NamespaceErrors>,
+pub struct PreparedDocument {
+    pub id: Uuid,
+    pub doc_type: String,
+    pub issuer_signed: IssuerSigned,
+    pub device_namespaces: DeviceNamespacesBytes,
+    pub prepared_cose: PreparedCose,
+    pub errors: Option<NamespaceErrors>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReaderAuthOutcome {
+    pub common_name: Option<String>,
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum PreparedCose {
+pub enum PreparedCose {
     Sign1(PreparedCoseSign1),
     Mac0(PreparedCoseMac0),
 }
@@ -278,7 +303,8 @@ impl SessionManagerEngaged {
     pub fn process_session_establishment(
         self,
         session_establishment: SessionEstablishment,
-    ) -> anyhow::Result<(SessionManager, RequestedItems)> {
+        trusted_verifiers: TrustAnchorRegistry,
+    ) -> anyhow::Result<(SessionManager, RequestAuthenticationOutcome)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript =
             SessionTranscript180135(self.device_engagement, e_reader_key.clone(), self.handover);
@@ -302,49 +328,72 @@ impl SessionManagerEngaged {
             sk_reader,
             reader_message_counter: 0,
             state: State::AwaitingRequest,
+            trusted_verifiers,
             device_auth_type: DeviceAuthType::Sign1,
         };
 
-        let requested_data = sm.handle_decoded_request(SessionData {
+        let validated_request = sm.handle_decoded_request(SessionData {
             data: Some(session_establishment.data),
             status: None,
-        })?;
+        });
 
-        Ok((sm, requested_data))
+        Ok((sm, validated_request))
     }
 }
 
 impl SessionManager {
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
-        let request: ciborium::Value = cbor::from_slice(request).map_err(|_| {
-            // tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
+        let request: ciborium::Value = cbor::from_slice(request).map_err(|error| {
+            tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborDecodingError)
         })?;
 
-        cbor::from_value(request).map_err(|_| {
-            // tracing::error!("unable to validate DeviceRequest cbor: {}", error);
+        cbor::from_value(request).map_err(|error| {
+            tracing::error!("unable to validate DeviceRequest cbor: {}", error);
             PreparedDeviceResponse::empty(Status::CborValidationError)
         })
     }
 
-    fn validate_request(
-        &self,
-        request: DeviceRequest,
-    ) -> Result<Vec<ItemsRequest>, PreparedDeviceResponse> {
-        if request.version != DeviceRequest::VERSION {
-            // tracing::error!(
-            //     "unsupported DeviceRequest version: {} ({} is supported)",
-            //     request.version,
-            //     DeviceRequest::VERSION
-            // );
-            return Err(PreparedDeviceResponse::empty(Status::GeneralError));
-        }
-        Ok(request
+    fn validate_request(&self, request: DeviceRequest) -> RequestAuthenticationOutcome {
+        let items_request: Vec<ItemsRequest> = request
             .doc_requests
+            .clone()
             .into_inner()
             .into_iter()
             .map(|DocRequest { items_request, .. }| items_request.into_inner())
-            .collect())
+            .collect();
+
+        let mut validated_request = RequestAuthenticationOutcome {
+            items_request,
+            common_name: None,
+            reader_authentication: AuthenticationStatus::Unchecked,
+            errors: BTreeMap::new(),
+        };
+
+        if request.version != DeviceRequest::VERSION {
+            tracing::error!(
+                "unsupported DeviceRequest version: {} ({} is supported)",
+                request.version,
+                DeviceRequest::VERSION
+            );
+            validated_request.errors.insert(
+                "parsing_errors".to_string(),
+                json!(vec!["unsupported DeviceRequest version".to_string()]),
+            );
+        }
+        if let Some(doc_request) = request.doc_requests.first() {
+            let outcome = self.reader_authentication(doc_request.clone());
+            if outcome.errors.is_empty() {
+                validated_request.reader_authentication = AuthenticationStatus::Valid;
+            } else {
+                validated_request.reader_authentication = AuthenticationStatus::Invalid;
+                tracing::error!("Reader authentication errors: {:#?}", outcome.errors);
+            }
+
+            validated_request.common_name = outcome.common_name;
+        }
+
+        validated_request
     }
 
     /// When the device is ready to respond, it prepares the response specifying the permitted items.
@@ -367,42 +416,65 @@ impl SessionManager {
         self.state = State::Signing(prepared_response);
     }
 
-    fn handle_decoded_request(&mut self, request: SessionData) -> anyhow::Result<RequestedItems> {
-        let data = request.data.ok_or_else(|| {
-            anyhow::anyhow!("no mdoc requests received, assume session can be terminated")
-        })?;
-        let decrypted_request = session::decrypt_reader_data(
+    fn handle_decoded_request(&mut self, request: SessionData) -> RequestAuthenticationOutcome {
+        let mut validated_request = RequestAuthenticationOutcome::default();
+        let data = match request.data {
+            Some(d) => d,
+            None => {
+                validated_request.errors.insert(
+                    "parsing_errors".to_string(),
+                    json!(vec![
+                        "no mdoc requests received, assume session can be terminated".to_string()
+                    ]),
+                );
+                return validated_request;
+            }
+        };
+        let decrypted_request = match session::decrypt_reader_data(
             &self.sk_reader.into(),
             data.as_ref(),
             &mut self.reader_message_counter,
         )
-        .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("unable to decrypt request: {}", e))
+        {
+            Ok(decrypted) => decrypted,
+            Err(e) => {
+                validated_request
+                    .errors
+                    .insert("decryption_errors".to_string(), json!(vec![e.to_string()]));
+                return validated_request;
+            }
+        };
+
         let request = match self.parse_request(&decrypted_request) {
             Ok(r) => r,
             Err(e) => {
                 self.state = State::Signing(e);
-                return Ok(Default::default());
+                return RequestAuthenticationOutcome::default();
             }
         };
-        let request = match self.validate_request(request) {
-            Ok(r) => r,
-            Err(e) => {
-                self.state = State::Signing(e);
-                return Ok(Default::default());
-            }
-        };
-        Ok(request)
+
+        self.validate_request(request)
     }
 
-    /// Handle a new request from the reader.
+    /// Handle a request from the reader.
     ///
-    /// The request is expected to be a [CBOR](https://cbor.io)
-    /// encoded [SessionData] and encrypted.
-    /// It will parse and validate it.
+    /// The request is expected to be a CBOR encoded
+    /// and encrypted [SessionData].
     ///
-    /// It returns the requested items by the reader.
-    pub fn handle_request(&mut self, request: &[u8]) -> anyhow::Result<RequestedItems> {
-        let session_data: SessionData = cbor::from_slice(request).map_err(CborError::from)?;
+    /// This method will return the [RequestAuthenticationOutcome] struct, which will
+    /// include the items requested by the reader/verifier.
+    pub fn handle_request(&mut self, request: &[u8]) -> RequestAuthenticationOutcome {
+        let mut validated_request = RequestAuthenticationOutcome::default();
+        let session_data: SessionData = match cbor::from_slice(request) {
+            Ok(sd) => sd,
+            Err(e) => {
+                validated_request
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e.to_string()]));
+                return validated_request;
+            }
+        };
         self.handle_decoded_request(session_data)
     }
 
@@ -505,6 +577,97 @@ impl SessionManager {
         } else {
             None
         }
+    }
+
+    pub fn reader_authentication(&self, doc_request: DocRequest) -> ReaderAuthOutcome {
+        let mut outcome = ReaderAuthOutcome::default();
+
+        let Some(reader_auth) = doc_request.reader_auth else {
+            outcome
+                .errors
+                .push("Processing: request does not contain reader auth".into());
+            return outcome;
+        };
+
+        let Some(x5chain_cbor) = reader_auth
+            .unprotected
+            .rest
+            .iter()
+            .find(|(label, _)| label == &Label::Int(X5CHAIN_COSE_HEADER_LABEL))
+            .map(|(_, value)| value)
+        else {
+            outcome
+                .errors
+                .push("Processing: reader auth does not contain x5chain".into());
+            return outcome;
+        };
+
+        let x5chain = match X5Chain::from_cbor(x5chain_cbor.clone()) {
+            Ok(x5c) => x5c,
+            Err(e) => {
+                outcome
+                    .errors
+                    .push(format!("Processing: x5chain cannot be decoded: {e}"));
+                return outcome;
+            }
+        };
+
+        outcome.common_name = Some(x5chain.end_entity_common_name().to_string());
+
+        let x5chain_validation_outcome = x509::validation::ValidationRuleset::MdlReaderOneStep
+            .validate(&x5chain, &self.trusted_verifiers);
+
+        outcome.errors.extend(x5chain_validation_outcome.errors);
+
+        // TODO: Support more than P-256.
+        let verifier: VerifyingKey<NistP256> = match x5chain.end_entity_public_key() {
+            Ok(verifier) => verifier,
+            Err(e) => {
+                outcome.errors.push(format!(
+                    "Processing: reader public key cannot be decoded: {e}"
+                ));
+                return outcome;
+            }
+        };
+
+        let detached_payload = match Tag24::new(ReaderAuthentication(
+            "ReaderAuthentication".into(),
+            self.session_transcript.clone(),
+            doc_request.items_request,
+        )) {
+            Ok(tagged) => tagged,
+            Err(e) => {
+                outcome.errors.push(format!(
+                    "Processing: failed to construct reader auth payload: {e}"
+                ));
+                return outcome;
+            }
+        };
+
+        let detached_payload = match cbor::to_vec(&detached_payload) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                outcome.errors.push(format!(
+                    "Processing: failed to encode reader auth payload: {e}"
+                ));
+                return outcome;
+            }
+        };
+
+        let verification_outcome = reader_auth
+            .verify::<VerifyingKey<NistP256>, p256::ecdsa::Signature>(
+                &verifier,
+                Some(&detached_payload),
+                None,
+            );
+
+        if let Err(e) = verification_outcome.into_result() {
+            outcome.errors.push(format!(
+                "Verification: failed to verify reader auth signature: {e}"
+            ))
+        }
+
+        outcome
     }
 }
 
@@ -850,7 +1013,7 @@ impl From<Mdoc> for Document {
 }
 
 /// Filter permitted items to only permit the items that were requested.
-fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
+pub fn filter_permitted(request: &RequestedItems, permitted: PermittedItems) -> PermittedItems {
     permitted
         .into_iter()
         .filter_map(|(doc_type, namespaces)| {
@@ -1063,9 +1226,9 @@ mod test {
         let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();
         let issuer_item2 = Tag24::new(issuer_signed_item2).unwrap();
         let issuer_item3 = Tag24::new(issuer_signed_item3).unwrap();
-        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1.clone());
+        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1);
         issuer_items.insert(element_identifier2, issuer_item2.clone());
-        issuer_items.insert(element_identifier3, issuer_item3.clone());
+        issuer_items.insert(element_identifier3, issuer_item3);
 
         let result = nearest_age_attestation(requested_element_identifier, issuer_items)
             .expect("failed to process age attestation request");

@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, Namespaces};
+use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Documents, RequestedItems};
 use isomdl::presentation::{device, reader};
@@ -25,7 +26,7 @@ struct RequestData {
 
 struct SessionManager {
     inner: Mutex<device::SessionManager>,
-    items_requests: RequestedItems,
+    items_request: RequestedItems,
     key: Arc<p256::ecdsa::SigningKey>,
 }
 
@@ -96,8 +97,10 @@ fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u
         NAMESPACE.into(),
         DataElements::new(AGE_OVER_21_ELEMENT.to_string(), false),
     );
+    let trust_anchor_registry = TrustAnchorRegistry::default();
+
     let (reader_sm, session_request, _ble_ident) =
-        reader::SessionManager::establish_session(qr, requested_elements)
+        reader::SessionManager::establish_session(qr, requested_elements, trust_anchor_registry)
             .context("failed to establish reader session")?;
     Ok((reader_sm, session_request))
 }
@@ -109,24 +112,24 @@ fn handle_request(
     request: Vec<u8>,
     key: Arc<p256::ecdsa::SigningKey>,
 ) -> Result<Option<RequestData>> {
-    let (session_manager, items_requests) = {
+    let (session_manager, validated_response) = {
         let session_establishment: definitions::SessionEstablishment =
             cbor::from_slice(&request).context("could not deserialize request")?;
         state
             .0
             .clone()
-            .process_session_establishment(session_establishment)
+            .process_session_establishment(session_establishment, Default::default())
             .context("could not process process session establishment")?
     };
     let session_manager = Arc::new(SessionManager {
         inner: Mutex::new(session_manager),
-        items_requests: items_requests.clone(),
+        items_request: validated_response.items_request.clone(),
         key,
     });
     // Propagate any errors back to the reader
     if let Ok(Some(response)) = get_errors(session_manager.clone()) {
-        let res = reader_session_manager.handle_response(&response)?;
-        println!("Reader: {res:?}");
+        let validated_response = reader_session_manager.handle_response(&response);
+        println!("Reader: {validated_response:?}");
         return Ok(None);
     };
 
@@ -147,7 +150,7 @@ fn create_response(session_manager: Arc<SessionManager>) -> Result<Vec<u8>> {
         .inner
         .lock()
         .unwrap()
-        .prepare_response(&session_manager.items_requests, permitted_items);
+        .prepare_response(&session_manager.items_request, permitted_items);
     sign_pending_and_retrieve_response(session_manager.clone(), Some(1))?
         .ok_or_else(|| anyhow::anyhow!("cannot prepare response"))
 }
@@ -185,7 +188,7 @@ fn reader_handle_device_response(
     reader_sm: &mut reader::SessionManager,
     response: Vec<u8>,
 ) -> Result<()> {
-    let res = reader_sm.handle_response(&response)?;
-    println!("{:?}", res);
+    let validated_response = reader_sm.handle_response(&response);
+    println!("Validated Response: {validated_response:?}");
     Ok(())
 }

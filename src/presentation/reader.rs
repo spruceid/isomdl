@@ -13,24 +13,39 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use crate::cbor;
-use crate::cbor::CborError;
-use crate::definitions::{
-    device_engagement::DeviceRetrievalMethod,
-    device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
-    helpers::{NonEmptyVec, Tag24},
-    session::{
-        self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
-        SessionEstablishment,
-    },
-    DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
-};
+use std::collections::BTreeMap;
+
+use anyhow::Context;
 use anyhow::{anyhow, Result};
+use coset::Label;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use uuid::Uuid;
+
+use super::authentication::{
+    mdoc::{device_authentication, issuer_authentication},
+    AuthenticationStatus, ResponseAuthenticationOutcome,
+};
+
+use crate::definitions::x509;
+use crate::{
+    cbor::{self, CborError},
+    definitions::{
+        device_engagement::DeviceRetrievalMethod,
+        device_key::cose_key::Error as CoseError,
+        device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
+        device_response::Document,
+        helpers::{non_empty_vec, NonEmptyVec, Tag24},
+        session::{
+            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
+            SessionEstablishment,
+        },
+        x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain},
+        DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
+    },
+    presentation::reader::{device_request::ItemsRequestBytes, Error as ReaderError},
+};
 
 /// The main state of the reader.
 ///
@@ -38,18 +53,30 @@ use uuid::Uuid;
 /// for handling the session with the device.
 ///
 /// The transition to this state is made by [SessionManager::establish_session].
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SessionManager {
     session_transcript: SessionTranscript180135,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
+    trust_anchor_registry: TrustAnchorRegistry,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct ReaderAuthentication(
+    pub String,
+    pub SessionTranscript180135,
+    pub ItemsRequestBytes,
+);
 
 /// Various errors that can occur during the interaction with the device.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Received IssuerAuth had a detached payload.")]
+    DetachedIssuerAuth,
+    #[error("Could not parse MSO.")]
+    MSOParsing,
     /// The QR code had the wrong prefix or the contained data could not be decoded.
     #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
     InvalidQrCode(anyhow::Error),
@@ -77,14 +104,24 @@ pub enum Error {
     /// Not a valid JSON input.
     #[error("not a valid JSON input.")]
     JsonError,
-    /// Unexpected date type for data_element.
-    #[error("Unexpected date type for data_element.")]
+    /// Unexpected data type for data element.
+    #[error("Unexpected data type for data element.")]
     ParsingError,
     /// Request for data is invalid.
     #[error("Request for data is invalid.")]
     InvalidRequest,
-    #[error("Could not serialize to cbor: {0}")]
-    CborError(CborError),
+    #[error("Failed mdoc authentication: {0}")]
+    MdocAuth(String),
+    #[error("Currently unsupported format")]
+    Unsupported,
+    #[error("No x5chain found for issuer authentication")]
+    X5ChainMissing,
+    #[error("Failed to parse x5chain: {0}")]
+    X5ChainParsing(anyhow::Error),
+    #[error("issuer authentication failed: {0}")]
+    IssuerAuthentication(String),
+    #[error("Unable to parse issuer public key")]
+    IssuerPublicKey(anyhow::Error),
 }
 
 impl From<CborError> for Error {
@@ -99,6 +136,42 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+impl From<x509_cert::der::Error> for Error {
+    fn from(value: x509_cert::der::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<p256::ecdsa::Error> for Error {
+    fn from(value: p256::ecdsa::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<x509_cert::spki::Error> for Error {
+    fn from(value: x509_cert::spki::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<CoseError> for Error {
+    fn from(value: CoseError) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<non_empty_vec::Error> for Error {
+    fn from(value: non_empty_vec::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
+impl From<asn1_rs::Error> for Error {
+    fn from(value: asn1_rs::Error) -> Self {
+        Error::MdocAuth(value.to_string())
+    }
+}
+
 impl SessionManager {
     /// Establish a session with the device.
     ///
@@ -108,27 +181,31 @@ impl SessionManager {
     pub fn establish_session(
         qr_code: String,
         namespaces: device_request::Namespaces,
+        trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
-        let device_engagement_bytes =
-            Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code).map_err(Error::InvalidQrCode)?;
+        let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
+            .context("failed to construct QR code")?;
 
         //generate own keys
-        let key_pair = create_p256_ephemeral_keys()?;
+        let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
         let e_reader_key_private = key_pair.0;
-        let e_reader_key_public = Tag24::new(key_pair.1)?;
+        let e_reader_key_public =
+            Tag24::new(key_pair.1).context("failed to encode public cose key")?;
 
         //decode device_engagement
         let device_engagement = device_engagement_bytes.as_ref();
         let e_device_key = &device_engagement.security.1;
 
         // calculate ble Ident value
-        let ble_ident = super::calculate_ble_ident(e_device_key)?;
+        let ble_ident =
+            super::calculate_ble_ident(e_device_key).context("failed to calculate BLE Ident")?;
 
         // derive shared secret
         let shared_secret = get_shared_secret(
             e_device_key.clone().into_inner(),
             &e_reader_key_private.into(),
-        )?;
+        )
+        .context("failed to derive shared session secret")?;
 
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
@@ -136,12 +213,16 @@ impl SessionManager {
             Handover::QR,
         );
 
-        let session_transcript_bytes = Tag24::new(session_transcript.clone())?;
+        let session_transcript_bytes = Tag24::new(session_transcript.clone())
+            .context("failed to encode session transcript")?;
 
         //derive session keys
-        let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();
-        let sk_device =
-            derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
+        let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)
+            .context("failed to derive reader session key")?
+            .into();
+        let sk_device = derive_session_key(&shared_secret, &session_transcript_bytes, false)
+            .context("failed to derive device session key")?
+            .into();
 
         let mut session_manager = Self {
             session_transcript,
@@ -149,14 +230,18 @@ impl SessionManager {
             device_message_counter: 0,
             sk_reader,
             reader_message_counter: 0,
+            trust_anchor_registry,
         };
 
-        let request = session_manager.build_request(namespaces)?;
+        let request = session_manager
+            .build_request(namespaces)
+            .context("failed to build device request")?;
         let session = SessionEstablishment {
             data: request.into(),
             e_reader_key: e_reader_key_public,
         };
-        let session_request = cbor::to_vec(&session)?;
+        let session_request =
+            cbor::to_vec(&session).context("failed to encode session establishment")?;
 
         Ok((session_manager, session_request, ble_ident))
     }
@@ -201,6 +286,7 @@ impl SessionManager {
             namespaces,
             request_info: None,
         };
+
         let doc_request = DocRequest {
             reader_auth: None,
             items_request: Tag24::new(items_request)?,
@@ -218,16 +304,7 @@ impl SessionManager {
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
-    /// Handles a response from the device.
-    ///
-    /// The response is expected to be a [CBOR](https://cbor.io)
-    /// encoded [SessionData] and encrypted.
-    ///
-    /// Will return the elements and values grouped by namespace.
-    pub fn handle_response(
-        &mut self,
-        response: &[u8],
-    ) -> Result<BTreeMap<String, BTreeMap<String, Value>>, Error> {
+    fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, Error> {
         let session_data: SessionData = cbor::from_slice(response)?;
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
@@ -239,62 +316,103 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
-        let response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
-        let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
-        let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
-        let mut parsed_response = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
-
-        let mut namespaces = response
-            .documents
-            .ok_or(Error::DeviceTransmissionError)?
-            .into_inner()
-            .into_iter()
-            .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-            .ok_or(Error::DocumentTypeError)?
-            .issuer_signed
-            .namespaces
-            .ok_or(Error::NoMdlDataTransmission)?
-            .into_inner();
-
-        // Check if at least one of the two namespaces exists
-        if !namespaces.contains_key("org.iso.18013.5.1")
-            && !namespaces.contains_key("org.iso.18013.5.1.aamva")
-        {
-            return Err(Error::IncorrectNamespace);
-        }
-
-        if let Some(core_response) = namespaces.remove("org.iso.18013.5.1") {
-            core_response
-                .into_inner()
-                .into_iter()
-                .map(|item| item.into_inner())
-                .for_each(|item| {
-                    let value = parse_response(item.element_value.clone());
-                    if let Ok(val) = value {
-                        core_namespace.insert(item.element_identifier, val);
-                    }
-                });
-
-            parsed_response.insert("org.iso.18013.5.1".to_string(), core_namespace);
-        }
-
-        if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
-            aamva_response
-                .into_inner()
-                .into_iter()
-                .map(|item| item.into_inner())
-                .for_each(|item| {
-                    let value = parse_response(item.element_value.clone());
-                    if let Ok(val) = value {
-                        aamva_namespace.insert(item.element_identifier, val);
-                    }
-                });
-
-            parsed_response.insert("org.iso.18013.5.1.aamva".to_string(), aamva_namespace);
-        }
-
-        Ok(parsed_response)
+        let device_response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
+        Ok(device_response)
     }
+
+    pub fn handle_response(&mut self, response: &[u8]) -> ResponseAuthenticationOutcome {
+        let mut validated_response = ResponseAuthenticationOutcome::default();
+
+        let device_response = match self.decrypt_response(response) {
+            Ok(device_response) => device_response,
+            Err(e) => {
+                validated_response.errors.insert(
+                    "decryption_errors".to_string(),
+                    json!(vec![format!("{e:?}")]),
+                );
+                return validated_response;
+            }
+        };
+
+        match parse(&device_response) {
+            Ok((document, x5chain, namespaces)) => {
+                self.validate_response(x5chain, document.clone(), namespaces)
+            }
+            Err(e) => {
+                validated_response
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![format!("{e:?}")]));
+                validated_response
+            }
+        }
+    }
+
+    fn validate_response(
+        &mut self,
+        x5chain: X5Chain,
+        document: Document,
+        namespaces: BTreeMap<String, serde_json::Value>,
+    ) -> ResponseAuthenticationOutcome {
+        let mut validated_response = ResponseAuthenticationOutcome {
+            response: namespaces,
+            ..Default::default()
+        };
+
+        match device_authentication(&document, self.session_transcript.clone()) {
+            Ok(_) => {
+                validated_response.device_authentication = AuthenticationStatus::Valid;
+            }
+            Err(e) => {
+                validated_response.device_authentication = AuthenticationStatus::Invalid;
+                validated_response.errors.insert(
+                    "device_authentication_errors".to_string(),
+                    json!(vec![format!("{e:?}")]),
+                );
+            }
+        }
+
+        let validation_errors = x509::validation::ValidationRuleset::Mdl
+            .validate(&x5chain, &self.trust_anchor_registry)
+            .errors;
+        if validation_errors.is_empty() {
+            match issuer_authentication(x5chain, &document.issuer_signed) {
+                Ok(_) => {
+                    validated_response.issuer_authentication = AuthenticationStatus::Valid;
+                }
+                Err(e) => {
+                    validated_response.issuer_authentication = AuthenticationStatus::Invalid;
+                    validated_response.errors.insert(
+                        "issuer_authentication_errors".to_string(),
+                        serde_json::json!(vec![format!("{e:?}")]),
+                    );
+                }
+            }
+        } else {
+            validated_response
+                .errors
+                .insert("certificate_errors".to_string(), json!(validation_errors));
+            validated_response.issuer_authentication = AuthenticationStatus::Invalid
+        };
+
+        validated_response
+    }
+}
+
+fn parse(
+    device_response: &DeviceResponse,
+) -> Result<(&Document, X5Chain, BTreeMap<String, Value>), Error> {
+    let document = get_document(device_response)?;
+    let header = document.issuer_signed.issuer_auth.unprotected.clone();
+    let x5chain = header
+        .rest
+        .iter()
+        .find(|(label, _)| label == &Label::Int(X5CHAIN_COSE_HEADER_LABEL))
+        .map(|(_, value)| value.to_owned())
+        .map(X5Chain::from_cbor)
+        .ok_or(Error::X5ChainMissing)?
+        .map_err(Error::X5ChainParsing)?;
+    let parsed_response = parse_namespaces(device_response)?;
+    Ok((document, x5chain, parsed_response))
 }
 
 fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
@@ -333,7 +451,19 @@ fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     }
 }
 
+fn get_document(device_response: &DeviceResponse) -> Result<&Document, Error> {
+    device_response
+        .documents
+        .as_ref()
+        .ok_or(ReaderError::DeviceTransmissionError)?
+        .iter()
+        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .ok_or(ReaderError::DocumentTypeError)
+}
+
 fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Error> {
+    // TODO: Check country name of certificate matches mdl
+
     // Check if request follows ISO18013-5 restrictions
     // A valid mdoc request can contain a maximum of 2 age_over_NN fields
     let age_over_nn_requested: Vec<(String, bool)> = namespaces
@@ -353,8 +483,67 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
     Ok(true)
 }
 
+// TODO: Support other namespaces.
+fn parse_namespaces(
+    device_response: &DeviceResponse,
+) -> Result<BTreeMap<String, serde_json::Value>, Error> {
+    let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
+    let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
+    let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
+    let mut namespaces = device_response
+        .documents
+        .as_ref()
+        .ok_or(Error::DeviceTransmissionError)?
+        .iter()
+        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .ok_or(Error::DocumentTypeError)?
+        .issuer_signed
+        .namespaces
+        .as_ref()
+        .ok_or(Error::NoMdlDataTransmission)?
+        .clone()
+        .into_inner();
+
+    namespaces
+        .remove("org.iso.18013.5.1")
+        .ok_or(Error::IncorrectNamespace)?
+        .into_inner()
+        .into_iter()
+        .map(|item| item.into_inner())
+        .for_each(|item| {
+            let value = parse_response(item.element_value.clone());
+            if let Ok(val) = value {
+                core_namespace.insert(item.element_identifier, val);
+            }
+        });
+
+    parsed_response.insert(
+        "org.iso.18013.5.1".to_string(),
+        serde_json::to_value(core_namespace)?,
+    );
+
+    if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
+        aamva_response
+            .into_inner()
+            .into_iter()
+            .map(|item| item.into_inner())
+            .for_each(|item| {
+                let value = parse_response(item.element_value.clone());
+                if let Ok(val) = value {
+                    aamva_namespace.insert(item.element_identifier, val);
+                }
+            });
+
+        parsed_response.insert(
+            "org.iso.18013.5.1.aamva".to_string(),
+            serde_json::to_value(aamva_namespace)?,
+        );
+    }
+    Ok(parsed_response)
+}
+
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::*;
 
     #[test]
