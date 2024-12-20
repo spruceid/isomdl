@@ -1,3 +1,4 @@
+use std::str::FromStr;
 pub use super::FullDate;
 
 use crate::definitions::traits::{FromJson, FromJsonError};
@@ -19,21 +20,7 @@ pub enum TDateOrFullDate {
 impl FromJson for TDate {
     fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         let date_str = String::from_json(v)?;
-
-        // 18013-5 asks for dates to be in RFC3339 format with no milliseconds, and with no UTC
-        // offset.
-        Ok(Self(
-            OffsetDateTime::parse(&date_str, &Rfc3339)
-                .map_err(|e| anyhow!("date not in RFC3339 format: {}", e))
-                .map_err(FromJsonError::Parsing)?
-                .to_offset(UtcOffset::UTC)
-                .replace_millisecond(0)
-                // Unwrap safety: 0 is a valid millisecond.
-                .unwrap()
-                .format(&Rfc3339)
-                // Unwrap safety: it has just been successfully parsed from a RFC3339 formatted string.
-                .unwrap(),
-        ))
+        Self::from_str(&date_str)
     }
 }
 
@@ -63,5 +50,25 @@ impl From<TDateOrFullDate> for ciborium::Value {
             TDateOrFullDate::TDate(t) => t.into(),
             TDateOrFullDate::FullDate(f) => f.into(),
         }
+    }
+}
+impl FromStr for TDate {
+    type Err = FromJsonError;
+
+    fn from_str(s: &str) -> Result<Self, FromJsonError> {
+        // 18013-5 asks for dates to be in RFC3339 format with no milliseconds, and with no UTC
+        // offset.
+        Ok(Self(
+            OffsetDateTime::parse(&s, &Rfc3339)
+                .map_err(|e| anyhow!("date not in RFC3339 format: {}", e))
+                .map_err(FromJsonError::Parsing)?
+                .to_offset(UtcOffset::UTC)
+                .replace_millisecond(0)
+                // Unwrap safety: 0 is a valid millisecond.
+                .unwrap()
+                .format(&Rfc3339)
+                // Unwrap safety: it has just been successfully parsed from a RFC3339 formatted string.
+                .unwrap(),
+        ))
     }
 }
