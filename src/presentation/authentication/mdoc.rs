@@ -62,7 +62,7 @@ pub fn device_authentication(
             let device_auth: &DeviceAuth = &document.device_signed.device_auth;
 
             match device_auth {
-                DeviceAuth::Signature { device_signature } => {
+                DeviceAuth::DeviceSignature(device_signature) => {
                     let detached_payload = Tag24::new(DeviceAuthentication::new(
                         session_transcript,
                         document.doc_type.clone(),
@@ -82,7 +82,7 @@ pub fn device_authentication(
                         Ok(())
                     }
                 }
-                DeviceAuth::Mac { .. } => {
+                DeviceAuth::DeviceMac(_) => {
                     Err(Error::Unsupported)
                     // send not yet supported error
                 }

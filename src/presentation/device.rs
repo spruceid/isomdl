@@ -737,12 +737,8 @@ impl PreparedDocument {
             ..
         } = self;
         let device_auth = match prepared_cose {
-            PreparedCose::Sign1(inner) => DeviceAuth::Signature {
-                device_signature: inner.finalize(signature),
-            },
-            PreparedCose::Mac0(inner) => DeviceAuth::Mac {
-                device_mac: inner.finalize(signature),
-            },
+            PreparedCose::Sign1(inner) => DeviceAuth::DeviceSignature(inner.finalize(signature)),
+            PreparedCose::Mac0(inner) => DeviceAuth::DeviceMac(inner.finalize(signature)),
         };
         let device_signed = DeviceSigned {
             namespaces: device_namespaces,

@@ -191,9 +191,7 @@ mod test {
             },
             device_signed: DeviceSigned {
                 namespaces: device_namespaces_bytes,
-                device_auth: DeviceAuth::Mac {
-                    device_mac: cose_mac0,
-                },
+                device_auth: DeviceAuth::DeviceMac(cose_mac0),
             },
             errors: None,
         };
