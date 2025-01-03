@@ -34,14 +34,10 @@ pub type DeviceSignedItems = NonEmptyMap<String, ciborium::Value>;
 /// This struct contains the device signature in the form of a [CoseSign1] object.  
 /// The [CoseSign1] object represents a `COSE (CBOR Object Signing and Encryption) signature.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-// #[serde(untagged)]
+#[serde(rename_all = "camelCase")]
 pub enum DeviceAuth {
-    #[serde(rename_all = "camelCase")]
-    Signature {
-        device_signature: MaybeTagged<CoseSign1>,
-    },
-    #[serde(rename_all = "camelCase")]
-    Mac { device_mac: MaybeTagged<CoseMac0> },
+    DeviceSignature(MaybeTagged<CoseSign1>),
+    DeviceMac(MaybeTagged<CoseMac0>),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -93,9 +89,7 @@ mod tests {
             cbor::from_slice(&bytes).expect("failed to parse COSE_Sign1 from bytes");
         let bytes2 = cbor::to_vec(&cose_sign1).unwrap();
         assert_eq!(bytes, bytes2);
-        let device_auth = DeviceAuth::Signature {
-            device_signature: cose_sign1,
-        };
+        let device_auth = DeviceAuth::DeviceSignature(cose_sign1);
         let bytes = cbor::to_vec(&device_auth).unwrap();
         println!("bytes {}", hex::encode(&bytes));
         let roundtripped: DeviceAuth = cbor::from_slice(&bytes).unwrap();
