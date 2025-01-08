@@ -91,7 +91,7 @@ impl Mdoc {
         let builder = coset::CoseSign1Builder::new()
             .protected(protected)
             .payload(mso_bytes);
-        let prepared_sig = PreparedCoseSign1::new(builder, None, None, true)?;
+        let prepared_sig = PreparedCoseSign1::new(builder, None, None, false)?;
 
         let preparation_mdoc = PreparedMdoc {
             doc_type,
