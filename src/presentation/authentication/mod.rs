@@ -8,7 +8,7 @@ use serde_json::Value;
 pub mod mdoc;
 
 /// The outcome of the holder device authenticating the device request.
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct RequestAuthenticationOutcome {
     /// The requested items from the mDL namespace.
     pub items_request: RequestedItems,
@@ -23,7 +23,7 @@ pub struct RequestAuthenticationOutcome {
 }
 
 /// The outcome of the reader device authenticating the device response.
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct ResponseAuthenticationOutcome {
     /// The values sent back from the holder device, serialized as JSON.
     pub response: BTreeMap<String, Value>,
@@ -36,7 +36,7 @@ pub struct ResponseAuthenticationOutcome {
 }
 
 /// The outcome of authenticity checks.
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 pub enum AuthenticationStatus {
     #[default]
     Unchecked,
