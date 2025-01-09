@@ -267,7 +267,7 @@ mod tests {
             .protected(protected)
             .unprotected(unprotected)
             .payload(b"This is the content.".to_vec());
-        let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
+        let prepared = PreparedCoseMac0::new(builder, None, None, false).unwrap();
         let signature_payload = prepared.signature_payload();
         let signature = tag(signature_payload, &signer).unwrap();
         let cose_mac0 = prepared.finalize(signature);
@@ -315,7 +315,7 @@ mod tests {
             .protected(protected)
             .unprotected(unprotected)
             .payload(b"This is the content.".to_vec());
-        let prepared = PreparedCoseMac0::new(builder, None, None, true).unwrap();
+        let prepared = PreparedCoseMac0::new(builder, None, None, false).unwrap();
         let signature_payload = prepared.signature_payload();
         let signature = tag(signature_payload, &signer).unwrap();
         let cose_mac0 = prepared.finalize(signature);
