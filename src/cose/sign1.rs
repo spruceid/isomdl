@@ -319,7 +319,7 @@ mod tests {
             .protected(protected)
             .unprotected(unprotected)
             .payload(b"This is the content.".to_vec());
-        let prepared = PreparedCoseSign1::new(builder, None, None, true).unwrap();
+        let prepared = PreparedCoseSign1::new(builder, None, None, false).unwrap();
         let signature_payload = prepared.signature_payload();
         let signature = sign::<SigningKey, Signature>(signature_payload, &signer).unwrap();
         let cose_sign1 = prepared.finalize(signature);
@@ -371,7 +371,7 @@ mod tests {
             .protected(protected)
             .unprotected(unprotected)
             .payload(b"This is the content.".to_vec());
-        let prepared = PreparedCoseSign1::new(builder, None, None, true).unwrap();
+        let prepared = PreparedCoseSign1::new(builder, None, None, false).unwrap();
         let signature_payload = prepared.signature_payload();
         let signature = sign::<SigningKey, Signature>(signature_payload, &signer).unwrap();
         let cose_sign1 = prepared.finalize(signature);
@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn tag_coset_tagged_roundtrip() {
         // this is tagged
-        let bytes = hex::decode(COSE_SIGN1).unwrap();
+        let bytes = hex::decode(RFC8392_COSE_SIGN1).unwrap();
 
         // can parse tagged value
         let parsed: MaybeTagged<CoseSign1> = cbor::from_slice(&bytes).unwrap();

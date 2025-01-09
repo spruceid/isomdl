@@ -896,7 +896,7 @@ pub trait DeviceSession {
                         cose_sign1_builder,
                         Some(&device_auth_bytes),
                         None,
-                        true,
+                        false,
                     ) {
                         Ok(prepared) => prepared,
                         Err(_e) => {
@@ -916,7 +916,7 @@ pub trait DeviceSession {
                         cose_mac0_builder,
                         Some(&device_auth_bytes),
                         None,
-                        true,
+                        false,
                     ) {
                         Ok(prepared) => prepared,
                         Err(_e) => {
