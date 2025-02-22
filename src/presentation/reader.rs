@@ -186,6 +186,25 @@ impl SessionManager {
         let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
             .context("failed to construct QR code")?;
 
+        Self::establish_session_with_handover(
+            device_engagement_bytes,
+            namespaces,
+            trust_anchor_registry,
+            Handover::QR,
+        )
+    }
+
+    /// Establish a session with the device, using the specified handover type.
+    ///
+    /// Internally it generates the ephemeral keys,
+    /// derives the shared secret, and derives the session keys
+    /// (using **Diffie–Hellman key exchange**).
+    pub fn establish_session_with_handover(
+        device_engagement_bytes: Tag24<DeviceEngagement>,
+        namespaces: device_request::Namespaces,
+        trust_anchor_registry: TrustAnchorRegistry,
+        handover: Handover,
+    ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         //generate own keys
         let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
         let e_reader_key_private = key_pair.0;
@@ -210,7 +229,7 @@ impl SessionManager {
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
             e_reader_key_public.clone(),
-            Handover::QR,
+            handover,
         );
 
         let session_transcript_bytes = Tag24::new(session_transcript.clone())
