@@ -245,6 +245,7 @@ impl SessionManagerInit {
     /// It transition to [SessionManagerInit] state.
     pub fn initialise(
         documents: Documents,
+        device_engagement: DeviceEngagement,
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
         server_retrieval_methods: Option<ServerRetrievalMethods>,
     ) -> Result<Self, Error> {
@@ -254,13 +255,13 @@ impl SessionManagerInit {
             Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
         let security = Security(1, e_device_key_bytes);
 
-        let device_engagement = DeviceEngagement {
-            version: "1.0".to_string(),
-            security,
-            device_retrieval_methods,
-            server_retrieval_methods,
-            protocol_info: None,
-        };
+        // let device_engagement = DeviceEngagement {
+        //     version: "1.0".to_string(),
+        //     security,
+        //     device_retrieval_methods,
+        //     server_retrieval_methods,
+        //     protocol_info: None,
+        // };
 
         let device_engagement =
             Tag24::<DeviceEngagement>::new(device_engagement).map_err(Error::Tag24CborEncoding)?;
