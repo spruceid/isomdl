@@ -23,12 +23,9 @@ use serde_json::json;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::authentication::{
-    mdoc::{device_authentication, issuer_authentication},
-    AuthenticationStatus, ResponseAuthenticationOutcome,
-};
+use super::authentication::ResponseAuthenticationOutcome;
+use super::reader_utils::validate_response;
 
-use crate::definitions::x509;
 use crate::{
     cbor::{self, CborError},
     definitions::{
@@ -335,9 +332,13 @@ impl SessionManager {
         };
 
         match parse(&device_response) {
-            Ok((document, x5chain, namespaces)) => {
-                self.validate_response(x5chain, document.clone(), namespaces)
-            }
+            Ok((document, x5chain, namespaces)) => validate_response(
+                self.session_transcript.clone(),
+                self.trust_anchor_registry.clone(),
+                x5chain,
+                document.clone(),
+                namespaces,
+            ),
             Err(e) => {
                 validated_response
                     .errors
@@ -346,59 +347,9 @@ impl SessionManager {
             }
         }
     }
-
-    fn validate_response(
-        &mut self,
-        x5chain: X5Chain,
-        document: Document,
-        namespaces: BTreeMap<String, serde_json::Value>,
-    ) -> ResponseAuthenticationOutcome {
-        let mut validated_response = ResponseAuthenticationOutcome {
-            response: namespaces,
-            ..Default::default()
-        };
-
-        match device_authentication(&document, self.session_transcript.clone()) {
-            Ok(_) => {
-                validated_response.device_authentication = AuthenticationStatus::Valid;
-            }
-            Err(e) => {
-                validated_response.device_authentication = AuthenticationStatus::Invalid;
-                validated_response.errors.insert(
-                    "device_authentication_errors".to_string(),
-                    json!(vec![format!("{e:?}")]),
-                );
-            }
-        }
-
-        let validation_errors = x509::validation::ValidationRuleset::Mdl
-            .validate(&x5chain, &self.trust_anchor_registry)
-            .errors;
-        if validation_errors.is_empty() {
-            match issuer_authentication(x5chain, &document.issuer_signed) {
-                Ok(_) => {
-                    validated_response.issuer_authentication = AuthenticationStatus::Valid;
-                }
-                Err(e) => {
-                    validated_response.issuer_authentication = AuthenticationStatus::Invalid;
-                    validated_response.errors.insert(
-                        "issuer_authentication_errors".to_string(),
-                        serde_json::json!(vec![format!("{e:?}")]),
-                    );
-                }
-            }
-        } else {
-            validated_response
-                .errors
-                .insert("certificate_errors".to_string(), json!(validation_errors));
-            validated_response.issuer_authentication = AuthenticationStatus::Invalid
-        };
-
-        validated_response
-    }
 }
 
-fn parse(
+pub fn parse(
     device_response: &DeviceResponse,
 ) -> Result<(&Document, X5Chain, BTreeMap<String, Value>), Error> {
     let document = get_document(device_response)?;

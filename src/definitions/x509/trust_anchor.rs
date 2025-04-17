@@ -1,4 +1,4 @@
-use anyhow::Error;
+use anyhow::{Context, Error};
 use der::{DecodePem, EncodePem};
 use serde::{Deserialize, Serialize};
 use x509_cert::Certificate;
@@ -39,7 +39,10 @@ impl TrustAnchorRegistry {
         Ok(Self {
             anchors: certs
                 .into_iter()
-                .map(TrustAnchor::try_from)
+                .enumerate()
+                .map(|(index, t)| {
+                    TrustAnchor::try_from(t).context(format!("Failed to build trust anchor for cert no. {}", index))
+                })
                 .collect::<Result<_, _>>()?,
         })
     }
