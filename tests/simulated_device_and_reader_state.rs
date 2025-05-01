@@ -2,7 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use isomdl::cbor;
-use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
+use isomdl::definitions::device_engagement::{
+    CentralClientMode, DeviceEngagementType, DeviceRetrievalMethods,
+};
 use isomdl::definitions::device_request::{DataElements, Namespaces};
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};

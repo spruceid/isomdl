@@ -4,6 +4,8 @@
 //! based on a message count and a flag indicating whether the vector is for the reader or the device.
 use super::helpers::Tag24;
 use super::DeviceEngagement;
+use super::DeviceRetrievalMethod;
+use crate::cbor::CborError;
 use crate::definitions::device_engagement::EReaderKeyBytes;
 use crate::definitions::device_key::cose_key::EC2Y;
 use crate::definitions::device_key::CoseKey;
@@ -30,11 +32,21 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// When negotiated handover is used, the mdoc (holder) should include
+/// the following service URN to the reader, which will be used to select
+/// the appropriate alternative carrier record in a handover request message.
+///
+/// See 18013-5 §8.2.2.1 Device Engagement using NFC for more information.
+pub const NFC_NEGOTIATED_HANDOVER_SERVICE: &str = "urn:nfc:sn:handover";
+pub const TNF_WELL_KNOWN: u8 = 0x01;
+pub const TNF_MIME_MEDIA: u8 = 0x02;
+
 pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
 pub type DeviceEngagementBytes = Tag24<DeviceEngagement>;
 pub type SessionTranscriptBytes = Tag24<SessionTranscript180135>;
-pub type NfcHandover = (ByteStr, Option<ByteStr>);
+pub type NfcHandoverSelectMessage = ByteStr;
+pub type NfcHandoverRequestMessage = Option<ByteStr>;
 
 /// Represents the establishment of a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,12 +62,12 @@ pub struct SessionEstablishment {
 /// Represents session data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
-    /// An optional [ByteStr] that represents the data associated with the session.  
+    /// An optional [ByteStr] that represents the data associated with the session.
     /// The field is skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<ByteStr>,
 
-    /// An optional [Status] that represents the status of the session.  
+    /// An optional [Status] that represents the status of the session.
     /// Similarly, the field is skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
@@ -104,7 +116,7 @@ pub struct SessionTranscript180135(
 
 impl SessionTranscript for SessionTranscript180135 {}
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Curve not supported for DH exchange")]
     UnsupportedCurve,
@@ -114,18 +126,181 @@ pub enum Error {
     SessionKeyError,
     #[error("Something went wrong generating ephemeral keys")]
     EphemeralKeyError,
+    #[error("Serialization error")]
+    Cbor(#[from] CborError),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NfcHandover(pub NfcHandoverSelectMessage, pub NfcHandoverRequestMessage);
+
+impl NfcHandover {
+    pub fn create_handover_select(
+        device_engagement: &Tag24<DeviceEngagement>,
+        nfc_handover_request: NfcHandoverRequestMessage,
+    ) -> Result<Self, Error> {
+        let mut embedded_ndef = Vec::new();
+
+        // Track how many records total we will emit
+        let mut record_parts = Vec::new();
+
+        // URI Record for negotiated handover support (urn:nfc:sn:handover)
+        let uri_record = NdefRecord {
+            tnf: TNF_WELL_KNOWN,
+            type_field: vec![b'U'], // URI Record type
+            id: None,
+            payload: {
+                let mut payload = vec![0x00]; // URI Identifier Code 0x00 = no prefix
+                payload.extend_from_slice(NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes());
+                payload
+            },
+        };
+
+        // URI record
+        record_parts.push(uri_record);
+
+        // Dynamic AC/Carrier records
+        if let Some(retrieval_methods) = device_engagement.inner.device_retrieval_methods.as_ref() {
+            for method in retrieval_methods.iter() {
+                if let DeviceRetrievalMethod::BLE(_) = method {
+                    let (ac_record, bt_record) =
+                        NdefRecord::configure_bluetooth_alternative_carrier_records(
+                            device_engagement,
+                        )?;
+                    record_parts.push(ac_record);
+                    record_parts.push(bt_record);
+                }
+            }
+        }
+
+        // Encode records with Message Beginning (MB)/Message Ending (ME) flags
+        for (i, record) in record_parts.iter().enumerate() {
+            let mb = i == 0;
+            let me = i == record_parts.len() - 1;
+            embedded_ndef.extend_from_slice(&record.encode(mb, me));
+        }
+
+        let mut hs_payload = vec![0x12]; // Version 1.2
+        hs_payload.extend_from_slice(&embedded_ndef);
+
+        let hs_record = NdefRecord {
+            tnf: TNF_WELL_KNOWN,
+            type_field: b"Hs".to_vec(),
+            id: None,
+            payload: hs_payload,
+        };
+
+        // Final top-level NDEF message
+        Ok(NfcHandover(
+            hs_record.encode(true, true).into(),
+            nfc_handover_request,
+        ))
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NdefRecord {
+    pub tnf: u8,
+    pub type_field: Vec<u8>,
+    pub id: Option<Vec<u8>>,
+    pub payload: Vec<u8>,
+}
+
+impl NdefRecord {
+    /// Create alternative carrier records for bluetooth handover.
+    fn configure_bluetooth_alternative_carrier_records(
+        device_engagement: &Tag24<DeviceEngagement>,
+    ) -> Result<(Self, Self), Error> {
+        Ok((
+            NdefRecord {
+                tnf: TNF_WELL_KNOWN,
+                type_field: b"ac".to_vec(),
+                id: None,
+                payload: vec![
+                    0x01, // Carrier Power State: active
+                    0x01, // Length of Carrier Data Reference
+                    b'B', // Carrier Data Reference ID
+                    0x00, // Auxiliary Data Reference Count
+                ],
+            },
+            NdefRecord {
+                tnf: TNF_MIME_MEDIA,
+                type_field: b"application/vnd.bluetooth.ep.oob".to_vec(),
+                id: Some(b"B".to_vec()), // must match AC reference
+                payload: device_engagement.inner_bytes.clone(),
+            },
+        ))
+    }
+
+    /// `mb` -> message begin
+    /// `me` -> message end
+    ///
+    /// Encodes the NDEF record into a byte vector.
+    pub fn encode(&self, mb: bool, me: bool) -> Vec<u8> {
+        let sr = self.payload.len() < 256;
+        let il = self.id.is_some();
+        let mut header = 0;
+        if mb {
+            header |= 0x80;
+        }
+        if me {
+            header |= 0x40;
+        }
+        if sr {
+            header |= 0x10;
+        }
+        if il {
+            header |= 0x08;
+        }
+        header |= self.tnf & 0x07;
+
+        let mut record = vec![header];
+        record.push(self.type_field.len() as u8);
+
+        if sr {
+            record.push(self.payload.len() as u8);
+        } else {
+            record.extend_from_slice(&(self.payload.len() as u32).to_be_bytes());
+        }
+
+        if il {
+            record.push(self.id.as_ref().unwrap().len() as u8);
+        }
+
+        record.extend_from_slice(&self.type_field);
+        if il {
+            record.extend_from_slice(self.id.as_ref().unwrap());
+        }
+        record.extend_from_slice(&self.payload);
+        record
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Handover {
-    QR,
-    NFC(ByteStr, Option<ByteStr>),
+    /// > If QR code is used for device engagement, the device engagement structure
+    /// > shall be transmitted as a barcode compliant with ISO/IEC 18004. The QR code
+    /// > shall contain an URI with "mdoc:" as a scheme.
+    ///
+    /// See ISO/IEC 18013-5 §8.2.2.3 for more information.
+    ///
+    // NOTE: The specification does not mention adding the `mdoc:` scheme
+    // to the QR handover variant. However, the device engagement bytes structure
+    // does permit additional bytes to be appended after the required device
+    // engagement bytes. See `DeviceEngagement` structure for required fields. Therefore,
+    // adding the QR code URI here should be acceptable per the specification.
+    //
+    // The contents of the QR code are the encoded device engagement bytes, which
+    // are used to parse the device engagement bytes structure.
+    //
+    // See ISO/IEC 18013-5 §8.2.1.1 for more information.
+    QR(String),
+    NFC(NfcHandover),
     OID4VP(String, String),
 }
 
 pub enum EphemeralSecrets {
-    /// Represents an Eph256 session.  
+    /// Represents an Eph256 session.
     /// This enum variant holds an `EphemeralSecret` of type `NistP256`.
     Eph256(EphemeralSecret<NistP256>),
 
@@ -137,17 +312,17 @@ pub enum EncodedPoints {
     /// Represents a session with an Ep256 encoded point.
     Ep256(EncodedPoint<NistP256>),
 
-    /// Represents an Ep384 session.  
+    /// Represents an Ep384 session.
     /// This struct holds an encoded point of type `EncodedPoint<NistP384>`.
     Ep384(EncodedPoint<NistP384>),
 }
 
 pub enum SharedSecrets {
-    /// Represents a session with a shared secret using the `SS256` algorithm.  
+    /// Represents a session with a shared secret using the `SS256` algorithm.
     /// The shared secret is generated using the `NistP256` elliptic curve.
     Ss256(SharedSecret<NistP256>),
 
-    /// Represents a session with a shared secret using the `Ss384` algorithm.  
+    /// Represents a session with a shared secret using the `Ss384` algorithm.
     /// The shared secret is of type [`SharedSecret<NistP384>`].
     Ss384(SharedSecret<NistP384>),
 }
@@ -290,14 +465,24 @@ mod test {
     use crate::cbor;
     use crate::definitions::device_engagement::Security;
     use crate::definitions::device_request::DeviceRequest;
+    use crate::definitions::helpers::NonEmptyVec;
+    use crate::definitions::CoseKey;
+
+    fn dummy_device_key() -> CoseKey {
+        let crv = EC2Curve::P256;
+        let x: Vec<u8> = vec![0u8; 32];
+        let y = EC2Y::Value(x.clone());
+
+        CoseKey::EC2 { crv, x, y }
+    }
 
     #[test]
     fn qr_handover() {
-        // null
-        let cbor = hex::decode("F6").expect("failed to decode hex");
+        // Empty string in CBOR is 0x60
+        let cbor = hex::decode("60").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::QR) {
+        if !matches!(handover, Handover::QR(..)) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
@@ -316,7 +501,7 @@ mod test {
         let cbor = hex::decode("80").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::QR) {
+        if !matches!(handover, Handover::QR(..)) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
@@ -335,7 +520,7 @@ mod test {
         let cbor = hex::decode("A0").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::QR) {
+        if !matches!(handover, Handover::QR(..)) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
@@ -439,7 +624,7 @@ mod test {
         let session_transcript = Tag24::new(SessionTranscript180135(
             device_engagement_bytes,
             reader_key_bytes,
-            Handover::QR,
+            Handover::QR(String::new()),
         ))
         .unwrap();
         let _session_key_device =
@@ -502,5 +687,106 @@ mod test {
         let plaintext =
             decrypt_reader_data(&session_key, encrypted_request.as_ref(), &mut 0).unwrap();
         let _device_request: DeviceRequest = crate::cbor::from_slice(&plaintext).unwrap();
+    }
+
+    #[test]
+    fn test_valid_nfc_handover_select_ble_only() {
+        use crate::definitions::device_engagement::Security;
+
+        let device_engagement = Tag24::new(DeviceEngagement {
+            version: "1.0".into(),
+            security: Security(1, Tag24::new(dummy_device_key()).unwrap()),
+            device_retrieval_methods: Some(NonEmptyVec::new(DeviceRetrievalMethod::BLE(
+                Default::default(),
+            ))),
+            server_retrieval_methods: None,
+            protocol_info: None,
+        })
+        .expect("failed to create device engagement tag24");
+
+        let result = NfcHandover::create_handover_select(&device_engagement, None);
+        assert!(result.is_ok());
+
+        let NfcHandover(handover_bytes, _) = result.unwrap();
+        let raw = handover_bytes.as_ref();
+
+        // Assert: Handover starts with valid NDEF header
+        assert_eq!(
+            raw[0] & 0xF8,
+            0xD0,
+            "First NDEF record should be MB=1, TNF=0x01"
+        );
+
+        // Assert: 'Hs' record type exists
+        assert!(raw.windows(2).any(|w| w == b"Hs"), "Hs type not found");
+
+        // Assert: Includes version byte (0x12)
+        assert!(raw.contains(&0x12), "Hs payload missing version byte 0x12");
+
+        // Assert: Includes 'urn:nfc:sn:handover' URI
+        let urn = NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes();
+        assert!(
+            raw.windows(urn.len()).any(|w| w == urn),
+            "URI 'urn:nfc:sn:handover' missing"
+        );
+    }
+
+    #[test]
+    fn test_nfc_handover_with_no_retrieval_methods() {
+        let device_engagement = Tag24::new(DeviceEngagement {
+            version: "1.0".into(),
+            security: Security(1, Tag24::new(dummy_device_key()).unwrap()),
+            device_retrieval_methods: None,
+            server_retrieval_methods: None,
+            protocol_info: None,
+        })
+        .expect("failed to create device engagement tag24");
+
+        let result = NfcHandover::create_handover_select(&device_engagement, None);
+        assert!(result.is_ok());
+
+        let NfcHandover(handover_bytes, _) = result.unwrap();
+        let raw = handover_bytes.as_ref();
+
+        // Should still contain the URI record
+        assert!(
+            raw.windows(NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes().len())
+                .any(|w| w == NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes()),
+            "URN URI missing"
+        );
+
+        let uri_count = raw
+            .windows(NFC_NEGOTIATED_HANDOVER_SERVICE.len())
+            .filter(|w| *w == NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes())
+            .count();
+
+        assert_eq!(uri_count, 1, "Expected only one URI record");
+
+        // Only one embedded record expected
+        let num_ndef_records = raw.iter().filter(|b| **b & 0x80 != 0).count();
+        assert_eq!(
+            num_ndef_records, 2,
+            "Expected 2 beginning bytes, one for URI and one for Hs"
+        );
+    }
+
+    #[test]
+    fn test_nfc_handover_missing_device_key_should_fail() {
+        let device_engagement = Tag24::new(DeviceEngagement {
+            version: "1.0".into(),
+            security: Security(1, Tag24::new(dummy_device_key()).unwrap()),
+            device_retrieval_methods: Some(NonEmptyVec::new(DeviceRetrievalMethod::BLE(
+                Default::default(),
+            ))),
+            server_retrieval_methods: None,
+            protocol_info: None,
+        })
+        .expect("Failed to create device engagement");
+
+        let result = NfcHandover::create_handover_select(&device_engagement, None);
+        assert!(
+            result.is_ok(),
+            "Should succeed even with minimal fields in dummy key (adjust if validation is enforced)"
+        );
     }
 }

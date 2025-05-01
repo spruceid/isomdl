@@ -210,7 +210,7 @@ impl SessionManager {
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
             e_reader_key_public.clone(),
-            Handover::QR,
+            Handover::QR(qr_code),
         );
 
         let session_transcript_bytes = Tag24::new(session_transcript.clone())

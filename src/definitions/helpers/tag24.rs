@@ -14,7 +14,7 @@ use serde::{
 /// preserved for future serialising.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag24<T> {
-    inner: T,
+    pub(crate) inner: T,
     pub inner_bytes: Vec<u8>,
 }
 

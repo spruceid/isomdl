@@ -17,10 +17,12 @@
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use crate::{
-    cbor,
+    cbor::{self, CborError},
     cose::{mac0::PreparedCoseMac0, sign1::PreparedCoseSign1, MaybeTagged},
     definitions::{
-        device_engagement::{DeviceRetrievalMethod, Security, ServerRetrievalMethods},
+        device_engagement::{
+            DeviceEngagementType, DeviceRetrievalMethod, Security, ServerRetrievalMethods,
+        },
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
         device_response::{
             Document as DeviceResponseDoc, DocumentError, DocumentErrorCode, DocumentErrors,
@@ -32,7 +34,8 @@ use crate::{
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
-            self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
+            self, derive_session_key, get_shared_secret, Handover, NfcHandover,
+            NfcHandoverRequestMessage, SessionData, SessionTranscript,
         },
         x509::{
             self, trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
@@ -78,14 +81,39 @@ pub struct SessionManagerInit {
 
 /// Engaged state.
 ///
-/// Transition to this state is made with [SessionManagerInit::qr_engagement].
+/// Transition to this state is made with [SessionManagerInit::engage].
 /// That creates the `QR code` that the reader will use to establish the session.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
-    documents: Documents,
-    e_device_key: Vec<u8>,
-    device_engagement: Tag24<DeviceEngagement>,
-    handover: Handover,
+    pub documents: Documents,
+    pub e_device_key: Vec<u8>,
+    pub device_engagement: Tag24<DeviceEngagement>,
+    pub handover: Handover,
+}
+
+impl SessionManagerEngaged {
+    /// Return NFC Handover constructed from the device engagement.
+    ///
+    /// Optionally accepts a `HfcHandoverRequestMessage` to include in the handover,
+    /// from the reader, encoded in a NFC NDEF message format.
+    ///
+    /// NOTE: This method will construct a NFC Handover message that can be used to
+    /// establish a session with the reader, regardless of the inner `Handover` type of
+    /// the engaged session.
+    pub fn nfc_handover(
+        &self,
+        nfc_handover_request: NfcHandoverRequestMessage,
+    ) -> Result<NfcHandover, session::Error> {
+        NfcHandover::create_handover_select(&self.device_engagement, nfc_handover_request)
+    }
+
+    /// Return the QR code URI for the engaged session.
+    ///
+    /// This URI can be used to establish a session with the reader,
+    /// regardless of the inner `Handover` type of the engaged session.
+    pub fn qr_handover(&self) -> Result<String, CborError> {
+        self.device_engagement.to_qr_code_uri()
+    }
 }
 
 /// The initial state of the Session Manager.
@@ -157,6 +185,8 @@ pub enum Error {
     ValidationError,
     #[error("Could not serialize to cbor: {0}")]
     CborError(coset::CoseError),
+    #[error("invalid device engagement type: {0}")]
+    InvalidDeviceEngagementType(String),
 }
 
 impl From<x509_cert::der::Error> for Error {
@@ -245,7 +275,6 @@ impl SessionManagerInit {
     /// It transition to [SessionManagerInit] state.
     pub fn initialise(
         documents: Documents,
-        device_engagement: DeviceEngagement,
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
         server_retrieval_methods: Option<ServerRetrievalMethods>,
     ) -> Result<Self, Error> {
@@ -255,18 +284,19 @@ impl SessionManagerInit {
             Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
         let security = Security(1, e_device_key_bytes);
 
-        // let device_engagement = DeviceEngagement {
-        //     version: "1.0".to_string(),
-        //     security,
-        //     device_retrieval_methods,
-        //     server_retrieval_methods,
-        //     protocol_info: None,
-        // };
+        let device_engagement = DeviceEngagement {
+            version: "1.0".to_string(),
+            security,
+            device_retrieval_methods,
+            server_retrieval_methods,
+            protocol_info: None,
+        };
 
         let device_engagement =
             Tag24::<DeviceEngagement>::new(device_engagement).map_err(Error::Tag24CborEncoding)?;
 
         Ok(Self {
+            // device_engagement_type,
             documents,
             e_device_key: e_device_key.to_bytes().to_vec(),
             device_engagement,
@@ -280,15 +310,57 @@ impl SessionManagerInit {
     /// Begins the device engagement using **QR code**.
     ///
     /// The response contains the device's public key and engagement data.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the `engage()` method instead to engage the session.")]
     pub fn qr_engagement(self) -> anyhow::Result<(SessionManagerEngaged, String)> {
         let qr_code_uri = self.device_engagement.to_qr_code_uri()?;
         let sm = SessionManagerEngaged {
             documents: self.documents,
             device_engagement: self.device_engagement,
             e_device_key: self.e_device_key,
-            handover: Handover::QR,
+            handover: Handover::QR(qr_code_uri.clone()),
         };
         Ok((sm, qr_code_uri))
+    }
+
+    /// Returns the session manager engaged
+    ///
+    /// Consumes the initialized session and returns the device engagement based on the
+    /// device engagement type, i.e. `DeviceEngagementType::Nfc` or `DeviceEngagementType::QR`.
+    ///
+    /// NOTE: unlike `qr_engagement()` method, if this method engage type is QR, it will return the QR code URI within the
+    /// handover type within the `SessionManagerEngaged` type, returning a single value rather than a tuple,
+    /// with a qr code uri as the second item.
+    ///
+    /// ```ignore
+    /// use isomdl::definitions::device_engagement::DeviceEngagementType;
+    /// use isomdl::definitions::session::Handover
+    ///
+    /// let engaged_session = session.engage(DeviceEngagementType::QR)?;
+    ///
+    /// if let Handover::QR(qr_code_uri) = engaged_session.handover {
+    ///     println!("QR code URI: {}", qr_code_uri);
+    /// }
+    ///
+    /// ```
+    pub fn engage(
+        self,
+        device_engagement_handover_type: DeviceEngagementType,
+    ) -> anyhow::Result<SessionManagerEngaged> {
+        let handover = match device_engagement_handover_type {
+            DeviceEngagementType::NFC => Handover::NFC(NfcHandover::create_handover_select(
+                &self.device_engagement,
+                None,
+            )?),
+            DeviceEngagementType::QR => Handover::QR(self.device_engagement.to_qr_code_uri()?),
+        };
+
+        Ok(SessionManagerEngaged {
+            documents: self.documents,
+            device_engagement: self.device_engagement,
+            e_device_key: self.e_device_key,
+            handover,
+        })
     }
 }
 
