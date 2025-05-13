@@ -6,9 +6,7 @@ use crate::definitions::session::SessionTranscript;
 use crate::definitions::x509::X5Chain;
 use crate::definitions::DeviceAuth;
 use crate::definitions::Mso;
-use crate::definitions::{
-    device_signed::DeviceAuthentication, helpers::Tag24,
-};
+use crate::definitions::{device_signed::DeviceAuthentication, helpers::Tag24};
 use crate::presentation::reader::Error;
 use anyhow::Result;
 use elliptic_curve::generic_array::GenericArray;
@@ -31,12 +29,10 @@ pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> 
         .map_err(Error::IssuerAuthentication)
 }
 
-pub fn device_authentication<S>(
-    document: &Document,
-    session_transcript: S,
-) -> Result<(), Error>
+pub fn device_authentication<S>(document: &Document, session_transcript: S) -> Result<(), Error>
 where
-S: SessionTranscript + Clone{
+    S: SessionTranscript + Clone,
+{
     let mso_bytes = document
         .issuer_signed
         .issuer_auth
