@@ -102,8 +102,8 @@ pub enum Error {
     #[error("not a valid JSON input.")]
     JsonError,
     /// Unexpected data type for data element.
-    #[error("Unexpected data type for data element.")]
-    ParsingError,
+    #[error("Unexpected data type for data element: {0}.")]
+    ParsingError(String),
     /// Request for data is invalid.
     #[error("Request for data is invalid.")]
     InvalidRequest,
@@ -323,10 +323,9 @@ impl SessionManager {
         let device_response = match self.decrypt_response(response) {
             Ok(device_response) => device_response,
             Err(e) => {
-                validated_response.errors.insert(
-                    "decryption_errors".to_string(),
-                    json!(vec![format!("{e:?}")]),
-                );
+                validated_response
+                    .errors
+                    .insert("decryption_errors".to_string(), json!(vec![format!("{e}")]));
                 return validated_response;
             }
         };
@@ -342,7 +341,7 @@ impl SessionManager {
             Err(e) => {
                 validated_response
                     .errors
-                    .insert("parsing_errors".to_string(), json!(vec![format!("{e:?}")]));
+                    .insert("parsing_errors".to_string(), json!(vec![format!("{e}")]));
                 validated_response
             }
         }
@@ -369,13 +368,12 @@ pub fn parse(
 fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     match value {
         ciborium::Value::Text(s) => Ok(Value::String(s)),
-        ciborium::Value::Tag(_t, v) => {
-            if let ciborium::Value::Text(d) = *v {
-                Ok(Value::String(d))
-            } else {
-                Err(Error::ParsingError)
-            }
-        }
+        ciborium::Value::Tag(_t, v) => match *v {
+            ciborium::Value::Text(d) => Ok(Value::String(d)),
+            a => Err(Error::ParsingError(format!(
+                "found {a:?} when expecting text"
+            ))),
+        },
         ciborium::Value::Array(v) => {
             let mut array_response = Vec::<Value>::new();
             for a in v {
@@ -398,7 +396,9 @@ fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
         ciborium::Value::Bytes(b) => Ok(json!(b)),
         ciborium::Value::Bool(b) => Ok(json!(b)),
         ciborium::Value::Integer(i) => Ok(json!(<ciborium::value::Integer as Into<i128>>::into(i))),
-        _ => Err(Error::ParsingError),
+        a => Err(Error::ParsingError(format!(
+            "found {a:?} when expecting anything but floats and nulls"
+        ))),
     }
 }
 
