@@ -1,5 +1,6 @@
 use crate::cbor;
 use crate::cose;
+use crate::cose::sign1::VerificationResult;
 use crate::definitions::device_response::Document;
 use crate::definitions::issuer_signed;
 use crate::definitions::session::SessionTranscript;
@@ -75,10 +76,10 @@ where
                         Some(&cbor_payload),
                         external_aad,
                     );
-                    if !result.is_success() {
-                        Err(Error::ParsingError)?
-                    } else {
-                        Ok(())
+                    match result {
+                        VerificationResult::Success => Ok(()),
+                        VerificationResult::Failure(e) => Err(Error::MdocAuth(format!("failed verifying device signature: {e}"))),
+                        VerificationResult::Error(e) => Err(Error::MdocAuth(format!("error verifying device signature: {e}"))),
                     }
                 }
                 DeviceAuth::DeviceMac(_) => {

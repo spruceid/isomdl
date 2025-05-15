@@ -37,7 +37,7 @@ where
 
             validated_response.errors.insert(
                 "device_authentication_errors".to_string(),
-                json!(vec![format!("{e:?}")]),
+                json!(vec![format!("{e}")]),
             );
         }
     }
@@ -54,7 +54,7 @@ where
                 validated_response.issuer_authentication = AuthenticationStatus::Invalid;
                 validated_response.errors.insert(
                     "issuer_authentication_errors".to_string(),
-                    serde_json::json!(vec![format!("{e:?}")]),
+                    serde_json::json!(vec![format!("{e}")]),
                 );
             }
         }
