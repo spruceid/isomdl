@@ -78,8 +78,12 @@ where
                     );
                     match result {
                         VerificationResult::Success => Ok(()),
-                        VerificationResult::Failure(e) => Err(Error::MdocAuth(format!("failed verifying device signature: {e}"))),
-                        VerificationResult::Error(e) => Err(Error::MdocAuth(format!("error verifying device signature: {e}"))),
+                        VerificationResult::Failure(e) => Err(Error::MdocAuth(format!(
+                            "failed verifying device signature: {e}"
+                        ))),
+                        VerificationResult::Error(e) => Err(Error::MdocAuth(format!(
+                            "error verifying device signature: {e}"
+                        ))),
                     }
                 }
                 DeviceAuth::DeviceMac(_) => {
