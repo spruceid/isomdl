@@ -10,11 +10,11 @@ pub fn simulated_device_and_reader_interaction() {
             .into();
 
     // Device initialization and engagement
-    let (engaged_state, qr_code_uri) = Device::initialise_session().unwrap();
+    let engaged_state = Device::initialise_session().unwrap();
 
     // Reader processing QR and requesting the necessary fields
     let (mut reader_session_manager, request) =
-        Device::establish_reader_session(qr_code_uri).unwrap();
+        Device::establish_reader_session(engaged_state.qr_handover().unwrap()).unwrap();
 
     // Device accepting request
     let (device_session_manager, validated_request) =
