@@ -21,6 +21,7 @@ use crate::{
     cose::{mac0::PreparedCoseMac0, sign1::PreparedCoseSign1, MaybeTagged},
     definitions::{
         device_engagement::{
+            nfc_handover::{NfcHandover, NfcHandoverRequestMessage},
             DeviceEngagementType, DeviceRetrievalMethod, Security, ServerRetrievalMethods,
         },
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
@@ -34,8 +35,7 @@ use crate::{
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
-            self, derive_session_key, get_shared_secret, Handover, NfcHandover,
-            NfcHandoverRequestMessage, SessionData, SessionTranscript,
+            self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
         },
         x509::{
             self, trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,

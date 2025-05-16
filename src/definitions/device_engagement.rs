@@ -4,6 +4,10 @@
 //! It includes fields such as the `version`, `security details, `device retrieval methods, `server retrieval methods, and `protocol information.
 //!
 //! The module also provides implementations for conversions between [DeviceEngagement] and [ciborium::Value], as well as other utility functions.
+pub mod error;
+pub mod nfc_handover;
+pub mod nfc_options;
+
 use std::{collections::BTreeMap, vec};
 
 use anyhow::Result;
@@ -19,8 +23,6 @@ use crate::definitions::helpers::Tag24;
 use crate::definitions::helpers::{ByteStr, NonEmptyVec};
 use crate::definitions::CoseKey;
 
-pub mod error;
-pub mod nfc_options;
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
 
