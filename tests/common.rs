@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, Context, Result};
 use isomdl::cbor;
-use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
+use isomdl::definitions::device_engagement::{
+    CentralClientMode, DeviceEngagementType, DeviceRetrievalMethods,
+};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
 use isomdl::definitions::helpers::NonEmptyMap;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
@@ -29,7 +31,7 @@ impl Device {
     }
 
     /// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
-    pub fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
+    pub fn initialise_session() -> Result<SessionManagerEngaged> {
         // Parse the mDL
         let docs = Device::parse_mdl()?;
 
@@ -44,7 +46,7 @@ impl Device {
             .context("failed to initialize device")?;
 
         session
-            .qr_engagement()
+            .engage(DeviceEngagementType::QR)
             .context("could not generate qr engagement")
     }
 
