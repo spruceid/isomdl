@@ -38,7 +38,7 @@ pub struct DocRequest {
 }
 
 /// Represents a request for items.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemsRequest {
     /// The type of document.
