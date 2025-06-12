@@ -26,6 +26,7 @@ use uuid::Uuid;
 use super::authentication::ResponseAuthenticationOutcome;
 use super::reader_utils::validate_response;
 
+use crate::definitions::device_request::{DeviceRequestInfoBytes, ItemsRequestBytesAll};
 use crate::{
     cbor::{self, CborError},
     definitions::{
@@ -65,6 +66,14 @@ pub struct ReaderAuthentication(
     pub String,
     pub SessionTranscript180135,
     pub ItemsRequestBytes,
+);
+
+#[derive(Serialize, Deserialize)]
+pub struct ReaderAuthenticationAll<S>(
+    pub String,
+    pub S,
+    pub ItemsRequestBytesAll,
+    pub Option<DeviceRequestInfoBytes>,
 );
 
 /// Various errors that can occur during the interaction with the device.
@@ -291,6 +300,8 @@ impl SessionManager {
         let device_request = DeviceRequest {
             version: DeviceRequest::VERSION.to_string(),
             doc_requests: NonEmptyVec::new(doc_request),
+            device_request_info: None,
+            reader_auth_all: None,
         };
         let device_request_bytes = cbor::to_vec(&device_request)?;
         session::encrypt_reader_data(
