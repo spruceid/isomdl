@@ -435,7 +435,7 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
 }
 
 // TODO: Support other namespaces.
-fn parse_namespaces(
+pub fn parse_namespaces(
     device_response: &DeviceResponse,
 ) -> Result<BTreeMap<String, serde_json::Value>, Error> {
     let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
