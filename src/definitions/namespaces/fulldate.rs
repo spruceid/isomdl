@@ -9,7 +9,7 @@ const FORMAT: &[FormatItem<'static>] = format_description!("[year]-[month]-[day]
 
 /// `full-date` as defined in RFC3339.
 #[derive(Clone, Debug)]
-pub struct FullDate(Date);
+pub struct FullDate(pub Date);
 
 impl From<FullDate> for ciborium::Value {
     fn from(d: FullDate) -> ciborium::Value {
