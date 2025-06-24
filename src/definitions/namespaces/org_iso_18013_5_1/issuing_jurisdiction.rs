@@ -8,17 +8,24 @@ use serde_json::{Map, Value as Json};
 #[derive(Debug, Clone)]
 pub struct IssuingJurisdiction(String);
 
+impl IssuingJurisdiction {
+    pub fn new(issuing_jurisdiction: String, issuing_country: Alpha2) -> Result<Self, Error> {
+        if !issuing_jurisdiction.starts_with(issuing_country.as_str()) {
+            return Err(Error::CountryMismatch);
+        }
+        Ok(Self(issuing_jurisdiction))
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     #[error("issuing_jurisdiction must start with the value of issuing_country")]
     CountryMismatch,
 }
 
-impl Error {
-    fn into_from_json_error(self) -> FromJsonError {
-        match self {
-            Self::CountryMismatch => FromJsonError::Parsing(self.into()),
-        }
+impl From<Error> for FromJsonError {
+    fn from(e: Error) -> Self {
+        FromJsonError::Parsing(e.into())
     }
 }
 
@@ -40,10 +47,6 @@ impl FromJsonMap for IssuingJurisdiction {
             .ok_or(FromJsonError::Missing)
             .and_then(Alpha2::from_json)?;
 
-        if !jurisdiction.starts_with(country.as_str()) {
-            return Err(Error::CountryMismatch.into_from_json_error());
-        }
-
-        Ok(Self(jurisdiction))
+        Ok(Self::new(jurisdiction, country)?)
     }
 }

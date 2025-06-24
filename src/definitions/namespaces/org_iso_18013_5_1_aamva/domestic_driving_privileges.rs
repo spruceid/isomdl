@@ -9,7 +9,7 @@ use crate::{
 /// Guidelines (Version 1.0).
 #[derive(Clone, Debug, FromJson)]
 #[isomdl(crate = "crate")]
-pub struct DomesticDrivingPrivileges(Vec<DomesticDrivingPrivilege>);
+pub struct DomesticDrivingPrivileges(pub Vec<DomesticDrivingPrivilege>);
 
 impl ToCbor for DomesticDrivingPrivileges {
     fn to_cbor(self) -> ciborium::Value {
