@@ -6,6 +6,21 @@ use serde_json::Value as Json;
 #[derive(Debug, Clone)]
 pub struct CountyCode((char, char, char));
 
+impl CountyCode {
+    pub fn new(county_code: &str) -> Result<Self, Error> {
+        to_treble_digits(county_code).map(Self)
+    }
+
+    pub fn digits(&self) -> (char, char, char) {
+        self.0
+    }
+
+    pub fn as_str(&self) -> String {
+        let CountyCode((a, b, c)) = self;
+        format!("{a}{b}{c}")
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     #[error("expected a digit, found '{0}'")]
@@ -18,16 +33,14 @@ pub enum Error {
 
 impl ToCbor for CountyCode {
     fn to_cbor(self) -> ciborium::Value {
-        let CountyCode((a, b, c)) = self;
-        format!("{a}{b}{c}").into()
+        self.as_str().into()
     }
 }
 
 impl FromJson for CountyCode {
     fn from_json(v: &Json) -> Result<Self, FromJsonError> {
         String::from_json(v).and_then(|s| {
-            to_treble_digits(&s)
-                .map(Self)
+            Self::new(&s)
                 .map_err(Into::into)
                 .map_err(FromJsonError::Parsing)
         })

@@ -12,7 +12,7 @@ use strum_macros::{AsRefStr, EnumString, EnumVariantNames};
 /// `driving_privileges` in the org.iso.18013.5.1 namespace.
 #[derive(Clone, Debug, FromJson)]
 #[isomdl(crate = "crate")]
-pub struct DrivingPrivileges(Vec<DrivingPrivilege>);
+pub struct DrivingPrivileges(pub Vec<DrivingPrivilege>);
 
 impl From<DrivingPrivileges> for ciborium::Value {
     fn from(d: DrivingPrivileges) -> ciborium::Value {
@@ -81,7 +81,7 @@ pub struct DrivingPrivilege {
 
 #[derive(Clone, Debug, FromJson)]
 #[isomdl(crate = "crate")]
-pub struct Codes(NonEmptyVec<Code>);
+pub struct Codes(pub NonEmptyVec<Code>);
 
 impl From<Codes> for ciborium::Value {
     fn from(c: Codes) -> ciborium::Value {

@@ -9,6 +9,12 @@ pub struct AgeOver(pub BTreeMap<Age, bool>);
 #[derive(Debug, Clone, Ord, Eq, PartialOrd, PartialEq)]
 pub struct Age(char, char);
 
+impl Age {
+    pub fn digits(&self) -> (char, char) {
+        (self.0, self.1)
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     #[error("{0} is greater than the maximum age of 99")]

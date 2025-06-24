@@ -1,13 +1,13 @@
-mod age_over;
-mod alpha2;
-mod biometric_template;
-mod driving_privileges;
-mod eye_colour;
-mod hair_colour;
-mod issuing_jurisdiction;
-mod sex;
-mod tdate;
-mod un_distinguishing_sign;
+pub mod age_over;
+pub mod alpha2;
+pub mod biometric_template;
+pub mod driving_privileges;
+pub mod eye_colour;
+pub mod hair_colour;
+pub mod issuing_jurisdiction;
+pub mod sex;
+pub mod tdate;
+pub mod un_distinguishing_sign;
 
 pub use super::{fulldate::FullDate, latin1::Latin1};
 
