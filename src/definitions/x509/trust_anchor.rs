@@ -42,8 +42,7 @@ impl TrustAnchorRegistry {
                 .enumerate()
                 .map(|(index, t)| {
                     TrustAnchor::try_from(t).context(format!(
-                        "Failed to build trust anchor for cert no. {}",
-                        index
+                        "Failed to build trust anchor for cert no. {index}"
                     ))
                 })
                 .collect::<Result<_, _>>()?,

@@ -15,8 +15,7 @@ impl BasicConstraintsValidator {
             || !constraints.ca
         {
             Some(format!(
-                "expected to be CA:true, path_len:0, but found: {:?}",
-                constraints
+                "expected to be CA:true, path_len:0, but found: {constraints:?}"
             ))
         } else {
             None
