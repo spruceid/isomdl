@@ -1237,6 +1237,6 @@ mod test {
         let wib = "8";
         let x = wib.as_bytes();
 
-        println!("{:?}", x);
+        println!("{x:?}");
     }
 }

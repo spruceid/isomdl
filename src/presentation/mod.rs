@@ -42,6 +42,7 @@
 pub mod authentication;
 pub mod device;
 pub mod reader;
+pub mod reader_utils;
 
 use anyhow::Result;
 use base64::{decode, encode};
@@ -76,7 +77,7 @@ pub trait Stringify: Serialize + for<'a> Deserialize<'a> {
 
     /// Deserialize the object from the [CBOR](https://cbor.io) representation.
     ///
-    /// You can call this on something returned by [Stringify::stringify].  
+    /// You can call this on something returned by [Stringify::stringify].
     /// Operation may fail, so it returns a [Result].
     ///
     /// # Example
