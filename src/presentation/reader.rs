@@ -71,6 +71,7 @@ pub struct ReaderAuthentication(
 #[derive(Serialize, Deserialize)]
 pub struct ReaderAuthenticationAll<S>(
     pub String,
+    /// Meant to be the SessionTranscript
     pub S,
     pub ItemsRequestBytesAll,
     pub Option<DeviceRequestInfoBytes>,
