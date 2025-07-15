@@ -26,6 +26,7 @@ use elliptic_curve::{
     sec1::FromEncodedPoint,
 };
 use hkdf::Hkdf;
+use ndef_rs::error::NdefError;
 use p256::NistP256;
 use p384::NistP384;
 use rand::rngs::OsRng;
@@ -117,6 +118,11 @@ pub enum Error {
     EphemeralKeyError,
     #[error("Serialization error")]
     Cbor(#[from] CborError),
+    #[error("NFC negotiation error")]
+    Ndef(#[from] NdefError),
+    // I don't like using anyhow in an API, but ndef_rs itself returns anyhow errors.
+    #[error("Failed serializing NFC NDEF message")]
+    NdefSerialization(anyhow::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

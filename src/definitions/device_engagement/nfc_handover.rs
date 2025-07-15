@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use ndef_rs::{self as ndef, payload::{RecordPayload, UriPayload}, NdefMessage, NdefRecord};
 use serde::{Deserialize, Serialize};
 
 use super::{DeviceEngagement, DeviceRetrievalMethod};
@@ -16,6 +19,26 @@ pub const TNF_MIME_MEDIA: u8 = 0x02;
 pub type NfcHandoverSelectMessage = ByteStr;
 pub type NfcHandoverRequestMessage = Option<ByteStr>;
 
+// ndef_rs provides ExternalPayload, but this seems to have semantic meaning.
+// We'll implement our own form of it with no implied semantics.
+// This also allows us to use local borrows (since ExternalPayload only uses 'static),
+// preventing unnecessary copies :)
+#[derive(Debug, Clone)]
+struct RawPayload<'r, 'p> {
+    record_type: &'r [u8],
+    payload: &'p [u8],
+}
+
+impl<'r, 'p> RecordPayload for RawPayload<'r, 'p> {
+    fn record_type(&self) -> Cow<'_, [u8]> {
+        Cow::Borrowed(self.record_type)
+    }
+
+    fn payload(&self) -> Cow<'_, [u8]> {
+        Cow::Borrowed(self.payload)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NfcHandover(pub NfcHandoverSelectMessage, pub NfcHandoverRequestMessage);
 
@@ -24,139 +47,67 @@ impl NfcHandover {
         device_engagement: &Tag24<DeviceEngagement>,
         nfc_handover_request: NfcHandoverRequestMessage,
     ) -> Result<Self, Error> {
-        let mut embedded_ndef = Vec::new();
 
-        // Track how many records total we will emit
-        let mut record_parts = Vec::new();
+        let uri_record = NdefRecord::builder()
+            .tnf(ndef::TNF::WellKnown)
+            .payload(&UriPayload::static_with_abbrev(ndef::NONE_ABBRE, NFC_NEGOTIATED_HANDOVER_SERVICE))
+            .build()?;
 
-        // URI Record for negotiated handover support (urn:nfc:sn:handover)
-        let uri_record = NdefRecord {
-            tnf: TNF_WELL_KNOWN,
-            type_field: vec![b'U'], // URI Record type
-            id: None,
-            payload: {
-                let mut payload = vec![0x00]; // URI Identifier Code 0x00 = no prefix
-                payload.extend_from_slice(NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes());
-                payload
-            },
-        };
-
-        // URI record
-        record_parts.push(uri_record);
+        let mut message = NdefMessage::from(&[uri_record]);
 
         // Dynamic AC/Carrier records
         if let Some(retrieval_methods) = device_engagement.inner.device_retrieval_methods.as_ref() {
             for method in retrieval_methods.iter() {
                 if let DeviceRetrievalMethod::BLE(_) = method {
-                    let (ac_record, bt_record) =
-                        NdefRecord::configure_bluetooth_alternative_carrier_records(
-                            device_engagement,
-                        )?;
-                    record_parts.push(ac_record);
-                    record_parts.push(bt_record);
+                    // TODO: Do we want to be completely ignoring the reported method?
+
+                    const CARRIER_DATA_REFERENCE_ID: u8 = b'B';
+
+                    let ac_record = NdefRecord::builder()
+                        .tnf(ndef::TNF::WellKnown)
+                        .payload(&RawPayload{
+                            record_type: b"ac",
+                            payload: &[
+                                0x01, // Carrier Power State: active
+                                0x01, // Length of Carrier Data Reference
+                                CARRIER_DATA_REFERENCE_ID,
+                                0x00, // Auxiliary Data Reference Count
+                            ],
+                        })
+                        .build()?;
+
+                    let bt_record = NdefRecord::builder()
+                        .tnf(ndef::TNF::MimeMedia)
+                        .payload(&RawPayload {
+                            record_type: b"application/vnd.bluetooth.ep.oob",
+                            payload: &device_engagement.inner_bytes,
+                        })
+                        .id(vec![CARRIER_DATA_REFERENCE_ID]) // must match AC reference
+                        .build()?;
+
+                    message.add_record(ac_record);
+                    message.add_record(bt_record);
                 }
             }
         }
 
-        // Encode records with Message Beginning (MB)/Message Ending (ME) flags
-        for (i, record) in record_parts.iter().enumerate() {
-            let mb = i == 0;
-            let me = i == record_parts.len() - 1;
-            embedded_ndef.extend_from_slice(&record.encode(mb, me));
-        }
-
         let mut hs_payload = vec![0x12]; // Version 1.2
-        hs_payload.extend_from_slice(&embedded_ndef);
+        hs_payload.extend_from_slice(&message.to_buffer().map_err(Error::NdefSerialization)?);
 
-        let hs_record = NdefRecord {
-            tnf: TNF_WELL_KNOWN,
-            type_field: b"Hs".to_vec(),
-            id: None,
-            payload: hs_payload,
-        };
+        let hs_record = NdefMessage::from(&[
+            NdefRecord::builder()
+                .tnf(ndef::TNF::WellKnown)
+                .payload(&RawPayload {
+                    record_type: b"Hs",
+                    payload: &hs_payload,
+                })
+                .build()?,
+        ]);
 
         // Final top-level NDEF message
         Ok(NfcHandover(
-            hs_record.encode(true, true).into(),
+            hs_record.to_buffer().map_err(Error::NdefSerialization)?.into(),
             nfc_handover_request,
         ))
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct NdefRecord {
-    pub tnf: u8,
-    pub type_field: Vec<u8>,
-    pub id: Option<Vec<u8>>,
-    pub payload: Vec<u8>,
-}
-
-impl NdefRecord {
-    /// Create alternative carrier records for bluetooth handover.
-    fn configure_bluetooth_alternative_carrier_records(
-        device_engagement: &Tag24<DeviceEngagement>,
-    ) -> Result<(Self, Self), Error> {
-        Ok((
-            NdefRecord {
-                tnf: TNF_WELL_KNOWN,
-                type_field: b"ac".to_vec(),
-                id: None,
-                payload: vec![
-                    0x01, // Carrier Power State: active
-                    0x01, // Length of Carrier Data Reference
-                    b'B', // Carrier Data Reference ID
-                    0x00, // Auxiliary Data Reference Count
-                ],
-            },
-            NdefRecord {
-                tnf: TNF_MIME_MEDIA,
-                type_field: b"application/vnd.bluetooth.ep.oob".to_vec(),
-                id: Some(b"B".to_vec()), // must match AC reference
-                payload: device_engagement.inner_bytes.clone(),
-            },
-        ))
-    }
-
-    /// `mb` -> message begin
-    /// `me` -> message end
-    ///
-    /// Encodes the NDEF record into a byte vector.
-    pub fn encode(&self, mb: bool, me: bool) -> Vec<u8> {
-        let sr = self.payload.len() < 256;
-        let il = self.id.is_some();
-        let mut header = 0;
-        if mb {
-            header |= 0x80;
-        }
-        if me {
-            header |= 0x40;
-        }
-        if sr {
-            header |= 0x10;
-        }
-        if il {
-            header |= 0x08;
-        }
-        header |= self.tnf & 0x07;
-
-        let mut record = vec![header];
-        record.push(self.type_field.len() as u8);
-
-        if sr {
-            record.push(self.payload.len() as u8);
-        } else {
-            record.extend_from_slice(&(self.payload.len() as u32).to_be_bytes());
-        }
-
-        if il {
-            record.push(self.id.as_ref().unwrap().len() as u8);
-        }
-
-        record.extend_from_slice(&self.type_field);
-        if il {
-            record.extend_from_slice(self.id.as_ref().unwrap());
-        }
-        record.extend_from_slice(&self.payload);
-        record
     }
 }
