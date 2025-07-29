@@ -157,6 +157,7 @@ pub enum State {
 
 /// Various errors that can occur during the interaction with the reader.
 #[derive(Debug, thiserror::Error)]
+#[repr(u8)]
 pub enum Error {
     /// Unable to generate ephemeral key.
     #[error("unable to generate ephemeral key: {0}")]

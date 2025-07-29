@@ -72,6 +72,40 @@ pub struct DeviceEngagement {
     pub protocol_info: Option<ProtocolInfo>,
 }
 
+impl DeviceEngagement {
+    fn initiateHolderEngagement(uuid: Uuid) -> Result<Self, Error> {
+        let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
+            // NOTE: peripheral server mode is NOT current implemented.
+            // In the peripheral server mode, the mdoc holder generates the UUID
+            // to send over in the Negotiated Handover Select message
+            // TODO: Greg: if we are going to use our mdl reader / holder cross-device
+            // implementations, we will need to implement peripheral server mode.
+            // Marcelo: Sometimes the presentation gets stuck, other times it works.
+            peripheral_server_mode: None,
+            // NOTE: mdoc reader will provide a UUID for central client mode
+            // This UUID comes from the Request Message sent over NFC
+            central_client_mode: Some(CentralClientMode { uuid }),
+            // NOTE: Currently only supporting negotiative handover,
+            // and the mdoc reader is providing a central client mode.
+        }));
+
+        // let (e_device_key, e_device_key_pub) =
+        //     session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;
+        // let e_device_key_bytes =
+        //     Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
+        // let security = Security(1, e_device_key_bytes);
+
+        unimplemented!("")
+
+        // Ok(Self {
+        //     version: "1.0".to_string(),
+        //     security,
+        //     device_retrieval_methods: Some(drms),
+        //     server_retrieval_methods: None,
+        // })
+    }
+}
+
 impl PartialEq for DeviceEngagement {
     fn eq(&self, other: &Self) -> bool {
         self.version == other.version
