@@ -60,6 +60,61 @@ use super::{
     reader::ReaderAuthentication,
 };
 
+
+/// Prenegotiated BLE connection.
+/// 
+/// This is used when the flow is not initialized from a controlled presentation flow, such as during NFC presentation,
+/// where the device is placed against a reader, expected to negotiate a session, and *then* the user selects which document(s) to present.
+#[derive(Debug, Clone)]
+pub struct PrenegotiatedBle {
+    e_device_key: Vec<u8>,
+    device_engagement: Tag24<DeviceEngagement>,
+}
+
+impl PrenegotiatedBle {
+    /// Return NFC Handover constructed from the device engagement.
+    ///
+    /// Optionally accepts a `NfcHandoverRequestMessage` to include in the handover,
+    /// from the reader, encoded in a NFC NDEF message format.
+    ///
+    /// NOTE: This method will construct a NFC Handover message that can be used to
+    /// establish a session with the reader, regardless of the inner `Handover` type of
+    /// the engaged session.
+    pub fn nfc_handover(
+        &self,
+        nfc_handover_request: NfcHandoverRequestMessage,
+    ) -> Result<NfcHandover, session::Error> {
+        NfcHandover::create_handover_select(&self.device_engagement, nfc_handover_request)
+    }
+
+    /// Initialise the BLE session.
+    ///
+    /// Internally, this generates the ephemeral key and creates the device engagement.
+    pub fn initialise(
+        device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
+        server_retrieval_methods: Option<ServerRetrievalMethods>,
+    ) -> Result<Self, Error> {
+
+        let (e_device_key, security) = ephemeral_key()?;
+
+        let device_engagement = DeviceEngagement {
+            version: "1.0".to_string(),
+            security,
+            device_retrieval_methods,
+            server_retrieval_methods,
+            protocol_info: None,
+        };
+
+        let device_engagement =
+            Tag24::<DeviceEngagement>::new(device_engagement).map_err(Error::Tag24CborEncoding)?;
+
+        Ok(Self {
+            e_device_key,
+            device_engagement,
+        })
+    }
+}
+
 /// Initialisation state.
 ///
 /// You enter this state using [SessionManagerInit::initialise] method, providing
@@ -92,6 +147,7 @@ pub struct SessionManagerEngaged {
 }
 
 impl SessionManagerEngaged {
+    /* TODO: Do we keep this?
     /// Return NFC Handover constructed from the device engagement.
     ///
     /// Optionally accepts a `HfcHandoverRequestMessage` to include in the handover,
@@ -106,6 +162,7 @@ impl SessionManagerEngaged {
     ) -> Result<NfcHandover, session::Error> {
         NfcHandover::create_handover_select(&self.device_engagement, nfc_handover_request)
     }
+    */
 
     /// Return the QR code URI for the engaged session.
     ///
@@ -157,7 +214,6 @@ pub enum State {
 
 /// Various errors that can occur during the interaction with the reader.
 #[derive(Debug, thiserror::Error)]
-#[repr(u8)]
 pub enum Error {
     /// Unable to generate ephemeral key.
     #[error("unable to generate ephemeral key: {0}")]
@@ -267,6 +323,22 @@ pub type RequestedItems = Vec<ItemsRequest>;
 /// The lis of items that are permitted to be shared grouped by document type and namespace.
 pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdentifier>>>;
 
+/// Generate an ephemeral key for device engagement.
+/// Returns: (private_key, public_key)
+// TODO: Move me!
+fn ephemeral_key() -> Result<(Vec<u8>, Security), Error> {
+    let (e_device_key, e_device_key_pub) =
+        session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;
+    let e_device_key_bytes =
+        Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
+    let security = Security(1, e_device_key_bytes);
+
+    Ok((
+        e_device_key.to_bytes().to_vec(),
+        security,
+    ))
+}
+
 impl SessionManagerInit {
     /// Initialise the SessionManager.
     ///
@@ -279,11 +351,8 @@ impl SessionManagerInit {
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
         server_retrieval_methods: Option<ServerRetrievalMethods>,
     ) -> Result<Self, Error> {
-        let (e_device_key, e_device_key_pub) =
-            session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;
-        let e_device_key_bytes =
-            Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
-        let security = Security(1, e_device_key_bytes);
+
+        let (e_device_key, security) = ephemeral_key()?;
 
         let device_engagement = DeviceEngagement {
             version: "1.0".to_string(),
@@ -299,8 +368,20 @@ impl SessionManagerInit {
         Ok(Self {
             // device_engagement_type,
             documents,
-            e_device_key: e_device_key.to_bytes().to_vec(),
+            e_device_key: e_device_key,
             device_engagement,
+        })
+    }
+
+    /// Initialise the SessionManager with a prenegotiated BLE connection.
+    pub fn initialise_with_prenegotiated_ble(
+        documents: Documents,
+        prenegotiated_ble: PrenegotiatedBle,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            documents,
+            e_device_key: prenegotiated_ble.e_device_key,
+            device_engagement: prenegotiated_ble.device_engagement,
         })
     }
 
