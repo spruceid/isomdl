@@ -43,10 +43,43 @@ impl<'r, 'p> RecordPayload for RawPayload<'r, 'p> {
 pub struct NfcHandover(pub NfcHandoverSelectMessage, pub NfcHandoverRequestMessage);
 
 impl NfcHandover {
+
+    pub fn create_direct_handover() -> Result<Self, Error> {
+        let tp_payload = [&[
+            0x10, // TNEP version 1.0
+            NFC_NEGOTIATED_HANDOVER_SERVICE.len() as u8, // Length of service URN
+        ], NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes(), &[
+            0x00, // Single response communication mode
+            0x10, // Minimum wait time. TODO: magic number
+            0x0F, // Maximum no. of time extensions. TODO: magic number
+            0xFF, // Max NDEF size (upper bits)
+            0xFF, // Max NDEF size (lower bits)
+        ]].concat();
+
+        // Create the Tp (Transport Protocol) record
+        let tp_record = NdefMessage::from(&[
+            NdefRecord::builder()
+                .tnf(ndef::TNF::WellKnown)
+                .payload(&RawPayload {
+                    record_type: b"Tp",
+                    payload: &tp_payload,
+                })
+                .build()?,
+        ]);
+
+        // Final top-level NDEF message
+        Ok(NfcHandover(
+            tp_record.to_buffer().map_err(Error::NdefSerialization)?.into(),
+            None,
+        ))
+    }
+
     pub fn create_handover_select(
         device_engagement: &Tag24<DeviceEngagement>,
         nfc_handover_request: NfcHandoverRequestMessage,
     ) -> Result<Self, Error> {
+
+        todo!();
 
         let uri_record = NdefRecord::builder()
             .tnf(ndef::TNF::WellKnown)
@@ -61,6 +94,9 @@ impl NfcHandover {
                 if let DeviceRetrievalMethod::BLE(_) = method {
                     // TODO: Do we want to be completely ignoring the reported method?
 
+                    
+
+                    /*
                     const CARRIER_DATA_REFERENCE_ID: u8 = b'B';
 
                     let ac_record = NdefRecord::builder()
@@ -87,6 +123,7 @@ impl NfcHandover {
 
                     message.add_record(ac_record);
                     message.add_record(bt_record);
+                    */
                 }
             }
         }

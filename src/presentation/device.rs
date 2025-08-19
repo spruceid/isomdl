@@ -68,10 +68,20 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct PrenegotiatedBle {
     e_device_key: Vec<u8>,
-    device_engagement: Tag24<DeviceEngagement>,
+    pub device_engagement: Tag24<DeviceEngagement>,
 }
 
 impl PrenegotiatedBle {
+    /// Return NFC Handover using TNEP and BLE.
+    /// 
+    /// This method uses less back-and-forth communication than a standard NFC handover,
+    /// but only supports a single transport method.
+    /// Negotiated handover is typically preferred for maximum interoperability,
+    /// but when this is supported, it's faster and more reliable (by nature of being faster)
+    pub fn nfc_handover_direct(&self) -> Result<NfcHandover, session::Error> {
+        NfcHandover::create_direct_handover()
+    }
+
     /// Return NFC Handover constructed from the device engagement.
     ///
     /// Optionally accepts a `NfcHandoverRequestMessage` to include in the handover,
@@ -408,7 +418,7 @@ impl SessionManagerInit {
     /// Returns the session manager engaged
     ///
     /// Consumes the initialized session and returns the device engagement based on the
-    /// device engagement type, i.e. `DeviceEngagementType::Nfc` or `DeviceEngagementType::QR`.
+    /// device engagement type, i.e. `DeviceEngagementType::NFC` or `DeviceEngagementType::QR`.
     ///
     /// NOTE: unlike `qr_engagement()` method, if this method engage type is QR, it will return the QR code URI within the
     /// handover type within the `SessionManagerEngaged` type, returning a single value rather than a tuple,
