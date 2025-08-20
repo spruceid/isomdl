@@ -77,7 +77,7 @@ impl PrenegotiatedBle {
     /// but only supports a single transport method.
     /// Negotiated handover is typically preferred for maximum interoperability,
     /// but when this is supported, it's faster and more reliable (by nature of being faster)
-    pub fn nfc_handover_direct(&self) -> Result<ByteStr, session::Error> {
+    pub fn nfc_handover_direct(&self) -> Result<Vec<u8>, session::Error> {
         NfcHandover::create_direct_handover()
     }
 
@@ -89,7 +89,7 @@ impl PrenegotiatedBle {
     /// NOTE: This method will construct a NFC Handover message that can be used to
     /// establish a session with the reader, regardless of the inner `Handover` type of
     /// the engaged session.
-    pub fn nfc_handover(&self, request_type: NfcHandoverType) -> Result<ByteStr, session::Error> {
+    pub fn nfc_handover(&self, request_type: NfcHandoverType) -> Result<Vec<u8>, session::Error> {
         NfcHandover::create_handover_message(&self.device_engagement, request_type)
     }
 

@@ -23,8 +23,8 @@ pub const NFC_NEGOTIATED_HANDOVER_SERVICE: &str = "urn:nfc:sn:handover";
 pub const TNF_WELL_KNOWN: u8 = 0x01;
 pub const TNF_MIME_MEDIA: u8 = 0x02;
 
-pub type NfcHandoverSelectMessage = ByteStr;
-pub type NfcHandoverRequestMessage = ByteStr;
+pub type NfcHandoverSelectMessage = Vec<u8>;
+pub type NfcHandoverRequestMessage = Vec<u8>;
 
 pub enum NfcHandoverType {
     Select,
@@ -82,16 +82,27 @@ impl NfcHandover {
             .build()?]);
 
         // Final top-level NDEF message
-        Ok(tp_record
-            .to_buffer()
-            .map_err(Error::NdefSerialization)?
-            .into())
+        Ok(tp_record.to_buffer().map_err(Error::NdefSerialization)?)
+    }
+
+    /// Create the Te (Transport Exchange) record
+    pub fn create_tnep_status_record(status: u8) -> Result<Vec<u8>, Error> {
+        let te_record = NdefMessage::from(&[NdefRecord::builder()
+            .tnf(ndef::TNF::WellKnown)
+            .payload(&RawPayload {
+                record_type: b"Te",
+                payload: &[status],
+            })
+            .build()?]);
+
+        // Final top-level NDEF message
+        Ok(te_record.to_buffer().map_err(Error::NdefSerialization)?)
     }
 
     pub fn create_handover_message(
         device_engagement: &Tag24<DeviceEngagement>,
         r#type: NfcHandoverType,
-    ) -> Result<ByteStr, Error> {
+    ) -> Result<Vec<u8>, Error> {
         let uri_record = NdefRecord::builder()
             .tnf(ndef::TNF::WellKnown)
             .payload(&UriPayload::static_with_abbrev(
@@ -167,9 +178,6 @@ impl NfcHandover {
             .build()?]);
 
         // Final top-level NDEF message
-        Ok(hs_record
-            .to_buffer()
-            .map_err(Error::NdefSerialization)?
-            .into())
+        Ok(hs_record.to_buffer().map_err(Error::NdefSerialization)?)
     }
 }

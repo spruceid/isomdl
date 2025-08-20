@@ -145,7 +145,7 @@ pub enum Handover {
     //
     // See ISO/IEC 18013-5 §8.2.1.1 for more information.
     QR(String),
-    NFC(ByteStr),
+    NFC(Vec<u8>),
     OID4VP(String, String),
 }
 
