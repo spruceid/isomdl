@@ -560,7 +560,7 @@ mod test {
         let handover_bytes =
             NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select)
                 .expect("failed to create nfc handover message");
-        let raw = handover_bytes.as_ref();
+        let raw: &[u8] = handover_bytes.as_ref();
 
         // Assert: Handover starts with valid NDEF header
         assert_eq!(
@@ -597,7 +597,7 @@ mod test {
         let handover_bytes =
             NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select)
                 .expect("failed to create nfc handover select message");
-        let raw = handover_bytes.as_ref();
+        let raw: &[u8] = handover_bytes.as_ref();
 
         // Should still contain the URI record
         assert!(
