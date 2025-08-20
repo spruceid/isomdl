@@ -8,7 +8,7 @@ use ndef_rs::{
 use serde::{Deserialize, Serialize};
 
 use super::{DeviceEngagement, DeviceRetrievalMethod};
-use crate::definitions::session::Error;
+use crate::definitions::session::{Error, Handover};
 use crate::definitions::{
     device_engagement::CentralClientMode,
     helpers::{ByteStr, Tag24},
@@ -24,7 +24,12 @@ pub const TNF_WELL_KNOWN: u8 = 0x01;
 pub const TNF_MIME_MEDIA: u8 = 0x02;
 
 pub type NfcHandoverSelectMessage = ByteStr;
-pub type NfcHandoverRequestMessage = Option<ByteStr>;
+pub type NfcHandoverRequestMessage = ByteStr;
+
+pub enum NfcHandoverType {
+    Select,
+    Request,
+}
 
 // ndef_rs provides ExternalPayload, but this seems to have semantic meaning.
 // We'll implement our own form of it with no implied semantics.
@@ -50,7 +55,7 @@ impl<'r, 'p> RecordPayload for RawPayload<'r, 'p> {
 pub struct NfcHandover(pub NfcHandoverSelectMessage, pub NfcHandoverRequestMessage);
 
 impl NfcHandover {
-    pub fn create_direct_handover() -> Result<Self, Error> {
+    pub fn create_direct_handover() -> Result<NfcHandoverSelectMessage, Error> {
         let tp_payload = [
             &[
                 0x10,                                        // TNEP version 1.0
@@ -71,25 +76,22 @@ impl NfcHandover {
         let tp_record = NdefMessage::from(&[NdefRecord::builder()
             .tnf(ndef::TNF::WellKnown)
             .payload(&RawPayload {
-                record_type: b"Tp",
+                record_type: b"Hs",
                 payload: &tp_payload,
             })
             .build()?]);
 
         // Final top-level NDEF message
-        Ok(NfcHandover(
-            tp_record
-                .to_buffer()
-                .map_err(Error::NdefSerialization)?
-                .into(),
-            None,
-        ))
+        Ok(tp_record
+            .to_buffer()
+            .map_err(Error::NdefSerialization)?
+            .into())
     }
 
-    pub fn create_handover_select(
+    pub fn create_handover_message(
         device_engagement: &Tag24<DeviceEngagement>,
-        nfc_handover_request: NfcHandoverRequestMessage,
-    ) -> Result<Self, Error> {
+        r#type: NfcHandoverType,
+    ) -> Result<ByteStr, Error> {
         let uri_record = NdefRecord::builder()
             .tnf(ndef::TNF::WellKnown)
             .payload(&UriPayload::static_with_abbrev(
@@ -151,21 +153,23 @@ impl NfcHandover {
         let mut hs_payload = vec![0x12]; // Version 1.2
         hs_payload.extend_from_slice(&message.to_buffer().map_err(Error::NdefSerialization)?);
 
+        let record_type = match r#type {
+            NfcHandoverType::Request => b"Hr",
+            NfcHandoverType::Select => b"Hs",
+        };
+
         let hs_record = NdefMessage::from(&[NdefRecord::builder()
             .tnf(ndef::TNF::WellKnown)
             .payload(&RawPayload {
-                record_type: b"Hs",
+                record_type,
                 payload: &hs_payload,
             })
             .build()?]);
 
         // Final top-level NDEF message
-        Ok(NfcHandover(
-            hs_record
-                .to_buffer()
-                .map_err(Error::NdefSerialization)?
-                .into(),
-            nfc_handover_request,
-        ))
+        Ok(hs_record
+            .to_buffer()
+            .map_err(Error::NdefSerialization)?
+            .into())
     }
 }

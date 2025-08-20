@@ -21,7 +21,7 @@ use crate::{
     cose::{mac0::PreparedCoseMac0, sign1::PreparedCoseSign1, MaybeTagged},
     definitions::{
         device_engagement::{
-            nfc_handover::{NfcHandover, NfcHandoverRequestMessage},
+            nfc_handover::{NfcHandover, NfcHandoverRequestMessage, NfcHandoverType},
             DeviceEngagementType, DeviceRetrievalMethod, Security, ServerRetrievalMethods,
         },
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
@@ -32,7 +32,7 @@ use crate::{
         device_signed::{
             DeviceAuth, DeviceAuthType, DeviceAuthentication, DeviceNamespacesBytes, DeviceSigned,
         },
-        helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
+        helpers::{tag24, ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
             self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
@@ -60,9 +60,8 @@ use super::{
     reader::ReaderAuthentication,
 };
 
-
 /// Prenegotiated BLE connection.
-/// 
+///
 /// This is used when the flow is not initialized from a controlled presentation flow, such as during NFC presentation,
 /// where the device is placed against a reader, expected to negotiate a session, and *then* the user selects which document(s) to present.
 #[derive(Debug, Clone)]
@@ -73,12 +72,12 @@ pub struct PrenegotiatedBle {
 
 impl PrenegotiatedBle {
     /// Return NFC Handover using TNEP and BLE.
-    /// 
+    ///
     /// This method uses less back-and-forth communication than a standard NFC handover,
     /// but only supports a single transport method.
     /// Negotiated handover is typically preferred for maximum interoperability,
     /// but when this is supported, it's faster and more reliable (by nature of being faster)
-    pub fn nfc_handover_direct(&self) -> Result<NfcHandover, session::Error> {
+    pub fn nfc_handover_direct(&self) -> Result<ByteStr, session::Error> {
         NfcHandover::create_direct_handover()
     }
 
@@ -90,11 +89,8 @@ impl PrenegotiatedBle {
     /// NOTE: This method will construct a NFC Handover message that can be used to
     /// establish a session with the reader, regardless of the inner `Handover` type of
     /// the engaged session.
-    pub fn nfc_handover(
-        &self,
-        nfc_handover_request: NfcHandoverRequestMessage,
-    ) -> Result<NfcHandover, session::Error> {
-        NfcHandover::create_handover_select(&self.device_engagement, nfc_handover_request)
+    pub fn nfc_handover(&self, request_type: NfcHandoverType) -> Result<ByteStr, session::Error> {
+        NfcHandover::create_handover_message(&self.device_engagement, request_type)
     }
 
     /// Initialise the BLE session.
@@ -104,7 +100,6 @@ impl PrenegotiatedBle {
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
         server_retrieval_methods: Option<ServerRetrievalMethods>,
     ) -> Result<Self, Error> {
-
         let (e_device_key, security) = ephemeral_key()?;
 
         let device_engagement = DeviceEngagement {
@@ -343,10 +338,7 @@ fn ephemeral_key() -> Result<(Vec<u8>, Security), Error> {
         Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
     let security = Security(1, e_device_key_bytes);
 
-    Ok((
-        e_device_key.to_bytes().to_vec(),
-        security,
-    ))
+    Ok((e_device_key.to_bytes().to_vec(), security))
 }
 
 impl SessionManagerInit {
@@ -361,7 +353,6 @@ impl SessionManagerInit {
         device_retrieval_methods: Option<NonEmptyVec<DeviceRetrievalMethod>>,
         server_retrieval_methods: Option<ServerRetrievalMethods>,
     ) -> Result<Self, Error> {
-
         let (e_device_key, security) = ephemeral_key()?;
 
         let device_engagement = DeviceEngagement {
@@ -440,9 +431,9 @@ impl SessionManagerInit {
         device_engagement_handover_type: DeviceEngagementType,
     ) -> anyhow::Result<SessionManagerEngaged> {
         let handover = match device_engagement_handover_type {
-            DeviceEngagementType::NFC => Handover::NFC(NfcHandover::create_handover_select(
+            DeviceEngagementType::NFC => Handover::NFC(NfcHandover::create_handover_message(
                 &self.device_engagement,
-                None,
+                NfcHandoverType::Request,
             )?),
             DeviceEngagementType::QR => Handover::QR(self.device_engagement.to_qr_code_uri()?),
         };
