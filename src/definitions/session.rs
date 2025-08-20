@@ -5,7 +5,7 @@
 use super::helpers::Tag24;
 use super::DeviceEngagement;
 use crate::cbor::CborError;
-use crate::definitions::device_engagement::nfc_handover::NfcHandover;
+
 use crate::definitions::device_engagement::EReaderKeyBytes;
 use crate::definitions::device_key::cose_key::EC2Y;
 use crate::definitions::device_key::CoseKey;
@@ -313,7 +313,9 @@ pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 
 mod test {
     use super::*;
     use crate::cbor;
-    use crate::definitions::device_engagement::nfc_handover::NFC_NEGOTIATED_HANDOVER_SERVICE;
+    use crate::definitions::device_engagement::nfc_handover::{
+        NfcHandover, NfcHandoverType, NFC_NEGOTIATED_HANDOVER_SERVICE,
+    };
     use crate::definitions::device_engagement::Security;
     use crate::definitions::device_request::DeviceRequest;
     use crate::definitions::helpers::NonEmptyVec;
@@ -555,10 +557,9 @@ mod test {
         })
         .expect("failed to create device engagement tag24");
 
-        let result = NfcHandover::create_handover_select(&device_engagement, None);
-        assert!(result.is_ok());
-
-        let NfcHandover(handover_bytes, _) = result.unwrap();
+        let handover_bytes =
+            NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select)
+                .expect("failed to create nfc handover message");
         let raw = handover_bytes.as_ref();
 
         // Assert: Handover starts with valid NDEF header
@@ -593,10 +594,9 @@ mod test {
         })
         .expect("failed to create device engagement tag24");
 
-        let result = NfcHandover::create_handover_select(&device_engagement, None);
-        assert!(result.is_ok());
-
-        let NfcHandover(handover_bytes, _) = result.unwrap();
+        let handover_bytes =
+            NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select)
+                .expect("failed to create nfc handover select message");
         let raw = handover_bytes.as_ref();
 
         // Should still contain the URI record
@@ -634,7 +634,8 @@ mod test {
         })
         .expect("Failed to create device engagement");
 
-        let result = NfcHandover::create_handover_select(&device_engagement, None);
+        let result =
+            NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select);
         assert!(
             result.is_ok(),
             "Should succeed even with minimal fields in dummy key (adjust if validation is enforced)"

@@ -76,7 +76,7 @@ impl NfcHandover {
         let tp_record = NdefMessage::from(&[NdefRecord::builder()
             .tnf(ndef::TNF::WellKnown)
             .payload(&RawPayload {
-                record_type: b"Hs",
+                record_type: b"Tp",
                 payload: &tp_payload,
             })
             .build()?]);
