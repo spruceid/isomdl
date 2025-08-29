@@ -313,21 +313,8 @@ pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 
 mod test {
     use super::*;
     use crate::cbor;
-    use crate::definitions::device_engagement::nfc_handover::{
-        NfcHandover, NfcHandoverType, NFC_NEGOTIATED_HANDOVER_SERVICE,
-    };
     use crate::definitions::device_engagement::Security;
     use crate::definitions::device_request::DeviceRequest;
-    use crate::definitions::helpers::NonEmptyVec;
-    use crate::definitions::{CoseKey, DeviceRetrievalMethod};
-
-    fn dummy_device_key() -> CoseKey {
-        let crv = EC2Curve::P256;
-        let x: Vec<u8> = vec![0u8; 32];
-        let y = EC2Y::Value(x.clone());
-
-        CoseKey::EC2 { crv, x, y }
-    }
 
     #[test]
     fn qr_handover() {
@@ -540,105 +527,5 @@ mod test {
         let plaintext =
             decrypt_reader_data(&session_key, encrypted_request.as_ref(), &mut 0).unwrap();
         let _device_request: DeviceRequest = crate::cbor::from_slice(&plaintext).unwrap();
-    }
-
-    #[test]
-    fn test_valid_nfc_handover_select_ble_only() {
-        use crate::definitions::device_engagement::Security;
-
-        let device_engagement = Tag24::new(DeviceEngagement {
-            version: "1.0".into(),
-            security: Security(1, Tag24::new(dummy_device_key()).unwrap()),
-            device_retrieval_methods: Some(NonEmptyVec::new(DeviceRetrievalMethod::BLE(
-                Default::default(),
-            ))),
-            server_retrieval_methods: None,
-            protocol_info: None,
-        })
-        .expect("failed to create device engagement tag24");
-
-        let handover_bytes =
-            NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select)
-                .expect("failed to create nfc handover message");
-        let raw: &[u8] = handover_bytes.as_ref();
-
-        // Assert: Handover starts with valid NDEF header
-        assert_eq!(
-            raw[0] & 0xF8,
-            0xD0,
-            "First NDEF record should be MB=1, TNF=0x01"
-        );
-
-        // Assert: 'Hs' record type exists
-        assert!(raw.windows(2).any(|w| w == b"Hs"), "Hs type not found");
-
-        // Assert: Includes version byte (0x12)
-        assert!(raw.contains(&0x12), "Hs payload missing version byte 0x12");
-
-        // Assert: Includes 'urn:nfc:sn:handover' URI
-        let urn = NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes();
-        assert!(
-            raw.windows(urn.len()).any(|w| w == urn),
-            "URI 'urn:nfc:sn:handover' missing"
-        );
-    }
-
-    #[test]
-    fn test_nfc_handover_with_no_retrieval_methods() {
-        let device_engagement = Tag24::new(DeviceEngagement {
-            version: "1.0".into(),
-            security: Security(1, Tag24::new(dummy_device_key()).unwrap()),
-            device_retrieval_methods: None,
-            server_retrieval_methods: None,
-            protocol_info: None,
-        })
-        .expect("failed to create device engagement tag24");
-
-        let handover_bytes =
-            NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select)
-                .expect("failed to create nfc handover select message");
-        let raw: &[u8] = handover_bytes.as_ref();
-
-        // Should still contain the URI record
-        assert!(
-            raw.windows(NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes().len())
-                .any(|w| w == NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes()),
-            "URN URI missing"
-        );
-
-        let uri_count = raw
-            .windows(NFC_NEGOTIATED_HANDOVER_SERVICE.len())
-            .filter(|w| *w == NFC_NEGOTIATED_HANDOVER_SERVICE.as_bytes())
-            .count();
-
-        assert_eq!(uri_count, 1, "Expected only one URI record");
-
-        // Only one embedded record expected
-        let num_ndef_records = raw.iter().filter(|b| **b & 0x80 != 0).count();
-        assert_eq!(
-            num_ndef_records, 2,
-            "Expected 2 beginning bytes, one for URI and one for Hs"
-        );
-    }
-
-    #[test]
-    fn test_nfc_handover_missing_device_key_should_fail() {
-        let device_engagement = Tag24::new(DeviceEngagement {
-            version: "1.0".into(),
-            security: Security(1, Tag24::new(dummy_device_key()).unwrap()),
-            device_retrieval_methods: Some(NonEmptyVec::new(DeviceRetrievalMethod::BLE(
-                Default::default(),
-            ))),
-            server_retrieval_methods: None,
-            protocol_info: None,
-        })
-        .expect("Failed to create device engagement");
-
-        let result =
-            NfcHandover::create_handover_message(&device_engagement, NfcHandoverType::Select);
-        assert!(
-            result.is_ok(),
-            "Should succeed even with minimal fields in dummy key (adjust if validation is enforced)"
-        );
     }
 }

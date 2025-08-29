@@ -1,7 +1,6 @@
 use crate::cbor::CborError;
 use crate::definitions::device_key::cose_key::Error as CoseKeyError;
 use crate::definitions::helpers::tag24::Error as Tag24Error;
-use crate::presentation;
 
 /// Errors that can occur when deserialising a DeviceEngagement.
 #[derive(Debug, thiserror::Error)]
