@@ -144,7 +144,7 @@ pub enum Handover {
     // are used to parse the device engagement bytes structure.
     //
     // See ISO/IEC 18013-5 §8.2.1.1 for more information.
-    QR(String),
+    QR,
     NFC,
     OID4VP(String, String),
 }
@@ -322,7 +322,7 @@ mod test {
         let cbor = hex::decode("60").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::QR(..)) {
+        if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
@@ -341,7 +341,7 @@ mod test {
         let cbor = hex::decode("80").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::QR(..)) {
+        if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
@@ -360,7 +360,7 @@ mod test {
         let cbor = hex::decode("A0").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::QR(..)) {
+        if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
         } else {
             let roundtripped =
@@ -378,8 +378,8 @@ mod test {
         let cbor = hex::decode("824568656C6C6FF6").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::NFC(..)) {
-            panic!("expected 'Handover::NFC(..)', received {handover:?}")
+        if !matches!(handover, Handover::NFC) {
+            panic!("expected 'Handover::NFC', received {handover:?}")
         } else {
             let roundtripped =
                 cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
@@ -396,8 +396,8 @@ mod test {
         let cbor = hex::decode("824568656C6C6F45776F726C64").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::NFC(..)) {
-            panic!("expected 'Handover::NFC(..)', received {handover:?}")
+        if !matches!(handover, Handover::NFC) {
+            panic!("expected 'Handover::NFC', received {handover:?}")
         } else {
             let roundtripped =
                 cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
@@ -464,7 +464,7 @@ mod test {
         let session_transcript = Tag24::new(SessionTranscript180135(
             device_engagement_bytes,
             reader_key_bytes,
-            Handover::QR(String::new()),
+            Handover::QR,
         ))
         .unwrap();
         let _session_key_device =

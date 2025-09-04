@@ -371,7 +371,7 @@ impl SessionManagerInit {
             documents: self.documents,
             device_engagement: self.device_engagement,
             e_device_key: self.e_device_key,
-            handover: Handover::QR(qr_code_uri.clone()),
+            handover: Handover::QR,
         };
         Ok((sm, qr_code_uri))
     }
@@ -402,7 +402,7 @@ impl SessionManagerInit {
     ) -> anyhow::Result<SessionManagerEngaged> {
         let handover = match device_engagement_handover_type {
             DeviceEngagementType::NFC => Handover::NFC,
-            DeviceEngagementType::QR => Handover::QR(self.device_engagement.to_qr_code_uri()?),
+            DeviceEngagementType::QR => Handover::QR,
         };
 
         Ok(SessionManagerEngaged {
