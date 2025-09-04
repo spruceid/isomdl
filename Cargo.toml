@@ -33,7 +33,7 @@ hmac = "0.12.1"
 aes = "0.8.2"
 sec1 = "0.7.1"
 uuid = { version = "1.3", features = ["v1", "v4", "std", "rng", "serde"] }
-time = { version = "0.3.20", features = ["formatting", "parsing", "macros"] }
+time = { version = "0.3.35", features = ["formatting", "parsing", "macros"] }
 zeroize = { version = "1.5", features = ["zeroize_derive"] }
 signature = { version = "2.0.0", features = ["std"] }
 async-signature = "0.3.0"
