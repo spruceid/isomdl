@@ -22,8 +22,7 @@ use crate::{
     definitions::{
         device_engagement::{
             nfc::{NegotiatedBleInfo, NegotiatedCarrierInfo},
-            CentralClientMode, DeviceEngagementType, DeviceRetrievalMethod, DeviceRetrievalMethods,
-            Security, ServerRetrievalMethods,
+            DeviceEngagementType, DeviceRetrievalMethod, Security, ServerRetrievalMethods,
         },
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
         device_response::{
@@ -41,8 +40,7 @@ use crate::{
         x509::{
             self, trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
         },
-        BleOptions, CoseKey, DeviceEngagement, DeviceResponse, IssuerSignedItem, Mso,
-        SessionEstablishment,
+        CoseKey, DeviceEngagement, DeviceResponse, IssuerSignedItem, Mso, SessionEstablishment,
     },
     issuance::Mdoc,
 };
@@ -331,14 +329,7 @@ impl SessionManagerInit {
                 let device_engagement = DeviceEngagement {
                     version: "1.0".to_string(),
                     security,
-                    device_retrieval_methods: Some(DeviceRetrievalMethods::new(
-                        DeviceRetrievalMethod::BLE(BleOptions {
-                            peripheral_server_mode: None,
-                            central_client_mode: Some(CentralClientMode {
-                                uuid: negotiated_carrier.uuid,
-                            }),
-                        }),
-                    )),
+                    device_retrieval_methods: None,
                     server_retrieval_methods: None,
                     protocol_info: None,
                 };
@@ -401,7 +392,7 @@ impl SessionManagerInit {
         device_engagement_handover_type: DeviceEngagementType,
     ) -> anyhow::Result<SessionManagerEngaged> {
         let handover = match device_engagement_handover_type {
-            DeviceEngagementType::NFC => Handover::NFC,
+            DeviceEngagementType::NFC => Handover::NFC(Default::default(), None),
             DeviceEngagementType::QR => Handover::QR,
         };
 

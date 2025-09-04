@@ -1,10 +1,46 @@
-use crate::definitions::device_engagement::nfc::{
-    apdu::{self},
-    ndef::{self, CarrierInfo, NFC_MAX_PAYLOAD_SIZE, NFC_MAX_PAYLOAD_SIZE_BYTES},
-    util::{IntoRaw, KnownOrRaw},
+use crate::definitions::{
+    device_engagement::nfc::{
+        apdu::{self},
+        ndef::{
+            self, CarrierInfo, HandoverError, NFC_MAX_PAYLOAD_SIZE, NFC_MAX_PAYLOAD_SIZE_BYTES,
+        },
+        util::{IntoRaw, KnownOrRaw},
+    },
+    Security,
 };
 
 use thiserror::Error;
+use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct StaticHandoverState {
+    pub uuid: uuid::Uuid,
+    pub private_key: Vec<u8>,
+    pub security: Security,
+}
+
+impl StaticHandoverState {
+    pub fn new() -> anyhow::Result<Self> {
+        let (private_key, security) = crate::presentation::device::ephemeral_key()
+            .map_err(|e| anyhow::anyhow!("Failed to generate holder keys: {e}"))?;
+
+        Ok(Self {
+            uuid: Uuid::new_v4(),
+            private_key,
+            security,
+        })
+    }
+}
+
+impl std::fmt::Debug for StaticHandoverState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StaticHandoverState")
+            .field("uuid", &self.uuid)
+            .field("private_key", &"<redacted>")
+            .field("security", &self.security)
+            .finish()
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum ApduError {
@@ -12,15 +48,6 @@ pub enum ApduError {
     InvalidApdu,
     #[error("NDEF handover failed: {0}")]
     NdefHandoverError(#[from] ndef::HandoverError),
-}
-
-#[derive(Debug, Clone)]
-pub struct ApduHandoverDriver {
-    state: ndef::HandoverState,
-    selected_file: Option<KnownOrRaw<u16, apdu::FileId>>,
-    ndef_send: Option<Vec<u8>>,
-    ndef_recv: NdefUpdateDriver,
-    negotiated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -124,20 +151,39 @@ fn cc_file(negotiated: bool) -> Vec<u8> {
     cc
 }
 
+#[derive(Debug, Clone)]
+pub struct ApduHandoverDriver {
+    state: ndef::HandoverState,
+    selected_file: Option<KnownOrRaw<u16, apdu::FileId>>,
+    ndef_send: Option<Vec<u8>>,
+    ndef_recv: NdefUpdateDriver,
+    negotiated: bool,
+    static_ble: StaticHandoverState,
+}
+
 impl ApduHandoverDriver {
-    pub fn new(negotiated: bool) -> Self {
-        Self {
+    pub fn new(negotiated: bool) -> Result<Self, HandoverError> {
+        Ok(Self {
             state: ndef::HandoverState::Init,
             negotiated,
             selected_file: None,
             ndef_send: None,
             ndef_recv: NdefUpdateDriver::new(),
-        }
+            static_ble: StaticHandoverState::new()?,
+        })
     }
 
-    /// Perform a full reset of the APDU driver state.
+    /// Perform a full reset of the APDU driver state, except for the static BLE state.
     pub fn reset(&mut self) {
-        *self = Self::new(self.negotiated);
+        self.state = ndef::HandoverState::Init;
+        self.selected_file = None;
+        self.ndef_send = None;
+        self.ndef_recv = NdefUpdateDriver::new();
+    }
+
+    pub fn regenerate_static_ble_keys(&mut self) -> Result<(), HandoverError> {
+        self.static_ble = StaticHandoverState::new()?;
+        Ok(())
     }
 
     // If we have carrier info, return it and reset the state.
@@ -195,7 +241,7 @@ impl ApduHandoverDriver {
                     let handover_resp = if self.negotiated {
                         ndef::get_handover_ndef_response(&self.state, &[])
                     } else {
-                        ndef::get_static_handover_ndef_response()
+                        ndef::get_static_handover_ndef_response(self.static_ble.clone())
                     };
                     match handover_resp {
                         Ok(ndef::HandoverResponse { new_state, ndef }) => {

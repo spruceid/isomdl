@@ -5,16 +5,13 @@ use strum::IntoEnumIterator;
 use thiserror::Error;
 
 use crate::definitions::{
-    device_engagement::{
-        nfc::{
-            ble, ndef_parser,
-            util::{ByteVecDisplayAsHex, DisplayBytesAsHex},
-        },
-        CentralClientMode,
+    device_engagement::nfc::{
+        ble, ndef_parser,
+        util::{ByteVecDisplayAsHex, DisplayBytesAsHex},
+        StaticHandoverState,
     },
-    helpers::NonEmptyVec,
     traits::ToCbor,
-    BleOptions, DeviceEngagement, DeviceRetrievalMethod,
+    DeviceEngagement,
 };
 
 pub(super) const NFC_MAX_PAYLOAD_SIZE: usize = 255 - 2; // 255 minus 2 bytes for the size
@@ -360,34 +357,31 @@ pub struct HandoverResponse {
     pub ndef: Vec<u8>,
 }
 
-pub fn get_static_handover_ndef_response() -> Result<HandoverResponse, HandoverError> {
-    // TODO: This cross-reference feels unidiomatic.
-    //       I feel like this logic should maybe not live in crate::definitions?
-    let (private_key, security) = crate::presentation::device::ephemeral_key()
-        .map_err(|e| anyhow::anyhow!("Failed to generate holder keys: {e}"))?;
+pub fn get_static_handover_ndef_response(
+    static_handover_state: StaticHandoverState,
+) -> Result<HandoverResponse, HandoverError> {
+    // TODO: I feel like this logic should maybe not live in crate::definitions?
+    let StaticHandoverState {
+        uuid,
+        private_key,
+        security,
+    } = static_handover_state;
 
-    let uuid = uuid::Uuid::new_v4();
-
-    tracing::info!("Static handover with UUID: {uuid}");
-
-    let ble_option = BleOptions {
-        peripheral_server_mode: None,
-        central_client_mode: Some(CentralClientMode { uuid }),
-    };
-
-    let device_retrieval_methods = Some(NonEmptyVec::new(DeviceRetrievalMethod::BLE(ble_option)));
+    tracing::info!("Static handover with UUID: {}", uuid);
 
     let device_engagement = DeviceEngagement {
         version: "1.0".into(),
         security,
-        device_retrieval_methods,
+        device_retrieval_methods: None,
         protocol_info: None,
         server_retrieval_methods: None,
     };
 
+    const MDOC_ID: &[u8] = b"mdoc";
+
     let device_engagement_record = ndef_rs::NdefRecord::builder()
         .tnf(ndef_rs::TNF::External)
-        .id(b"mdoc".into())
+        .id(MDOC_ID.into())
         .payload(&RawPayload {
             record_type: b"iso.org:18013:deviceengagement",
             payload: &device_engagement
@@ -400,48 +394,60 @@ pub fn get_static_handover_ndef_response() -> Result<HandoverResponse, HandoverE
 
     use ble::ad_packet::KnownType as BleTypeByte;
     let (ac_record, cc_record) = {
-        const CARRIER_DATA_REFERENCE_ID: u8 = b'B';
+        // const CARRIER_DATA_REFERENCE_ID: u8 = b'B';
+        const OOB_RECORD_ID: &[u8] = b"0";
 
         let ac_record = NdefRecord::builder()
             .tnf(ndef_rs::TNF::WellKnown)
             .payload(&RawPayload {
                 record_type: b"ac",
                 payload: &[
-                    0x01, // Carrier Power State: active
-                    0x01, // Length of Carrier Data Reference
-                    CARRIER_DATA_REFERENCE_ID,
-                    0x00, // Auxiliary Data Reference Count
-                ],
-            })
-            .build()
-            .map_err(|e| {
-                anyhow::anyhow!("Failed to create central client mode NDEF record: {e}")
-            })?;
-
-        let cc_record = NdefRecord::builder()
-            .tnf(ndef_rs::TNF::MimeMedia)
-            .payload(&RawPayload {
-                record_type: b"application/vnd.bluetooth.ep.oob",
-                payload: &[
                     [
-                        0x02, // Length of LE Role Payload
-                        BleTypeByte::LeRole as u8,
-                        0x01, // Central Client Mode BLE role
-                        0x11, // Length of UUID payload
-                        BleTypeByte::CompleteList128BitServiceUuids as u8,
+                        0x01,                      // Carrier Power State: active
+                        OOB_RECORD_ID.len() as u8, // Length of Carrier Data Reference
                     ]
                     .as_slice(),
-                    uuid.as_bytes(),
+                    OOB_RECORD_ID,
+                    [
+                        0x01, // Auxiliary Data Reference Count
+                        MDOC_ID.len() as u8,
+                    ]
+                    .as_slice(),
+                    MDOC_ID,
                 ]
                 .concat(),
             })
-            .id(vec![CARRIER_DATA_REFERENCE_ID]) // must match AC reference
             .build()
             .map_err(|e| {
                 anyhow::anyhow!("Failed to create central client mode NDEF record: {e}")
             })?;
 
-        (ac_record, cc_record)
+        let ble_oob_payload = [
+            [
+                0x02, // Length of LE Role Payload
+                BleTypeByte::LeRole as u8,
+                0x01, // Central Client Mode BLE role
+                0x11, // Length of UUID payload
+                BleTypeByte::CompleteList128BitServiceUuids as u8,
+            ]
+            .as_slice(),
+            uuid.as_bytes(),
+        ]
+        .concat();
+
+        let ble_oob_record = NdefRecord::builder()
+            .id(OOB_RECORD_ID.into())
+            .tnf(ndef_rs::TNF::MimeMedia)
+            .payload(&RawPayload {
+                record_type: b"application/vnd.bluetooth.le.oob",
+                payload: &ble_oob_payload,
+            })
+            .build()
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to create central client mode NDEF record: {e}")
+            })?;
+
+        (ac_record, ble_oob_record)
     };
 
     let hs_payload = [

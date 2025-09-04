@@ -128,24 +128,8 @@ pub enum Error {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Handover {
-    /// > If QR code is used for device engagement, the device engagement structure
-    /// > shall be transmitted as a barcode compliant with ISO/IEC 18004. The QR code
-    /// > shall contain an URI with "mdoc:" as a scheme.
-    ///
-    /// See ISO/IEC 18013-5 §8.2.2.3 for more information.
-    ///
-    // NOTE: The specification does not mention adding the `mdoc:` scheme
-    // to the QR handover variant. However, the device engagement bytes structure
-    // does permit additional bytes to be appended after the required device
-    // engagement bytes. See `DeviceEngagement` structure for required fields. Therefore,
-    // adding the QR code URI here should be acceptable per the specification.
-    //
-    // The contents of the QR code are the encoded device engagement bytes, which
-    // are used to parse the device engagement bytes structure.
-    //
-    // See ISO/IEC 18013-5 §8.2.1.1 for more information.
     QR,
-    NFC,
+    NFC(ByteStr, Option<ByteStr>),
     OID4VP(String, String),
 }
 
@@ -318,8 +302,8 @@ mod test {
 
     #[test]
     fn qr_handover() {
-        // Empty string in CBOR is 0x60
-        let cbor = hex::decode("60").expect("failed to decode hex");
+        // null
+        let cbor = hex::decode("F6").expect("failed to decode hex");
         let handover: Handover =
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
@@ -362,42 +346,6 @@ mod test {
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
-        } else {
-            let roundtripped =
-                cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
-            assert_eq!(
-                cbor, roundtripped,
-                "re-serialized handover did not match initial bytes"
-            )
-        }
-    }
-
-    #[test]
-    fn nfc_static_handover() {
-        // ['hello', null]
-        let cbor = hex::decode("824568656C6C6FF6").expect("failed to decode hex");
-        let handover: Handover =
-            cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::NFC) {
-            panic!("expected 'Handover::NFC', received {handover:?}")
-        } else {
-            let roundtripped =
-                cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
-            assert_eq!(
-                cbor, roundtripped,
-                "re-serialized handover did not match initial bytes"
-            )
-        }
-    }
-
-    #[test]
-    fn nfc_negotiated_handover() {
-        // ['hello', 'world']
-        let cbor = hex::decode("824568656C6C6F45776F726C64").expect("failed to decode hex");
-        let handover: Handover =
-            cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::NFC) {
-            panic!("expected 'Handover::NFC', received {handover:?}")
         } else {
             let roundtripped =
                 cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
