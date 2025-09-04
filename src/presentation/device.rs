@@ -21,8 +21,9 @@ use crate::{
     cose::{mac0::PreparedCoseMac0, sign1::PreparedCoseSign1, MaybeTagged},
     definitions::{
         device_engagement::{
-            nfc::NegotiatedCarrierInfo, CentralClientMode, DeviceEngagementType,
-            DeviceRetrievalMethod, DeviceRetrievalMethods, Security, ServerRetrievalMethods,
+            nfc::{NegotiatedBleInfo, NegotiatedCarrierInfo},
+            CentralClientMode, DeviceEngagementType, DeviceRetrievalMethod, DeviceRetrievalMethods,
+            Security, ServerRetrievalMethods,
         },
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
         device_response::{
@@ -272,7 +273,7 @@ pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdent
 /// Generate an ephemeral key for device engagement.
 /// Returns: (private_key, public_key)
 // TODO: Move me!
-fn ephemeral_key() -> Result<(Vec<u8>, Security), Error> {
+pub fn ephemeral_key() -> Result<(Vec<u8>, Security), Error> {
     let (e_device_key, e_device_key_pub) =
         session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;
     let e_device_key_bytes =
@@ -310,7 +311,7 @@ impl SessionManagerInit {
         Ok(Self {
             // device_engagement_type,
             documents,
-            e_device_key: e_device_key,
+            e_device_key,
             device_engagement,
         })
     }
@@ -318,22 +319,31 @@ impl SessionManagerInit {
     /// Initialise the SessionManager with a prenegotiated connection.
     pub fn initialise_with_prenegotiated_carrier(
         documents: Documents,
-        prenegotiated_carrier: &NegotiatedCarrierInfo,
+        negotiated_carrier: &NegotiatedCarrierInfo,
     ) -> Result<Self, Error> {
-        let (e_device_key, security) = ephemeral_key()?;
-        let device_engagement = DeviceEngagement {
-            version: "1.0".to_string(),
-            security: security,
-            device_retrieval_methods: Some(DeviceRetrievalMethods::new(
-                DeviceRetrievalMethod::BLE(BleOptions {
-                    peripheral_server_mode: None,
-                    central_client_mode: Some(CentralClientMode {
-                        uuid: prenegotiated_carrier.uuid(),
-                    }),
-                }),
-            )),
-            server_retrieval_methods: None,
-            protocol_info: None,
+        let (e_device_key, device_engagement) = match &negotiated_carrier.ble {
+            NegotiatedBleInfo::StaticHandover {
+                private_key,
+                device_engagement,
+            } => (private_key.clone(), device_engagement.clone()),
+            _ => {
+                let (e_device_key, security) = ephemeral_key()?;
+                let device_engagement = DeviceEngagement {
+                    version: "1.0".to_string(),
+                    security,
+                    device_retrieval_methods: Some(DeviceRetrievalMethods::new(
+                        DeviceRetrievalMethod::BLE(BleOptions {
+                            peripheral_server_mode: None,
+                            central_client_mode: Some(CentralClientMode {
+                                uuid: negotiated_carrier.uuid,
+                            }),
+                        }),
+                    )),
+                    server_retrieval_methods: None,
+                    protocol_info: None,
+                };
+                (e_device_key, device_engagement)
+            }
         };
 
         let device_engagement =
@@ -341,8 +351,8 @@ impl SessionManagerInit {
 
         Ok(Self {
             documents,
-            e_device_key: e_device_key,
-            device_engagement: device_engagement,
+            e_device_key,
+            device_engagement,
         })
     }
 
@@ -391,9 +401,7 @@ impl SessionManagerInit {
         device_engagement_handover_type: DeviceEngagementType,
     ) -> anyhow::Result<SessionManagerEngaged> {
         let handover = match device_engagement_handover_type {
-            DeviceEngagementType::NFC => {
-                anyhow::bail!("NFC handover does not begin with direct engagement.")
-            }
+            DeviceEngagementType::NFC => Handover::NFC,
             DeviceEngagementType::QR => Handover::QR(self.device_engagement.to_qr_code_uri()?),
         };
 

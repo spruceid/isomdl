@@ -1,6 +1,6 @@
 use crate::definitions::device_engagement::nfc::{
     apdu::{self},
-    ndef::{self, CarrierInfo, NFC_MAX_PAYLOAD_SIZE_BYTES},
+    ndef::{self, CarrierInfo, NFC_MAX_PAYLOAD_SIZE, NFC_MAX_PAYLOAD_SIZE_BYTES},
     util::{IntoRaw, KnownOrRaw},
 };
 
@@ -20,6 +20,7 @@ pub struct ApduHandoverDriver {
     selected_file: Option<KnownOrRaw<u16, apdu::FileId>>,
     ndef_send: Option<Vec<u8>>,
     ndef_recv: NdefUpdateDriver,
+    negotiated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -100,14 +101,15 @@ impl NdefUpdateDriver {
     }
 }
 
+const APDU_MAX_SIZE: usize = NFC_MAX_PAYLOAD_SIZE + 10;
+const APDU_MAX_SIZE_BYTES: [u8; 2] = u16::to_be_bytes(APDU_MAX_SIZE as u16);
+
 #[rustfmt::skip]
-const CC_FILE: &[u8] = &[
+const CC_FILE_TEMPLATE: &[u8] = &[
     0x00, 0x0f, // Length of the CC file
     0x20, // Mapping version
-    0x00,
-    0x3b, // Maximum R-APDU (reader -> app) size // TODO: validate this value
-    0x00,
-    0x34, // Maximum C-APDU (app -> reader) size // TODO: validate this value
+    APDU_MAX_SIZE_BYTES[0], APDU_MAX_SIZE_BYTES[1], // Maximum R-APDU (reader -> app) size
+    APDU_MAX_SIZE_BYTES[0], APDU_MAX_SIZE_BYTES[1], // Maximum C-APDU (app -> reader) size
     0x04, // NDEF file control TLV
     0x06, // Length of TLV
     0xe1, 0x04, // File ID: NDEF file (0xe104)
@@ -116,10 +118,17 @@ const CC_FILE: &[u8] = &[
     0x00, // Write access condition. 00 for negotiated, ff for static
 ];
 
+fn cc_file(negotiated: bool) -> Vec<u8> {
+    let mut cc = CC_FILE_TEMPLATE.to_vec();
+    cc[14] = if negotiated { 0x00 } else { 0xff };
+    cc
+}
+
 impl ApduHandoverDriver {
-    pub fn new() -> Self {
+    pub fn new(negotiated: bool) -> Self {
         Self {
             state: ndef::HandoverState::Init,
+            negotiated,
             selected_file: None,
             ndef_send: None,
             ndef_recv: NdefUpdateDriver::new(),
@@ -128,7 +137,7 @@ impl ApduHandoverDriver {
 
     /// Perform a full reset of the APDU driver state.
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self::new(self.negotiated);
     }
 
     // If we have carrier info, return it and reset the state.
@@ -140,7 +149,6 @@ impl ApduHandoverDriver {
                 // Guaranteed unreachable
                 return None;
             };
-            self.reset();
             Some(carrier_info)
         } else {
             None
@@ -169,10 +177,12 @@ impl ApduHandoverDriver {
                         Ok(payload) => payload,
                         Err(err) => return err,
                     };
-                    self.ndef_send = Some(CC_FILE.into());
+                    self.ndef_send = Some(cc_file(self.negotiated));
                     response
                 }
                 KnownOrRaw::Known(apdu::FileId::NdefFile) => {
+                    // Subsequent calls to SELECT FILE should not refresh the contents of the file,
+                    // so we should not prepare a new NDEF message.
                     if self.selected_file == Some(file_id) {
                         return match control_info
                             .get_payload(&u16::to_be_bytes(apdu::FileId::NdefFile.into_raw()))
@@ -182,7 +192,12 @@ impl ApduHandoverDriver {
                         };
                     }
 
-                    match ndef::get_handover_ndef_response(&self.state, &[]) {
+                    let handover_resp = if self.negotiated {
+                        ndef::get_handover_ndef_response(&self.state, &[])
+                    } else {
+                        ndef::get_static_handover_ndef_response()
+                    };
+                    match handover_resp {
                         Ok(ndef::HandoverResponse { new_state, ndef }) => {
                             let response = match control_info
                                 .get_payload(&u16::to_be_bytes(apdu::FileId::NdefFile.into_raw()))
@@ -236,6 +251,9 @@ impl ApduHandoverDriver {
                 }
             }
             apdu::Apdu::UpdateBinary { offset, data } => {
+                if !self.negotiated {
+                    return apdu::ResponseCode::ConditionsNotSatisfied.into();
+                }
                 match self.ndef_recv.handle(offset, data) {
                     Ok(Some(msg)) => match ndef::get_handover_ndef_response(&self.state, &msg) {
                         Ok(ndef::HandoverResponse { new_state, ndef }) => {

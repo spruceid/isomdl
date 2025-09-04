@@ -149,18 +149,10 @@ impl<'a> RawNdefRecord<'a> {
             if failed {
                 return None;
             }
-            // NDEF §3.2
-            if bytes.len() < cursor + 10 {
-                if bytes.len() != cursor {
-                    failed = true;
-                    return Some(Err(ReadRecordError::BufferTooSmall {
-                        cursor: cursor,
-                        required_space: 10,
-                        buffer_len: bytes.len(),
-                    }));
-                }
+            if bytes.len() == cursor {
                 return None;
             }
+
             let flags_byte = bytes[cursor];
             // 7  6  5  4  3  2  1  0
             // MB ME CF SR IL TNF----
@@ -171,6 +163,20 @@ impl<'a> RawNdefRecord<'a> {
             let il = flags_byte & 0b00001000 != 0; // has ID field?
             let tnf = flags_byte & 0b00000111; // NDEF 3.2.6
             cursor += 1;
+
+            // NDEF §3.2
+            let header_size = 1 + // type length
+                if sr {1} else {4} + // payload length
+                if il {1} else {0}; // ID length
+
+            if bytes.len() < cursor + header_size {
+                failed = true;
+                return Some(Err(ReadRecordError::BufferTooSmall {
+                    cursor: cursor,
+                    required_space: header_size,
+                    buffer_len: bytes.len(),
+                }));
+            }
 
             let type_len = bytes[cursor] as usize;
             cursor += 1;

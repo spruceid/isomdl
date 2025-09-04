@@ -163,7 +163,28 @@ impl<'a> Apdu<'a> {
 
         let command_remainder = &command_bytes[4 + l_c_len..];
 
-        tracing::debug!("Processing APDU command: CLA: {cla}, INS: {ins}, P1: {p1}, P2: {p2}, LC Len: {l_c_len}, Payload Length: {payload_len}");
+        let mut response_len = 0;
+        if command_remainder.len() > payload_len {
+            if command_remainder.len() - payload_len != l_c_len {
+                tracing::error!(
+                    "Expected the remainder({}) after payload len({}) to be same as Lc len ({})",
+                    command_remainder.len(),
+                    payload_len,
+                    l_c_len
+                );
+                apdu_fail!(ResponseCode::Unspecified);
+            }
+            let resp_bytes = &command_remainder[payload_len..];
+            response_len = match l_c_len {
+                1 => resp_bytes[0] as usize,
+                3 => u16::from_be_bytes([resp_bytes[1], resp_bytes[2]]) as usize,
+                _ => {
+                    unreachable!()
+                }
+            }
+        }
+
+        tracing::debug!("Processing APDU command: CLA: {cla}, INS: {ins}, P1: {p1}, P2: {p2}, LC Len: {l_c_len}, Payload Length: {payload_len}, Resp len: {response_len}");
 
         let ins_bit1 = (ins & 0b0000_0001) != 0;
         let p1_bit8 = (p1 & 0b1000_0000) != 0;

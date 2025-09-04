@@ -1,12 +1,20 @@
 use std::borrow::Cow;
 
-use ndef_rs::payload::RecordPayload;
+use ndef_rs::{payload::RecordPayload, NdefRecord};
 use strum::IntoEnumIterator;
 use thiserror::Error;
 
-use crate::definitions::device_engagement::nfc::{
-    ndef_parser,
-    util::{ByteVecDisplayAsHex, DisplayBytesAsHex},
+use crate::definitions::{
+    device_engagement::{
+        nfc::{
+            ble, ndef_parser,
+            util::{ByteVecDisplayAsHex, DisplayBytesAsHex},
+        },
+        CentralClientMode,
+    },
+    helpers::NonEmptyVec,
+    traits::ToCbor,
+    BleOptions, DeviceEngagement, DeviceRetrievalMethod,
 };
 
 pub(super) const NFC_MAX_PAYLOAD_SIZE: usize = 255 - 2; // 255 minus 2 bytes for the size
@@ -113,6 +121,9 @@ impl<'r, 'p> RecordPayload for RawPayload<'r, 'p> {
     }
 }
 
+const TNEP_MIN_WAIT_TIME: u8 = 0x09;
+const TNEP_MAX_TIME_EXTENSIONS: u8 = 0x05;
+
 mod response {
     use crate::definitions::device_engagement::nfc::{
         ble::{self, ad_packet, AdPacket},
@@ -147,9 +158,9 @@ mod response {
             ],
             NFC_NEGOTIATED_HANDOVER_SERVICE,
             &[
-                0x00, // Communication mode: single response
-                0x10, // Minimum wait time. TNEP 1.0 §4.1.6
-                0x0F, // Maximum no. of time extensions, 0-15. TNEP 1.0 §4.1.7
+                0x00,                     // Communication mode: single response
+                TNEP_MIN_WAIT_TIME,       // Minimum wait time. TNEP 1.0 §4.1.6
+                TNEP_MAX_TIME_EXTENSIONS, // Maximum no. of time extensions, 0-15. TNEP 1.0 §4.1.7
                 NFC_MAX_PAYLOAD_SIZE_BYTES[0],
                 NFC_MAX_PAYLOAD_SIZE_BYTES[1],
             ],
@@ -297,13 +308,15 @@ mod response {
                     );
                     ret_value = Some((
                         message,
-                        match psm_mac_addr.is_some() && l2cap {
-                            true => CarrierInfo::BleL2cap {
-                                psm: psm.unwrap_or_default(), // known not empty since l2cap is true if psm == Some(192)
-                                uuid,
-                                psm_mac_addr,
+                        CarrierInfo {
+                            uuid,
+                            ble: match psm_mac_addr.is_some() && l2cap {
+                                true => BleInfo::L2cap {
+                                    psm: psm.unwrap_or_default(), // known not empty since l2cap is true if psm == Some(192)
+                                    psm_mac_addr,
+                                },
+                                false => BleInfo::NotL2cap { psm },
                             },
-                            false => CarrierInfo::Ble { psm, uuid },
                         },
                     ));
                 }
@@ -322,30 +335,148 @@ mod response {
 }
 
 #[derive(Debug, Clone)]
-pub enum CarrierInfo {
-    BleL2cap {
+pub enum BleInfo {
+    L2cap {
         psm: u32,
-        uuid: uuid::Uuid,
         psm_mac_addr: Option<[u8; 6]>, // TODO: Is this actually optional?
     },
-    Ble {
+    NotL2cap {
         psm: Option<u32>, // TODO: Is this actually optional?
-        uuid: uuid::Uuid,
+    },
+    StaticHandover {
+        private_key: Vec<u8>,
+        device_engagement: DeviceEngagement,
     },
 }
 
-impl CarrierInfo {
-    pub fn uuid(&self) -> uuid::Uuid {
-        match self {
-            CarrierInfo::BleL2cap { uuid, .. } => *uuid,
-            CarrierInfo::Ble { uuid, .. } => *uuid,
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct CarrierInfo {
+    pub ble: BleInfo,
+    pub uuid: uuid::Uuid,
 }
 
 pub struct HandoverResponse {
     pub new_state: HandoverState,
     pub ndef: Vec<u8>,
+}
+
+pub fn get_static_handover_ndef_response() -> Result<HandoverResponse, HandoverError> {
+    // TODO: This cross-reference feels unidiomatic.
+    //       I feel like this logic should maybe not live in crate::definitions?
+    let (private_key, security) = crate::presentation::device::ephemeral_key()
+        .map_err(|e| anyhow::anyhow!("Failed to generate holder keys: {e}"))?;
+
+    let uuid = uuid::Uuid::new_v4();
+
+    tracing::info!("Static handover with UUID: {uuid}");
+
+    let ble_option = BleOptions {
+        peripheral_server_mode: None,
+        central_client_mode: Some(CentralClientMode { uuid }),
+    };
+
+    let device_retrieval_methods = Some(NonEmptyVec::new(DeviceRetrievalMethod::BLE(ble_option)));
+
+    let device_engagement = DeviceEngagement {
+        version: "1.0".into(),
+        security,
+        device_retrieval_methods,
+        protocol_info: None,
+        server_retrieval_methods: None,
+    };
+
+    let device_engagement_record = ndef_rs::NdefRecord::builder()
+        .tnf(ndef_rs::TNF::External)
+        .id(b"mdoc".into())
+        .payload(&RawPayload {
+            record_type: b"iso.org:18013:deviceengagement",
+            payload: &device_engagement
+                .clone()
+                .to_cbor_bytes()
+                .map_err(|e| anyhow::anyhow!("Failed to generate device engagement record: {e}"))?,
+        })
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build device engagement record: {e}"))?;
+
+    use ble::ad_packet::KnownType as BleTypeByte;
+    let (ac_record, cc_record) = {
+        const CARRIER_DATA_REFERENCE_ID: u8 = b'B';
+
+        let ac_record = NdefRecord::builder()
+            .tnf(ndef_rs::TNF::WellKnown)
+            .payload(&RawPayload {
+                record_type: b"ac",
+                payload: &[
+                    0x01, // Carrier Power State: active
+                    0x01, // Length of Carrier Data Reference
+                    CARRIER_DATA_REFERENCE_ID,
+                    0x00, // Auxiliary Data Reference Count
+                ],
+            })
+            .build()
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to create central client mode NDEF record: {e}")
+            })?;
+
+        let cc_record = NdefRecord::builder()
+            .tnf(ndef_rs::TNF::MimeMedia)
+            .payload(&RawPayload {
+                record_type: b"application/vnd.bluetooth.ep.oob",
+                payload: &[
+                    [
+                        0x02, // Length of LE Role Payload
+                        BleTypeByte::LeRole as u8,
+                        0x01, // Central Client Mode BLE role
+                        0x11, // Length of UUID payload
+                        BleTypeByte::CompleteList128BitServiceUuids as u8,
+                    ]
+                    .as_slice(),
+                    uuid.as_bytes(),
+                ]
+                .concat(),
+            })
+            .id(vec![CARRIER_DATA_REFERENCE_ID]) // must match AC reference
+            .build()
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to create central client mode NDEF record: {e}")
+            })?;
+
+        (ac_record, cc_record)
+    };
+
+    let hs_payload = [
+        [0x12].as_slice(), // Version
+        &ndef_rs::NdefMessage::from(ac_record)
+            .to_buffer()
+            .map_err(|e| anyhow::anyhow!("Failed to construct handover select payload: {e}"))?,
+    ]
+    .concat();
+
+    let hs_record = ndef_rs::NdefRecord::builder()
+        .tnf(ndef_rs::TNF::WellKnown)
+        .payload(&RawPayload {
+            record_type: RecordType::HandoverSelect.as_bytes(),
+            payload: &hs_payload,
+        })
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to create handover select NDEF record: {e}"))?;
+
+    let response = ndef_rs::NdefMessage::from([hs_record, device_engagement_record, cc_record])
+        .to_buffer()
+        .map_err(|e| anyhow::anyhow!("Failed to construct NDEF message: {e}"))?;
+
+    let state = HandoverState::Done(CarrierInfo {
+        uuid,
+        ble: BleInfo::StaticHandover {
+            private_key,
+            device_engagement,
+        },
+    });
+
+    Ok(HandoverResponse {
+        new_state: state,
+        ndef: response,
+    })
 }
 
 pub fn get_handover_ndef_response(
@@ -400,11 +531,11 @@ pub fn get_handover_ndef_response(
         "send NDEF (raw): {:?}",
         DisplayBytesAsHex::from(ret.ndef.as_slice())
     );
-    // tracing::debug!(
-    //     "send NDEF: {:?}",
-    //     ndef_parser::NdefRecord::iterator_from_bytes(&ret.ndef)
-    //         .collect::<Result<Vec<_>, _>>()
-    //         .unwrap()
-    // );
+    tracing::debug!(
+        "send NDEF: {:?}",
+        ndef_parser::NdefRecord::iterator_from_bytes(&ret.ndef)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    );
     Ok(ret)
 }
