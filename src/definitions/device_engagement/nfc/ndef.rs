@@ -422,6 +422,8 @@ pub fn get_static_handover_ndef_response(
                 anyhow::anyhow!("Failed to create central client mode NDEF record: {e}")
             })?;
 
+        let mut uuid_bytes = *uuid.as_bytes();
+        uuid_bytes.reverse();
         let ble_oob_payload = [
             [
                 0x02, // Length of LE Role Payload
@@ -431,7 +433,7 @@ pub fn get_static_handover_ndef_response(
                 BleTypeByte::CompleteList128BitServiceUuids as u8,
             ]
             .as_slice(),
-            uuid.as_bytes(),
+            &uuid_bytes,
         ]
         .concat();
 
