@@ -453,7 +453,7 @@ pub fn get_static_handover_ndef_response(
     };
 
     let hs_payload = [
-        [0x12].as_slice(), // Version
+        [0x15].as_slice(), // Version
         &ndef_rs::NdefMessage::from(ac_record)
             .to_buffer()
             .map_err(|e| anyhow::anyhow!("Failed to construct handover select payload: {e}"))?,
