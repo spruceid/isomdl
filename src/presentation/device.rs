@@ -22,7 +22,7 @@ use crate::{
     definitions::{
         device_engagement::{
             nfc::{NegotiatedBleInfo, NegotiatedCarrierInfo},
-            DeviceEngagementType, DeviceRetrievalMethod, Security, ServerRetrievalMethods,
+            DeviceRetrievalMethod, Security, ServerRetrievalMethods,
         },
         device_request::{DeviceRequest, DocRequest, ItemsRequest},
         device_response::{
@@ -187,8 +187,6 @@ pub enum Error {
     ValidationError,
     #[error("Could not serialize to cbor: {0}")]
     CborError(coset::CoseError),
-    #[error("invalid device engagement type: {0}")]
-    InvalidDeviceEngagementType(String),
 }
 
 impl From<x509_cert::der::Error> for Error {
@@ -369,33 +367,20 @@ impl SessionManagerInit {
 
     /// Returns the session manager engaged
     ///
-    /// Consumes the initialized session and returns the device engagement based on the
-    /// device engagement type, i.e. `DeviceEngagementType::NFC` or `DeviceEngagementType::QR`.
+    /// Consumes the initialized session and returns the device engagement.
     ///
-    /// NOTE: unlike `qr_engagement()` method, if this method engage type is QR, it will return the QR code URI within the
-    /// handover type within the `SessionManagerEngaged` type, returning a single value rather than a tuple,
-    /// with a qr code uri as the second item.
+    /// NOTE: unlike `qr_engagement()` method, if the handover method is QR, it will return the QR code URI within the
+    /// `SessionManagerEngaged`, returning a single value rather than a tuple with a qr code uri as the second item.
     ///
     /// ```ignore
-    /// use isomdl::definitions::device_engagement::DeviceEngagementType;
     /// use isomdl::definitions::session::Handover
     ///
-    /// let engaged_session = session.engage(DeviceEngagementType::QR)?;
+    /// let engaged_session = session.engage(Handover::QR)?;
     ///
-    /// if let Handover::QR(qr_code_uri) = engaged_session.handover {
-    ///     println!("QR code URI: {}", qr_code_uri);
-    /// }
+    /// let qr_code_uri = engaged_session.qr_handover()?;
     ///
     /// ```
-    pub fn engage(
-        self,
-        device_engagement_handover_type: DeviceEngagementType,
-    ) -> anyhow::Result<SessionManagerEngaged> {
-        let handover = match device_engagement_handover_type {
-            DeviceEngagementType::NFC => Handover::NFC(Default::default(), None),
-            DeviceEngagementType::QR => Handover::QR,
-        };
-
+    pub fn engage(self, handover: Handover) -> anyhow::Result<SessionManagerEngaged> {
         Ok(SessionManagerEngaged {
             documents: self.documents,
             device_engagement: self.device_engagement,

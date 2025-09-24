@@ -10,6 +10,7 @@ use crate::definitions::{
         util::{ByteVecDisplayAsHex, DisplayBytesAsHex},
         StaticHandoverState,
     },
+    helpers::ByteStr,
     traits::ToCbor,
     DeviceEngagement,
 };
@@ -22,7 +23,7 @@ pub enum HandoverState {
     Init,
     WaitingForServiceSelect,
     WaitingForHandoverRequest,
-    Done(CarrierInfo),
+    Done(Box<NegotiatedCarrierInfo>),
 }
 
 #[derive(Error, Debug)]
@@ -46,7 +47,7 @@ pub enum HandoverError {
     FailedToBuildNdefTypeErased(#[source] anyhow::Error),
     #[error("Unexpected state {state:?} for {location}")]
     UnexpectedState {
-        state: HandoverState,
+        state: Box<HandoverState>,
         location: String,
     },
     #[error("{0}")]
@@ -86,12 +87,7 @@ impl RecordType {
         self.as_str().as_bytes()
     }
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        for record_type in RecordType::iter() {
-            if record_type.as_bytes() == bytes {
-                return Some(record_type);
-            }
-        }
-        None
+        RecordType::iter().find(|&record_type| record_type.as_bytes() == bytes)
     }
     pub fn from_str(s: &str) -> Option<Self> {
         Self::from_bytes(s.as_bytes())
@@ -138,7 +134,7 @@ mod response {
             .iter()
             .find(|r| r.type_bytes == record_type.as_bytes())
             .ok_or_else(|| {
-                HandoverError::FailedToFindNdefRecord(record_type, format!("{:?}", records))
+                HandoverError::FailedToFindNdefRecord(record_type, format!("{records:?}"))
             })
     }
 
@@ -173,15 +169,15 @@ mod response {
             .map_err(HandoverError::FailedToBuildNdef)?;
 
         let response_message = ndef_rs::NdefMessage::from(&[tp_record]);
-        Ok(response_message
+        response_message
             .to_buffer()
-            .map_err(HandoverError::FailedToBuildNdefTypeErased)?)
+            .map_err(HandoverError::FailedToBuildNdefTypeErased)
     }
 
     pub fn tnep_status(
         ndef_from_reader: &[ndef_parser::NdefRecord],
     ) -> Result<Vec<u8>, HandoverError> {
-        let service_select_record = find_record(&ndef_from_reader, RecordType::TnepServiceSelect)?;
+        let service_select_record = find_record(ndef_from_reader, RecordType::TnepServiceSelect)?;
         // TODO: Validate service select message
         _ = service_select_record;
 
@@ -194,14 +190,14 @@ mod response {
             .build()
             .map_err(HandoverError::FailedToBuildNdef)?;
         let response_message = ndef_rs::NdefMessage::from(&[te_record]);
-        Ok(response_message
+        response_message
             .to_buffer()
-            .map_err(HandoverError::FailedToBuildNdefTypeErased)?)
+            .map_err(HandoverError::FailedToBuildNdefTypeErased)
     }
 
     pub fn handover_select(
         ndef_from_reader: &[ndef_parser::NdefRecord],
-    ) -> Result<(Vec<u8>, CarrierInfo), HandoverError> {
+    ) -> Result<(Vec<u8>, NegotiatedCarrierInfo), HandoverError> {
         let handover_request_record = find_record(ndef_from_reader, RecordType::HandoverRequest)?;
         let hr_payload = handover_request_record.payload;
         if hr_payload.len() < 2 {
@@ -217,7 +213,7 @@ mod response {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| HandoverError::InvalidNdef(e, hr_payload[2..].into()))?;
 
-        let mut ret_value: Option<(Vec<u8>, CarrierInfo)> = None;
+        let mut ret_value: Option<(Vec<u8>, NegotiatedCarrierInfo)> = None;
 
         for alternative_carrier in hr_embedded_message {
             if alternative_carrier.tnf != ndef_parser::TNF::Media {
@@ -303,6 +299,7 @@ mod response {
                                 )
                             })?,
                     );
+                    /*
                     ret_value = Some((
                         message,
                         CarrierInfo {
@@ -316,6 +313,8 @@ mod response {
                             },
                         },
                     ));
+                    */
+                    todo!("negotiated handover");
                 }
             }
         }
@@ -347,9 +346,11 @@ pub enum BleInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct CarrierInfo {
+pub struct NegotiatedCarrierInfo {
     pub ble: BleInfo,
     pub uuid: uuid::Uuid,
+    pub hs_message: ByteStr,
+    pub hr_message: Option<ByteStr>,
 }
 
 pub struct HandoverResponse {
@@ -473,13 +474,15 @@ pub fn get_static_handover_ndef_response(
         .to_buffer()
         .map_err(|e| anyhow::anyhow!("Failed to construct NDEF message: {e}"))?;
 
-    let state = HandoverState::Done(CarrierInfo {
+    let state = HandoverState::Done(Box::new(NegotiatedCarrierInfo {
         uuid,
         ble: BleInfo::StaticHandover {
             private_key,
             device_engagement,
         },
-    });
+        hs_message: ByteStr::from(response.clone()),
+        hr_message: None,
+    }));
 
     Ok(HandoverResponse {
         new_state: state,
@@ -525,12 +528,12 @@ pub fn get_handover_ndef_response(
             let ret_value = response::handover_select(&ndef_from_reader)?;
             HandoverResponse {
                 ndef: ret_value.0,
-                new_state: Done(ret_value.1),
+                new_state: Done(ret_value.1.into()),
             }
         }
         Done(ci) => {
             return Err(HandoverError::UnexpectedState {
-                state: Done(ci.clone()),
+                state: Done(ci.clone()).into(),
                 location: "get_handover_ndef_response".to_string(),
             });
         }

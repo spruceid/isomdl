@@ -31,20 +31,6 @@ pub type ProtocolInfo = ciborium::Value;
 pub type Oidc = (u64, String, String);
 pub type WebApi = (u64, String, String);
 
-/// Device Engagement Type
-///
-/// The device engagement type is used to determine how the holder session should engage with a reader.
-///
-/// This type is used internally by the session to handle different engagement methods. It is a non-normative type,
-/// but corresponds to 18013-5 §8.2.2 Device engagement transmission technologies.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub enum DeviceEngagementType {
-    /// NFC.
-    NFC,
-    /// QR code.
-    QR,
-}
-
 /// Represents a device engagement.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(

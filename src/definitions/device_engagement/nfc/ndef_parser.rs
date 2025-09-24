@@ -172,7 +172,7 @@ impl<'a> RawNdefRecord<'a> {
             if bytes.len() < cursor + header_size {
                 failed = true;
                 return Some(Err(ReadRecordError::BufferTooSmall {
-                    cursor: cursor,
+                    cursor,
                     required_space: header_size,
                     buffer_len: bytes.len(),
                 }));
@@ -206,7 +206,7 @@ impl<'a> RawNdefRecord<'a> {
             if cursor + type_len > bytes.len() {
                 failed = true;
                 return Some(Err(ReadRecordError::BufferTooSmall {
-                    cursor: cursor,
+                    cursor,
                     required_space: type_len,
                     buffer_len: bytes.len(),
                 }));
@@ -216,7 +216,7 @@ impl<'a> RawNdefRecord<'a> {
             if cursor + id_len > bytes.len() {
                 failed = true;
                 return Some(Err(ReadRecordError::BufferTooSmall {
-                    cursor: cursor,
+                    cursor,
                     required_space: id_len,
                     buffer_len: bytes.len(),
                 }));
@@ -231,7 +231,7 @@ impl<'a> RawNdefRecord<'a> {
             if cursor + payload_len > bytes.len() {
                 failed = true;
                 return Some(Err(ReadRecordError::BufferTooSmall {
-                    cursor: cursor,
+                    cursor,
                     required_space: payload_len,
                     buffer_len: bytes.len(),
                 }));

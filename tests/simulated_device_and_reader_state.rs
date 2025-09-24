@@ -2,10 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use isomdl::cbor;
-use isomdl::definitions::device_engagement::{
-    CentralClientMode, DeviceEngagementType, DeviceRetrievalMethods,
-};
+use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, Namespaces};
+use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Documents, RequestedItems};
@@ -85,7 +84,7 @@ fn initialise_session(docs: Documents, uuid: Uuid) -> Result<SessionData> {
         .context("failed to initialize device")?;
 
     let engaged_state = session
-        .engage(DeviceEngagementType::QR)
+        .engage(Handover::QR)
         .context("could not generate qr engagement")?;
     Ok(SessionData {
         qr_code_uri: engaged_state

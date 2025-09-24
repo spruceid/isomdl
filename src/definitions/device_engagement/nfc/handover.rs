@@ -2,7 +2,8 @@ use crate::definitions::{
     device_engagement::nfc::{
         apdu::{self},
         ndef::{
-            self, CarrierInfo, HandoverError, NFC_MAX_PAYLOAD_SIZE, NFC_MAX_PAYLOAD_SIZE_BYTES,
+            self, HandoverError, NegotiatedCarrierInfo, NFC_MAX_PAYLOAD_SIZE,
+            NFC_MAX_PAYLOAD_SIZE_BYTES,
         },
         util::{IntoRaw, KnownOrRaw},
     },
@@ -187,7 +188,7 @@ impl ApduHandoverDriver {
     }
 
     // If we have carrier info, return it and reset the state.
-    pub fn get_carrier_info(&mut self) -> Option<CarrierInfo> {
+    pub fn get_carrier_info(&mut self) -> Option<Box<NegotiatedCarrierInfo>> {
         if matches!(&self.state, ndef::HandoverState::Done(_)) {
             let mut state = ndef::HandoverState::Init;
             std::mem::swap(&mut self.state, &mut state);

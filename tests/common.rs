@@ -1,11 +1,10 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, Context, Result};
 use isomdl::cbor;
-use isomdl::definitions::device_engagement::{
-    CentralClientMode, DeviceEngagementType, DeviceRetrievalMethods,
-};
+use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
 use isomdl::definitions::helpers::NonEmptyMap;
+use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
@@ -46,7 +45,7 @@ impl Device {
             .context("failed to initialize device")?;
 
         session
-            .engage(DeviceEngagementType::QR)
+            .engage(Handover::QR)
             .context("could not generate qr engagement")
     }
 

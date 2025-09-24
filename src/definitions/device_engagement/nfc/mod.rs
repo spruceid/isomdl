@@ -9,4 +9,4 @@ mod handover;
 pub use handover::*;
 
 pub use ndef::BleInfo as NegotiatedBleInfo;
-pub use ndef::CarrierInfo as NegotiatedCarrierInfo;
+pub use ndef::NegotiatedCarrierInfo;
