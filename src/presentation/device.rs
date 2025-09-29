@@ -92,23 +92,6 @@ pub struct SessionManagerEngaged {
 }
 
 impl SessionManagerEngaged {
-    /* TODO: Do we keep this?
-    /// Return NFC Handover constructed from the device engagement.
-    ///
-    /// Optionally accepts a `HfcHandoverRequestMessage` to include in the handover,
-    /// from the reader, encoded in a NFC NDEF message format.
-    ///
-    /// NOTE: This method will construct a NFC Handover message that can be used to
-    /// establish a session with the reader, regardless of the inner `Handover` type of
-    /// the engaged session.
-    pub fn nfc_handover(
-        &self,
-        nfc_handover_request: NfcHandoverRequestMessage,
-    ) -> Result<NfcHandover, session::Error> {
-        NfcHandover::create_handover_select(&self.device_engagement, nfc_handover_request)
-    }
-    */
-
     /// Return the QR code URI for the engaged session.
     ///
     /// This URI can be used to establish a session with the reader,
@@ -322,17 +305,6 @@ impl SessionManagerInit {
                 private_key,
                 device_engagement,
             } => (private_key.clone(), *device_engagement.clone()),
-            _ => {
-                let (e_device_key, security) = ephemeral_key()?;
-                let device_engagement = DeviceEngagement {
-                    version: "1.0".to_string(),
-                    security,
-                    device_retrieval_methods: None,
-                    server_retrieval_methods: None,
-                    protocol_info: None,
-                };
-                (e_device_key, device_engagement)
-            }
         };
 
         let device_engagement =

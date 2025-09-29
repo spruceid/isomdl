@@ -1,6 +1,8 @@
 mod apdu;
+#[allow(unused)]
 mod ble;
 mod ndef;
+#[allow(unused)]
 mod ndef_parser;
 mod util;
 use util::{impl_partial_enum, IntoRaw};

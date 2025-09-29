@@ -51,81 +51,12 @@ pub enum ApduError {
     NdefHandoverError(#[from] ndef::HandoverError),
 }
 
+// Stub out the real NdefUpdateDriver until we have negotiated handover finished.
 #[derive(Debug, Clone)]
-struct NdefUpdateDriver {
-    bytes: Vec<u8>,
-}
-
+struct NdefUpdateDriver;
 impl NdefUpdateDriver {
     pub fn new() -> Self {
-        Self { bytes: Vec::new() }
-    }
-    pub fn reset(&mut self) {
-        self.bytes.clear();
-    }
-    pub fn handle(
-        &mut self,
-        offset: usize,
-        bytes: &[u8],
-    ) -> Result<Option<Vec<u8>>, apdu::ResponseCode> {
-        if offset == 1 {
-            // We don't support sending the file length byte-by-byte.
-            // It must be sent all at once.
-            return Err(apdu::ResponseCode::Unspecified);
-        }
-        let (file_length, bytes) = if offset == 0 && bytes.len() >= 2 {
-            (
-                Some(u16::from_be_bytes([bytes[0], bytes[1]]) as usize),
-                &bytes[2..],
-            )
-        } else {
-            (None, bytes)
-        };
-        match (offset, file_length, bytes.len()) {
-            (0, Some(file_length), 0) if file_length != 0 => {
-                // Finalize file - we've written the entire file.
-                if self.bytes.len() == file_length {
-                    let mut ret = Vec::new();
-                    std::mem::swap(&mut ret, &mut self.bytes);
-                    Ok(Some(ret))
-                } else {
-                    self.reset();
-                    Err(apdu::ResponseCode::ConditionsNotSatisfied)
-                }
-            }
-            (0, Some(file_length), _) => {
-                // Reset file
-                self.reset();
-                if file_length == bytes.len() {
-                    // Got entire file
-                    self.bytes.extend_from_slice(bytes);
-                    let mut ret = Vec::new();
-                    std::mem::swap(&mut ret, &mut self.bytes);
-                    Ok(Some(ret))
-                } else {
-                    self.bytes.extend_from_slice(bytes);
-                    Ok(None)
-                }
-            }
-            (0, None, _) => {
-                self.reset();
-                Err(apdu::ResponseCode::Unspecified)
-            }
-            (offset_plus_two, _, _) => {
-                // Subtract two to account for the fact that the "file" (according to the spec)
-                // has the length (u16) prepended to it.
-                let offset = offset_plus_two - 2;
-                if offset != self.bytes.len() {
-                    // We don't support non-contiguous writes
-                    // TODO: Do we have to support this?
-                    self.reset();
-                    Err(apdu::ResponseCode::ConditionsNotSatisfied)
-                } else {
-                    self.bytes.extend_from_slice(bytes);
-                    Ok(None)
-                }
-            }
-        }
+        Self
     }
 }
 
@@ -240,7 +171,7 @@ impl ApduHandoverDriver {
                     }
 
                     let handover_resp = if self.negotiated {
-                        ndef::get_handover_ndef_response(&self.state, &[])
+                        todo!("Implement negotiated handover");
                     } else {
                         ndef::get_static_handover_ndef_response(self.static_ble.clone())
                     };
@@ -301,25 +232,9 @@ impl ApduHandoverDriver {
                 if !self.negotiated {
                     return apdu::ResponseCode::ConditionsNotSatisfied.into();
                 }
-                match self.ndef_recv.handle(offset, data) {
-                    Ok(Some(msg)) => match ndef::get_handover_ndef_response(&self.state, &msg) {
-                        Ok(ndef::HandoverResponse { new_state, ndef }) => {
-                            self.state = new_state;
-                            self.ndef_send = Some(ndef);
-                            apdu::ResponseCode::Ok.into()
-                        }
-                        Err(err) => {
-                            tracing::error!("Handover error: {:?}", err);
-                            self.reset();
-                            apdu::ResponseCode::Unspecified.into()
-                        }
-                    },
-                    Ok(None) => apdu::ResponseCode::Ok.into(),
-                    Err(resp) => {
-                        self.reset();
-                        resp.into()
-                    }
-                }
+                _ = offset;
+                _ = data;
+                todo!("Implement negotiated handover");
             }
         }
     }
