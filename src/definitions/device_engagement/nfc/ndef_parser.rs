@@ -3,7 +3,9 @@
 
 use thiserror::Error;
 
-use crate::definitions::device_engagement::nfc::{ndef::RawPayload, util::DisplayBytesAsHex};
+use crate::definitions::device_engagement::nfc::{
+    ndef_handover::RawPayload, util::DisplayBytesAsHex,
+};
 
 #[derive(Debug, Error)]
 pub enum ReadRecordError {

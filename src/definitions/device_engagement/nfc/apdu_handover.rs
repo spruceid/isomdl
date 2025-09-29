@@ -1,7 +1,7 @@
 use crate::definitions::{
     device_engagement::nfc::{
         apdu::{self},
-        ndef::{
+        ndef_handover::{
             self, HandoverError, NegotiatedCarrierInfo, NFC_MAX_PAYLOAD_SIZE,
             NFC_MAX_PAYLOAD_SIZE_BYTES,
         },
@@ -48,7 +48,7 @@ pub enum ApduError {
     #[error("Invalid APDU command")]
     InvalidApdu,
     #[error("NDEF handover failed: {0}")]
-    NdefHandoverError(#[from] ndef::HandoverError),
+    NdefHandoverError(#[from] ndef_handover::HandoverError),
 }
 
 // Stub out the real NdefUpdateDriver until we have negotiated handover finished.
@@ -85,7 +85,7 @@ fn cc_file(negotiated: bool) -> Vec<u8> {
 
 #[derive(Debug, Clone)]
 pub struct ApduHandoverDriver {
-    state: ndef::HandoverState,
+    state: ndef_handover::HandoverState,
     selected_file: Option<KnownOrRaw<u16, apdu::FileId>>,
     ndef_send: Option<Vec<u8>>,
     ndef_recv: NdefUpdateDriver,
@@ -96,7 +96,7 @@ pub struct ApduHandoverDriver {
 impl ApduHandoverDriver {
     pub fn new(negotiated: bool) -> Result<Self, HandoverError> {
         Ok(Self {
-            state: ndef::HandoverState::Init,
+            state: ndef_handover::HandoverState::Init,
             negotiated,
             selected_file: None,
             ndef_send: None,
@@ -107,7 +107,7 @@ impl ApduHandoverDriver {
 
     /// Perform a full reset of the APDU driver state, except for the static BLE state.
     pub fn reset(&mut self) {
-        self.state = ndef::HandoverState::Init;
+        self.state = ndef_handover::HandoverState::Init;
         self.selected_file = None;
         self.ndef_send = None;
         self.ndef_recv = NdefUpdateDriver::new();
@@ -120,10 +120,10 @@ impl ApduHandoverDriver {
 
     // If we have carrier info, return it and reset the state.
     pub fn get_carrier_info(&mut self) -> Option<Box<NegotiatedCarrierInfo>> {
-        if matches!(&self.state, ndef::HandoverState::Done(_)) {
-            let mut state = ndef::HandoverState::Init;
+        if matches!(&self.state, ndef_handover::HandoverState::Done(_)) {
+            let mut state = ndef_handover::HandoverState::Init;
             std::mem::swap(&mut self.state, &mut state);
-            let ndef::HandoverState::Done(carrier_info) = state else {
+            let ndef_handover::HandoverState::Done(carrier_info) = state else {
                 // Guaranteed unreachable
                 return None;
             };
@@ -173,10 +173,10 @@ impl ApduHandoverDriver {
                     let handover_resp = if self.negotiated {
                         todo!("Implement negotiated handover");
                     } else {
-                        ndef::get_static_handover_ndef_response(self.static_ble.clone())
+                        ndef_handover::get_static_handover_ndef_response(self.static_ble.clone())
                     };
                     match handover_resp {
-                        Ok(ndef::HandoverResponse { new_state, ndef }) => {
+                        Ok(ndef_handover::HandoverResponse { new_state, ndef }) => {
                             let response = match control_info
                                 .get_payload(&u16::to_be_bytes(apdu::FileId::NdefFile.into_raw()))
                             {

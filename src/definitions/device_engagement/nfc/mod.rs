@@ -1,14 +1,14 @@
 mod apdu;
 #[allow(unused)]
 mod ble;
-mod ndef;
+mod ndef_handover;
 #[allow(unused)]
 mod ndef_parser;
 mod util;
 use util::{impl_partial_enum, IntoRaw};
 
-mod handover;
-pub use handover::*;
+mod apdu_handover;
+pub use apdu_handover::*;
 
-pub use ndef::BleInfo as NegotiatedBleInfo;
-pub use ndef::NegotiatedCarrierInfo;
+pub use ndef_handover::BleInfo as NegotiatedBleInfo;
+pub use ndef_handover::NegotiatedCarrierInfo;
