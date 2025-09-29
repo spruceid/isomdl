@@ -34,8 +34,8 @@ pub enum ResponseCode {
 }
 
 impl ResponseCode {
-    pub fn to_bytes(&self) -> [u8; 2] {
-        [(*self as u16 >> 8) as u8, *self as u16 as u8]
+    pub fn to_bytes(self) -> [u8; 2] {
+        [(self as u16 >> 8) as u8, self as u16 as u8]
     }
 }
 
@@ -91,10 +91,10 @@ pub mod select {
     #[rustfmt::skip]
     #[derive(strum_macros::FromRepr, Debug, Clone, Copy)]
     pub enum Occurrence {
-        FirstOrOnlyOccurrence = 0b0000,
-        LastOccurrence        = 0b0001,
-        NextOccurrence        = 0b0010,
-        PrevOccurrence        = 0b0011,
+        FirstOrOnly = 0b0000,
+        Last        = 0b0001,
+        Next        = 0b0010,
+        Prev        = 0b0011,
     }
 
     #[repr(u8)]

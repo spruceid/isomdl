@@ -20,7 +20,7 @@ pub enum ReadRecordError {
 #[derive(Debug, Clone, Copy, strum_macros::FromRepr, PartialEq)]
 #[repr(u8)]
 // NDEF §3.2.6
-pub enum TNF {
+pub enum Tnf {
     Empty = 0x00,
     WellKnown = 0x01,
     Media = 0x02,
@@ -30,7 +30,7 @@ pub enum TNF {
     Unchanged = 0x06,
 }
 
-impl TNF {
+impl Tnf {
     pub fn to_ndef_rs(self) -> ndef_rs::TNF {
         ndef_rs::TNF::from_repr(self as u8).unwrap_or(ndef_rs::TNF::Unknown) // This cannot fail.
     }
@@ -57,7 +57,7 @@ pub struct NdefRecord<'a> {
     pub first_record: bool,
     pub last_record: bool,
     pub first_or_middle_chunk: bool,
-    pub tnf: TNF,
+    pub tnf: Tnf,
     pub type_bytes: &'a [u8],
     pub id: Option<&'a [u8]>,
     pub payload: &'a [u8],
@@ -70,7 +70,7 @@ impl<'a> std::fmt::Debug for NdefRecord<'a> {
             .field("last_record", &self.last_record)
             .field("first_or_middle_chunk", &self.first_or_middle_chunk)
             .field("tnf", &self.tnf);
-        match str::from_utf8(&self.type_bytes) {
+        match str::from_utf8(self.type_bytes) {
             Ok(type_str) => ret.field("type_bytes", &type_str),
             Err(_) => ret.field("type_bytes", &self.type_bytes),
         };
@@ -87,7 +87,7 @@ impl<'a> TryFrom<RawNdefRecord<'a>> for NdefRecord<'a> {
     type Error = ReadRecordError;
 
     fn try_from(raw_record: RawNdefRecord<'a>) -> Result<Self, Self::Error> {
-        let Some(tnf) = TNF::from_repr(raw_record.tnf) else {
+        let Some(tnf) = Tnf::from_repr(raw_record.tnf) else {
             return Err(ReadRecordError::UnknownOrInvalidTnf(raw_record.tnf));
         };
         Ok(Self {
@@ -139,6 +139,7 @@ impl<'a> NdefRecord<'a> {
     }
 }
 
+#[allow(clippy::identity_op)]
 impl<'a> RawNdefRecord<'a> {
     pub fn iterator_from_bytes(
         bytes: &[u8],

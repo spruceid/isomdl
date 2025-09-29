@@ -15,7 +15,7 @@ use crate::definitions::{
     DeviceEngagement,
 };
 
-pub(super) const NFC_MAX_PAYLOAD_SIZE: usize = 255 - 2; // 255 minus 2 bytes for the size
+pub(super) const NFC_MAX_PAYLOAD_SIZE: usize = 255 - 2; // 255 minus 2 bytes for the u16 size at the beginning of the payload
 pub(super) const NFC_MAX_PAYLOAD_SIZE_BYTES: [u8; 2] = (NFC_MAX_PAYLOAD_SIZE as u16).to_be_bytes();
 
 #[derive(Debug, Clone)]
@@ -216,7 +216,7 @@ mod response {
         let mut ret_value: Option<(Vec<u8>, NegotiatedCarrierInfo)> = None;
 
         for alternative_carrier in hr_embedded_message {
-            if alternative_carrier.tnf != ndef_parser::TNF::Media {
+            if alternative_carrier.tnf != ndef_parser::Tnf::Media {
                 continue;
             }
             if alternative_carrier.type_bytes != b"application/vnd.bluetooth.le.oob" {
@@ -341,7 +341,7 @@ pub enum BleInfo {
     },
     StaticHandover {
         private_key: Vec<u8>,
-        device_engagement: DeviceEngagement,
+        device_engagement: Box<DeviceEngagement>,
     },
 }
 
@@ -395,7 +395,6 @@ pub fn get_static_handover_ndef_response(
 
     use ble::ad_packet::KnownType as BleTypeByte;
     let (ac_record, cc_record) = {
-        // const CARRIER_DATA_REFERENCE_ID: u8 = b'B';
         const OOB_RECORD_ID: &[u8] = b"0";
 
         let ac_record = NdefRecord::builder()
@@ -478,7 +477,7 @@ pub fn get_static_handover_ndef_response(
         uuid,
         ble: BleInfo::StaticHandover {
             private_key,
-            device_engagement,
+            device_engagement: Box::new(device_engagement),
         },
         hs_message: ByteStr::from(response.clone()),
         hr_message: None,

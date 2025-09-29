@@ -321,7 +321,7 @@ impl SessionManagerInit {
             NegotiatedBleInfo::StaticHandover {
                 private_key,
                 device_engagement,
-            } => (private_key.clone(), device_engagement.clone()),
+            } => (private_key.clone(), *device_engagement.clone()),
             _ => {
                 let (e_device_key, security) = ephemeral_key()?;
                 let device_engagement = DeviceEngagement {

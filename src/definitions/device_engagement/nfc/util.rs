@@ -57,7 +57,7 @@ pub struct DisplayBytesAsHex<'a>(&'a [u8]);
 impl<'a> std::fmt::Debug for DisplayBytesAsHex<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for byte in self.0 {
-            write!(f, "{:02X}", byte)?;
+            write!(f, "{byte:02X}")?;
         }
         Ok(())
     }
@@ -65,7 +65,7 @@ impl<'a> std::fmt::Debug for DisplayBytesAsHex<'a> {
 
 impl<'a> Display for DisplayBytesAsHex<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -85,7 +85,7 @@ impl std::fmt::Debug for ByteVecDisplayAsHex {
 
 impl Display for ByteVecDisplayAsHex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
