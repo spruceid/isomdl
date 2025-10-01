@@ -64,5 +64,6 @@ hex = "0.4.3"
 p256 = "0.13.0"
 rstest = "0.23.0"
 serde_json = "*"
+serde_path_to_error = "0.1.20"
 test-log = { version = "0.2.16", features = ["trace"] }
 x509-cert = { version = "0.2.4", features = ["pem", "builder", "hazmat"] }
