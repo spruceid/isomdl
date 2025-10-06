@@ -1,10 +1,9 @@
 use ciborium::de::Error;
-use coset::{
+pub use coset::{
     iana::{self, EnumI64},
     AsCborValue, TaggedCborSerializable,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
 
 use crate::definitions::helpers::{ByteStr, Tag24};
 use crate::definitions::CoseKey;
@@ -13,14 +12,42 @@ use crate::definitions::CoseKey;
 #[serde(rename_all = "camelCase")]
 pub struct MobileIdCapabilityDescriptor {
     // spec: uint
-    version: u64,
+    pub version: u64,
 
     // Accept both a keyed-map form and a flat array form for the app descriptor.
     #[serde(rename = "mobileIdApplicationDescriptor")]
-    mobile_id_application_descriptor: MobileIdApplicationDescriptor,
+    pub mobile_id_application_descriptor: MobileIdApplicationDescriptor,
 
     #[serde(default)]
-    secure_area_attestation_objects: Vec<SecureAreaAttestationObject>,
+    pub secure_area_attestation_objects: Vec<SecureAreaAttestationObject>,
+}
+
+impl TaggedCborSerializable for MobileIdCapabilityDescriptor {
+    const TAG: u64 = 24;
+}
+
+impl AsCborValue for MobileIdCapabilityDescriptor {
+    fn from_cbor_value(value: ciborium::Value) -> coset::Result<Self> {
+        let bytes = match value {
+            ciborium::Value::Bytes(b) => b,
+            _ => {
+                return Err(coset::CoseError::DecodeFailed(Error::Semantic(
+                    None,
+                    "Invalid CBOR value".into(),
+                )))
+            }
+        };
+
+        ciborium::from_reader(&bytes[..])
+            .map_err(|e| coset::CoseError::DecodeFailed(Error::Semantic(None, e.to_string())))
+    }
+
+    fn to_cbor_value(self) -> coset::Result<ciborium::Value> {
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&self, &mut bytes)?;
+
+        Ok(ciborium::Value::Bytes(bytes))
+    }
 }
 
 impl TaggedCborSerializable for MobileIdApplicationDescriptor {
@@ -523,7 +550,7 @@ impl Serialize for SaAttestationObjectValue {
             #[serde(rename = "0")]
             sa_index: u64,
             #[serde(rename = "1", skip_serializing_if = "Option::is_none")]
-            sa_type: &'a Option<i64>,
+            sa_type: &'a Option<i64>, // TODO: add a type alias for this to indicate the known types from table 8 (ISO 23220-3)
             #[serde(rename = "2", skip_serializing_if = "Vec::is_empty")]
             sa_supported_user_auth: &'a Vec<i64>,
             #[serde(
@@ -539,7 +566,7 @@ impl Serialize for SaAttestationObjectValue {
             )]
             sa_crypto_key_definition: &'a SaCryptoKeyDefinitions,
             #[serde(rename = "5")]
-            sa_interface: i64,
+            sa_interface: i64, // TODO: Add enum values based on table 10 (ISO 23220-3)
             #[serde(rename = "6", skip_serializing_if = "Option::is_none")]
             sa_attestation_bytes: &'a Option<SaAttestationKeyBytes>,
             #[serde(rename = "7", skip_serializing_if = "Option::is_none")]
@@ -731,7 +758,7 @@ mod tests {
 
         match mcd_result {
             Ok(mcd) => {
-                println!("Deserialized MCD: {mcd:?}");
+                println!("Deserialized MCD: {mcd:#?}");
             }
             Err(err) => {
                 println!("Failed to deserialize MCD: {err}");
