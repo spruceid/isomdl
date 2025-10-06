@@ -85,23 +85,32 @@ fn cc_file(negotiated: bool) -> Vec<u8> {
 
 #[derive(Debug, Clone)]
 pub struct ApduHandoverDriver {
+    /// Do we respond to NDEF reads even if we haven't selected the MDOC application yet?
+    strict: bool,
     state: ndef_handover::HandoverState,
     selected_file: Option<KnownOrRaw<u16, apdu::FileId>>,
     ndef_send: Option<Vec<u8>>,
     ndef_recv: NdefUpdateDriver,
     negotiated: bool,
     static_ble: StaticHandoverState,
+    listen_for_ndef: bool,
 }
 
 impl ApduHandoverDriver {
-    pub fn new(negotiated: bool) -> Result<Self, HandoverError> {
+    /// Create a new APDU handover driver.
+    ///
+    /// * `negotiated`: true -> use negotiated handover (not implemented yet), false -> use static handover.
+    /// * `strict`: require selecting the MDOC AID before responding to NDEF reads. If strict is false, we will always return NDEF messages.
+    pub fn new(negotiated: bool, strict: bool) -> Result<Self, HandoverError> {
         Ok(Self {
+            strict,
             state: ndef_handover::HandoverState::Init,
             negotiated,
             selected_file: None,
             ndef_send: None,
             ndef_recv: NdefUpdateDriver::new(),
             static_ble: StaticHandoverState::new()?,
+            listen_for_ndef: false,
         })
     }
 
@@ -111,6 +120,7 @@ impl ApduHandoverDriver {
         self.selected_file = None;
         self.ndef_send = None;
         self.ndef_recv = NdefUpdateDriver::new();
+        self.listen_for_ndef = false;
     }
 
     pub fn regenerate_static_ble_keys(&mut self) -> Result<(), HandoverError> {
@@ -206,12 +216,17 @@ impl ApduHandoverDriver {
                 const APDU_AID_NDEF_APPLICATION: &[u8] =
                     &[0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
                 match aid {
-                    APDU_AID_MDOC | APDU_AID_NDEF_APPLICATION => {
-                        match control_info.get_payload(aid) {
-                            Ok(response) => response,
-                            Err(err) => err,
+                    APDU_AID_MDOC => match control_info.get_payload(aid) {
+                        Ok(response) => {
+                            self.listen_for_ndef = true;
+                            response
                         }
-                    }
+                        Err(err) => err,
+                    },
+                    APDU_AID_NDEF_APPLICATION => match control_info.get_payload(aid) {
+                        Ok(response) => response,
+                        Err(err) => err,
+                    },
                     _ => apdu::ResponseCode::FileOrApplicationNotFound.into(),
                 }
             }
@@ -240,6 +255,11 @@ impl ApduHandoverDriver {
     }
 
     pub fn process_apdu(&mut self, command: &[u8]) -> Vec<u8> {
-        self.process_apdu_inner(command).into()
+        let res = self.process_apdu_inner(command);
+        if !self.strict || self.listen_for_ndef {
+            res.into()
+        } else {
+            apdu::Response::from(apdu::ResponseCode::ConditionsNotSatisfied).into()
+        }
     }
 }
