@@ -3,8 +3,7 @@ use crate::definitions::device_key::cose_key::Error as CoseKeyError;
 use crate::definitions::helpers::tag24::Error as Tag24Error;
 
 /// Errors that can occur when deserialising a DeviceEngagement.
-#[derive(Debug, thiserror::Error)]
-#[repr(u8)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error("Expected isomdl major version 1")]
     UnsupportedVersion,
@@ -30,8 +29,6 @@ pub enum Error {
     InvalidNfcCommandDataLengthError,
     #[error("NFC Response Data Length must be between 256 and 65536")]
     InvalidNfcResponseDataLengthError,
-    // #[error(transparent)]
-    // Presentation(presentation::device::Error),
 }
 
 impl From<CoseKeyError> for Error {
