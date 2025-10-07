@@ -225,7 +225,7 @@ pub mod app_data_transmission_interface {
 }
 
 /// The CBOR bytes-encoded MobileIdAttestationKey (bstr .cbor COSE_Key)
-pub type AppAttestationKeyBytes = Tag24<CoseKey>;
+pub type AppAttestationKeyBytes = Tag24<ByteStr>; // Tag24<CoseKey>;
 
 /* ------------------------------
 Certifications (bstr // tstr)
@@ -740,8 +740,10 @@ mod tests {
 
     const MCD_BASE64_DATA: &str = r#"hFkCAKIBJhghWQH4MIIB9DCCAZmgAwIBAgIEY79y1TAKBggqhkjOPQQDAjB3MQswCQYDVQQGEwJLUjEOMAwGA1UECAwFU3V3b24xHDAaBgNVBAoME1NhbXN1bmcgRWxlY3Ryb25pY3MxFzAVBgNVBAsMDlNhbXN1bmcgV2FsbGV0MSEwHwYDVQQDDBhTYW1zdW5nIG1Eb2MgUm9vdCBDQSBTVEcwHhcNMjMwMTEyMDIzOTE3WhcNMzMwMTEyMDIzOTE3WjCBizELMAkGA1UEBhMCS1IxDjAMBgNVBAgMBVN1d29uMRwwGgYDVQQKDBNTYW1zdW5nIEVsZWN0cm9uaWNzMRcwFQYDVQQLDA5TYW1zdW5nIFdhbGxldDE1MDMGA1UEAwwsTW9iaWxlIElEIEF0dGVzdGF0aW9uIFNpZ25lciBDZXJ0aWZpY2F0ZSBTVEcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAT93Dyb9MALRD87qhHyKpdsNKFek1ubmIJV2yzkRhIhFYfs/9pbob08jFy+i8Zmgp1vNGmPgcXhB6szOg81OfTHMAoGCCqGSM49BAMCA0kAMEYCIQCrJbXOp9zsRx9zTB0wfVMo0jWCT+Ug3ToybyBmDWrh/wIhANdeqqjFGn/L5WUW/TLwFdAjzEz8XXAsDX5kWJEzPZ8poFjk2BhY4KNndmVyc2lvbgF4HHNlY3VyZUFyZWFBdHRlc3RhdGlvbk9iamVjdHOBompzYUVuY29kaW5nAHgYc2FBdHRlc3RhdGlvbk9iamVjdFZhbHVlpGEwG2UEE2hARmlIYTEAYTUBYTbYGFhLpAECIAEhWCAMe68WFdJj1CXTljt6+PX/cJED6lzL9HvkfGRkC8fMkiJYIDkTS/P9ZtuStmOog+nqo6zX1FIoUNwq54zv2aIl1FNpeB1tb2JpbGVJZEFwcGxpY2F0aW9uRGVzY3JpcHRvcqNhMIEBYTGCAAFhMoEBWECY8wux+W+I24lIZY1gQPUrxScMvb1zGu5e2Tni2k80x8AhTeznZ/lt2BchW2MJ99Z802m87elMR+OTMZ1NqFri"#;
 
+    // const MCD_BASE64_DATA: &str = "o2d2ZXJzaW9uAXgdbW9iaWxlSWRBcHBsaWNhdGlvbkRlc2NyaXB0b3KkYTCBAGExgQBhMoEBYTSAeBxzZWN1cmVBcmVhQXR0ZXN0YXRpb25PYmplY3RzgaJqc2FFbmNvZGluZwB4GHNhQXR0ZXN0YXRpb25PYmplY3RWYWx1ZaRhMABhMQBhNQFhNtgYWEukAQIgASFYIK/HAC2uTcbpASGuNdXu+JczhKOrm105LnTmswsJEMAgIlggEyyCxW11vbzsPaipTgj2kg4DdxJTRP1buHqVfs93ddY=";
+
     #[test]
-    fn test_mcd_serialization_with_paths() {
+    fn test_mcd_deserialization_with_paths() {
         let mcd_bytes = base64::decode_config(MCD_BASE64_DATA, base64::STANDARD)
             .expect("failed to parse mcd base64 payload");
 
@@ -816,12 +818,12 @@ mod tests {
 
         let mcd_bytes = base64::decode_config(MCD_BASE64_DATA, base64::STANDARD)
             .expect("failed to parse mcd base64 payload");
-        let inner_mcd_bytes = extract_mcd_payload_bytes(&mcd_bytes)
-            .expect("failed to extract MCD payload from COSE structure");
+        // let inner_mcd_bytes = extract_mcd_payload_bytes(&mcd_bytes)
+        //     .expect("failed to extract MCD payload from COSE structure");
 
         // Convert CBOR to JSON for better serde_path_to_error compatibility
         let cbor_value: ciborium::Value =
-            ciborium::from_reader(&inner_mcd_bytes[..]).expect("failed to parse CBOR");
+            ciborium::from_reader(&mcd_bytes[..]).expect("failed to parse CBOR");
         let json_string = ciborium_to_json_string(&cbor_value);
 
         // Create a deserializer that serde_path_to_error can track
@@ -929,4 +931,91 @@ mod tests {
 
         serde_json::to_string_pretty(&cbor_to_json(cbor_value)).unwrap_or_else(|_| "{}".to_string())
     }
+
+    // #[test]
+    // fn test_serialization_cbor_inspection() {
+    //     use hex::FromHex;
+
+    //     const EC_P256: &str = include_str!("../../test/definitions/cose_key/ec_p256.cbor");
+
+    //     println!("Testing serialization and CBOR byte inspection");
+
+    //     let key_bytes = <Vec<u8>>::from_hex(EC_P256).expect("unable to convert cbor hex to bytes");
+    //     let cose_key = ByteStr(key_bytes);
+    //     // let cose_key: CoseKey =
+    //     //     crate::cbor::from_slice(&key_bytes).expect("Failed to parse COSE key from CBOR");
+
+    //     // Create test data structure
+    //     let mcd = MobileIdCapabilityDescriptor {
+    //         version: 1,
+    //         mobile_id_application_descriptor: MobileIdApplicationDescriptor {
+    //             app_supported_dev_features: vec![
+    //                 app_supported_dev_feature::WEBVIEW_FEATURE,
+    //                 app_supported_dev_feature::SIMPLE_VIEW_FEATURE,
+    //             ],
+    //             app_engagement_interface: vec![
+    //                 app_engagement_interface::QR,
+    //                 app_engagement_interface::NFC,
+    //             ],
+    //             app_data_transmission_interface: vec![
+    //                 app_data_transmission_interface::NFC,
+    //                 app_data_transmission_interface::BLE,
+    //             ],
+    //             app_attestation_key_bytes: Tag24::new(cose_key.clone()).ok(),
+    //             certification: vec![
+    //                 // CertificationItem::Text("test-cert-1".to_string()),
+    //                 // CertificationItem::Bytes(ByteStr::from(vec![0xde, 0xad, 0xbe, 0xef])),
+    //             ],
+    //         },
+    //         secure_area_attestation_objects: vec![SecureAreaAttestationObject {
+    //             sa_encoding: sa_encoding::DEFAULT,
+    //             sa_attestation_object_value: SaAttestationObjectValue {
+    //                 sa_index: 42,
+    //                 sa_type: Some(1),
+    //                 sa_supported_user_auth: vec![0, 1, 2],
+    //                 sa_crypto_suites: vec![iana::Algorithm::ES256, iana::Algorithm::ES384],
+    //                 sa_crypto_key_definition: vec![iana::KeyType::EC2],
+    //                 sa_interface: 1,
+    //                 sa_attestation_bytes: Tag24::new(cose_key).ok(),
+    //                 sa_attestation_statement: Some(ByteStr::from(vec![0xca, 0xfe, 0xba, 0xbe])),
+    //                 sa_attestation_format: Some(sa_attestation_format::JWT),
+    //                 certification: vec![CertificationItem::Text("sa-test-cert".to_string())],
+    //             },
+    //         }],
+    //     };
+
+    //     println!("MCD: {mcd:?}");
+
+    //     // Serialize to CBOR bytes
+    //     let mut cbor_bytes = Vec::new();
+    //     ciborium::into_writer(&mcd, &mut cbor_bytes).expect("Failed to serialize to CBOR");
+
+    //     println!("Serialized CBOR payload size: {} bytes", cbor_bytes.len());
+    //     println!("Raw CBOR bytes (hex): {}", hex::encode(&cbor_bytes));
+
+    //     // Parse back the CBOR to inspect structure
+    //     let cbor_value: ciborium::Value =
+    //         ciborium::from_reader(&cbor_bytes[..]).expect("Failed to parse CBOR back");
+    //     println!("CBOR structure: {:#?}", cbor_value);
+
+    //     // Verify round-trip serialization/deserialization
+    //     let deserialized_mcd: MobileIdCapabilityDescriptor =
+    //         ciborium::from_reader(&cbor_bytes[..]).expect("Failed to deserialize back");
+
+    //     assert_eq!(mcd.version, deserialized_mcd.version);
+    //     assert_eq!(
+    //         mcd.secure_area_attestation_objects.len(),
+    //         deserialized_mcd.secure_area_attestation_objects.len()
+    //     );
+
+    //     println!("✅ Round-trip serialization successful!");
+
+    //     // Inspect specific CBOR map keys
+    //     if let ciborium::Value::Map(ref map) = cbor_value {
+    //         println!("Top-level CBOR map keys:");
+    //         for (key, _value) in map {
+    //             println!("  Key: {:?}", key);
+    //         }
+    //     }
+    // }
 }
