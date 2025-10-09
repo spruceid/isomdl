@@ -63,6 +63,6 @@ sha1 = "0.10.6"
 hex = "0.4.3"
 p256 = "0.13.0"
 rstest = "0.23.0"
-serde_json = "*"
+serde_json = "1.0.145"
 test-log = { version = "0.2.16", features = ["trace"] }
 x509-cert = { version = "0.2.4", features = ["pem", "builder", "hazmat"] }
