@@ -225,7 +225,7 @@ pub mod app_data_transmission_interface {
 }
 
 /// The CBOR bytes-encoded MobileIdAttestationKey (bstr .cbor COSE_Key)
-pub type AppAttestationKeyBytes = Tag24<ByteStr>; // Tag24<CoseKey>;
+pub type AppAttestationKeyBytes = ByteStr; // Tag24<CoseKey>;
 
 /* ------------------------------
 Certifications (bstr // tstr)
