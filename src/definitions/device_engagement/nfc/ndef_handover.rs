@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use ndef_rs::{payload::RecordPayload, NdefRecord};
+use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use thiserror::Error;
 
@@ -110,7 +111,7 @@ impl<'r, 'p> RecordPayload for RawPayload<'r, 'p> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BleInfo {
     StaticHandover {
         private_key: Vec<u8>,
@@ -118,7 +119,7 @@ pub enum BleInfo {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NegotiatedCarrierInfo {
     pub ble: BleInfo,
     pub uuid: uuid::Uuid,
