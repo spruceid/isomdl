@@ -26,6 +26,7 @@ use uuid::Uuid;
 use super::authentication::ResponseAuthenticationOutcome;
 use super::reader_utils::validate_response;
 
+use crate::definitions::device_engagement::{CentralClientMode, PeripheralServerMode};
 use crate::definitions::device_request::{DeviceRequestInfoBytes, ItemsRequestBytesAll};
 use crate::{
     cbor::{self, CborError},
@@ -253,6 +254,7 @@ impl SessionManager {
         Ok((session_manager, session_request, ble_ident))
     }
 
+    #[deprecated(since = "0.2.1", note = "use ble_central_client_options instead")]
     pub fn first_central_client_uuid(&self) -> Option<&Uuid> {
         self.session_transcript
             .0
@@ -269,6 +271,40 @@ impl SessionManager {
                         _ => None,
                     })
                     .next()
+            })
+    }
+
+    /// Retrieve the connection details for BLE central client mode offered by the mdoc, if any.
+    ///
+    /// The protocol allows for more than one central client mode to be offered, so a consumer
+    /// of this API can use the first one that works.
+    pub fn ble_central_client_options(&self) -> impl Iterator<Item = &CentralClientMode> {
+        self.session_transcript
+            .0
+            .as_ref()
+            .device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.central_client_mode.as_ref(),
+                _ => None,
+            })
+    }
+
+    /// Retrieve the connection details for BLE peripheral server mode offered by the mdoc, if any.
+    ///
+    /// The protocol allows for more than one peripheral server mode to be offered, so a consumer
+    /// of this API can use the first one that works.
+    pub fn ble_peripheral_server_options(&self) -> impl Iterator<Item = &PeripheralServerMode> {
+        self.session_transcript
+            .0
+            .as_ref()
+            .device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.peripheral_server_mode.as_ref(),
+                _ => None,
             })
     }
 
