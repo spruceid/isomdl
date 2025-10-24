@@ -2,6 +2,10 @@
 name = "isomdl-macros"
 version = "0.1.0"
 edition = "2021"
+description = "Proc macros for the isomdl crate"
+homepage = "https://github.com/spruceid/isomdl"
+repository = "https://github.com/spruceid/isomdl"
+documentation = "https://docs.rs/isomdl"
 license = "Apache-2.0 OR MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
