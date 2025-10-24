@@ -82,7 +82,9 @@ impl AsCborValue for MobileIdApplicationDescriptor {
 MobileIdApplicationDescriptor
 ------------------------------ */
 
-// Public type you use everywhere
+/// Mobile ID Capaibility Descriptor
+///
+/// For more details see ISO-23220-3
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MobileIdApplicationDescriptor {
     pub app_supported_dev_features: AppSupportedDevFeatures,
@@ -123,7 +125,6 @@ impl<'de> Deserialize<'de> for MobileIdApplicationDescriptor {
     where
         D: serde::Deserializer<'de>,
     {
-        println!("Deserializing MobileIdApplicationDescriptor");
         match MobileIdApplicationDescriptorDe::deserialize(deserializer) {
             Ok(de_result) => match de_result {
                 MobileIdApplicationDescriptorDe::MapForm {
@@ -132,40 +133,28 @@ impl<'de> Deserialize<'de> for MobileIdApplicationDescriptor {
                     app_data_transmission_interface,
                     app_attestation_key_bytes,
                     certification,
-                } => {
-                    println!("MobileIdApplicationDescriptor MapForm deserialized successfully");
-                    Ok(Self {
-                        app_supported_dev_features,
-                        app_engagement_interface,
-                        app_data_transmission_interface,
-                        app_attestation_key_bytes,
-                        certification,
-                    })
-                }
+                } => Ok(Self {
+                    app_supported_dev_features,
+                    app_engagement_interface,
+                    app_data_transmission_interface,
+                    app_attestation_key_bytes,
+                    certification,
+                }),
                 MobileIdApplicationDescriptorDe::ArrayForm(
                     app_supported_dev_features,
                     app_engagement_interface,
                     app_data_transmission_interface,
                     app_attestation_key_bytes,
                     certification,
-                ) => {
-                    println!("MobileIdApplicationDescriptor ArrayForm deserialized successfully");
-                    Ok(Self {
-                        app_supported_dev_features,
-                        app_engagement_interface,
-                        app_data_transmission_interface,
-                        app_attestation_key_bytes,
-                        certification,
-                    })
-                }
+                ) => Ok(Self {
+                    app_supported_dev_features,
+                    app_engagement_interface,
+                    app_data_transmission_interface,
+                    app_attestation_key_bytes,
+                    certification,
+                }),
             },
-            Err(err) => {
-                println!(
-                    "❌ Failed to deserialize MobileIdApplicationDescriptor: {}",
-                    err
-                );
-                Err(err)
-            }
+            Err(err) => Err(err),
         }
     }
 }
@@ -244,7 +233,9 @@ pub enum CertificationItem {
 SecureAreaAttestationObject
 ------------------------------ */
 
-// Public type you use
+/// Secure Area Attestation Object
+///
+/// Defined in ISO-23220-3
 #[derive(Debug, Clone)]
 pub struct SecureAreaAttestationObject {
     pub sa_encoding: SaEncoding,
@@ -254,7 +245,6 @@ pub struct SecureAreaAttestationObject {
 // Accept either map {"saEncoding":..,"saAttestationObjectValue":..}
 // or array [saEncoding, saAttestationObjectValue]
 // Custom deserializer handles both map and array forms without untagged enum issues
-
 impl<'de> Deserialize<'de> for SecureAreaAttestationObject {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -262,8 +252,6 @@ impl<'de> Deserialize<'de> for SecureAreaAttestationObject {
     {
         use serde::de::{Error, MapAccess, SeqAccess, Visitor};
         use std::fmt;
-
-        println!("Deserializing SecureAreaAttestationObject with custom deserializer");
 
         struct SecureAreaAttestationObjectVisitor;
 
@@ -278,8 +266,6 @@ impl<'de> Deserialize<'de> for SecureAreaAttestationObject {
             where
                 A: MapAccess<'de>,
             {
-                println!("Visiting SecureAreaAttestationObject as map");
-
                 let mut sa_encoding: Option<SaEncoding> = None;
                 let mut sa_attestation_object_value: Option<SaAttestationObjectValue> = None;
 
@@ -302,8 +288,6 @@ impl<'de> Deserialize<'de> for SecureAreaAttestationObject {
                 let sa_attestation_object_value = sa_attestation_object_value
                     .ok_or_else(|| Error::missing_field("saAttestationObjectValue"))?;
 
-                println!("SecureAreaAttestationObject map deserialized successfully");
-
                 Ok(SecureAreaAttestationObject {
                     sa_encoding,
                     sa_attestation_object_value,
@@ -314,16 +298,12 @@ impl<'de> Deserialize<'de> for SecureAreaAttestationObject {
             where
                 A: SeqAccess<'de>,
             {
-                println!("Visiting SecureAreaAttestationObject as sequence");
-
                 let sa_encoding = seq
                     .next_element()?
                     .ok_or_else(|| Error::invalid_length(0, &"at least 1 element"))?;
                 let sa_attestation_object_value = seq
                     .next_element()?
                     .ok_or_else(|| Error::invalid_length(1, &"at least 2 elements"))?;
-
-                println!("SecureAreaAttestationObject sequence deserialized successfully");
 
                 Ok(SecureAreaAttestationObject {
                     sa_encoding,
@@ -368,7 +348,7 @@ pub mod sa_encoding {
 SaAttestationObjectValue
 ------------------------------ */
 
-// Public type
+/// Secure Area Attestation Object
 #[derive(Debug, Clone)]
 pub struct SaAttestationObjectValue {
     pub sa_index: u64,                                            // 0 (required)
@@ -383,8 +363,6 @@ pub struct SaAttestationObjectValue {
     pub certification: Certifications,                            // 9
 }
 
-// Custom deserializer handles both map and array forms without untagged enum issues
-
 impl<'de> Deserialize<'de> for SaAttestationObjectValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -392,8 +370,6 @@ impl<'de> Deserialize<'de> for SaAttestationObjectValue {
     {
         use serde::de::{Error, MapAccess, SeqAccess, Visitor};
         use std::fmt;
-
-        println!("Deserializing SaAttestationObjectValue with custom deserializer");
 
         struct SaAttestationObjectValueVisitor;
 
@@ -408,8 +384,6 @@ impl<'de> Deserialize<'de> for SaAttestationObjectValue {
             where
                 A: MapAccess<'de>,
             {
-                println!("Visiting SaAttestationObjectValue as map");
-
                 let mut sa_index: Option<u64> = None;
                 let mut sa_type: Option<i64> = None;
                 let mut sa_supported_user_auth: Vec<i64> = Vec::new();
@@ -449,11 +423,9 @@ impl<'de> Deserialize<'de> for SaAttestationObjectValue {
                             // Handle Tag24<ByteStr> for sa_attestation_bytes
                             match map.next_value::<SaAttestationKeyBytes>() {
                                 Ok(value) => {
-                                    println!("Successfully parsed sa_attestation_bytes (Tag24)");
                                     sa_attestation_bytes = Some(value);
                                 }
-                                Err(e) => {
-                                    println!("❌ Failed to parse sa_attestation_bytes: {}", e);
+                                Err(_) => {
                                     sa_attestation_bytes = None;
                                 }
                             }
@@ -501,8 +473,6 @@ impl<'de> Deserialize<'de> for SaAttestationObjectValue {
             where
                 A: SeqAccess<'de>,
             {
-                println!("Visiting SaAttestationObjectValue as sequence");
-
                 let sa_index = seq
                     .next_element()?
                     .ok_or_else(|| Error::invalid_length(0, &"at least 1 element"))?;
@@ -517,8 +487,6 @@ impl<'de> Deserialize<'de> for SaAttestationObjectValue {
                 let sa_attestation_statement = seq.next_element()?.unwrap_or(None);
                 let sa_attestation_format = seq.next_element()?.unwrap_or(None);
                 let certification = seq.next_element()?.unwrap_or_default();
-
-                println!("SaAttestationObjectValue sequence deserialized - sa_index: {}, sa_interface: {}", sa_index, sa_interface);
 
                 Ok(SaAttestationObjectValue {
                     sa_index,
@@ -625,50 +593,6 @@ where
     seq.end()
 }
 
-fn deserialize_cryptosuites<'de, D>(deserializer: D) -> Result<SecureAreaCryptoSuites, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::{SeqAccess, Visitor};
-    use std::fmt;
-
-    println!("Deserializing crypto suites");
-    struct CryptoSuitesVisitor;
-
-    impl<'de> Visitor<'de> for CryptoSuitesVisitor {
-        type Value = SecureAreaCryptoSuites;
-
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("a sequence of COSE algorithm identifiers (int) or unit for default")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            println!("Visiting crypto suites sequence");
-            let mut out = Vec::new();
-            while let Some(v) = seq.next_element::<i64>()? {
-                if let Some(alg) = iana::Algorithm::from_i64(v) {
-                    out.push(alg);
-                }
-            }
-            println!("Crypto suites sequence parsed, {} items", out.len());
-            Ok(out)
-        }
-
-        fn visit_unit<E>(self) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            println!("Crypto suites using default (empty) value");
-            Ok(Vec::new()) // Return empty vec for default case
-        }
-    }
-
-    deserializer.deserialize_any(CryptoSuitesVisitor)
-}
-
 pub type SaCryptoKeyDefinitions = Vec<iana::KeyType>;
 
 fn serialize_key_definitions<S>(
@@ -686,61 +610,11 @@ where
     seq.end()
 }
 
-fn deserialize_key_definitions<'de, D>(deserializer: D) -> Result<SaCryptoKeyDefinitions, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::{SeqAccess, Visitor};
-    use std::fmt;
-
-    println!("Deserializing key definitions");
-    struct KeyDefinitionsVisitor;
-
-    impl<'de> Visitor<'de> for KeyDefinitionsVisitor {
-        type Value = SaCryptoKeyDefinitions;
-
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("a sequence of COSE key type identifiers (int) or unit for default")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            println!("Visiting key definitions sequence");
-            let mut out = Vec::new();
-            while let Some(v) = seq.next_element::<i64>()? {
-                if let Some(kt) = iana::KeyType::from_i64(v) {
-                    out.push(kt);
-                }
-            }
-            println!("Key definitions sequence parsed, {} items", out.len());
-            Ok(out)
-        }
-
-        fn visit_unit<E>(self) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            println!("Key definitions using default (empty) value");
-            Ok(Vec::new()) // Return empty vec for default case
-        }
-    }
-
-    deserializer.deserialize_any(KeyDefinitionsVisitor)
-}
-
-// ------------------------------
-// Tests (unchanged harness)
-// ------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const MCD_BASE64_DATA: &str = r#"hFkCAKIBJhghWQH4MIIB9DCCAZmgAwIBAgIEY79y1TAKBggqhkjOPQQDAjB3MQswCQYDVQQGEwJLUjEOMAwGA1UECAwFU3V3b24xHDAaBgNVBAoME1NhbXN1bmcgRWxlY3Ryb25pY3MxFzAVBgNVBAsMDlNhbXN1bmcgV2FsbGV0MSEwHwYDVQQDDBhTYW1zdW5nIG1Eb2MgUm9vdCBDQSBTVEcwHhcNMjMwMTEyMDIzOTE3WhcNMzMwMTEyMDIzOTE3WjCBizELMAkGA1UEBhMCS1IxDjAMBgNVBAgMBVN1d29uMRwwGgYDVQQKDBNTYW1zdW5nIEVsZWN0cm9uaWNzMRcwFQYDVQQLDA5TYW1zdW5nIFdhbGxldDE1MDMGA1UEAwwsTW9iaWxlIElEIEF0dGVzdGF0aW9uIFNpZ25lciBDZXJ0aWZpY2F0ZSBTVEcwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAT93Dyb9MALRD87qhHyKpdsNKFek1ubmIJV2yzkRhIhFYfs/9pbob08jFy+i8Zmgp1vNGmPgcXhB6szOg81OfTHMAoGCCqGSM49BAMCA0kAMEYCIQCrJbXOp9zsRx9zTB0wfVMo0jWCT+Ug3ToybyBmDWrh/wIhANdeqqjFGn/L5WUW/TLwFdAjzEz8XXAsDX5kWJEzPZ8poFjk2BhY4KNndmVyc2lvbgF4HHNlY3VyZUFyZWFBdHRlc3RhdGlvbk9iamVjdHOBompzYUVuY29kaW5nAHgYc2FBdHRlc3RhdGlvbk9iamVjdFZhbHVlpGEwG2UEE2hARmlIYTEAYTUBYTbYGFhLpAECIAEhWCAMe68WFdJj1CXTljt6+PX/cJED6lzL9HvkfGRkC8fMkiJYIDkTS/P9ZtuStmOog+nqo6zX1FIoUNwq54zv2aIl1FNpeB1tb2JpbGVJZEFwcGxpY2F0aW9uRGVzY3JpcHRvcqNhMIEBYTGCAAFhMoEBWECY8wux+W+I24lIZY1gQPUrxScMvb1zGu5e2Tni2k80x8AhTeznZ/lt2BchW2MJ99Z802m87elMR+OTMZ1NqFri"#;
-
-    // const MCD_BASE64_DATA: &str = "o2d2ZXJzaW9uAXgdbW9iaWxlSWRBcHBsaWNhdGlvbkRlc2NyaXB0b3KkYTCBAGExgQBhMoEBYTSAeBxzZWN1cmVBcmVhQXR0ZXN0YXRpb25PYmplY3RzgaJqc2FFbmNvZGluZwB4GHNhQXR0ZXN0YXRpb25PYmplY3RWYWx1ZaRhMABhMQBhNQFhNtgYWEukAQIgASFYIK/HAC2uTcbpASGuNdXu+JczhKOrm105LnTmswsJEMAgIlggEyyCxW11vbzsPaipTgj2kg4DdxJTRP1buHqVfs93ddY=";
 
     #[test]
     fn test_mcd_deserialization_with_paths() {
@@ -751,38 +625,20 @@ mod tests {
         let inner_mcd_bytes = extract_mcd_payload_bytes(&mcd_bytes)
             .expect("failed to extract MCD payload from COSE structure");
 
-        println!("Extracted MCD payload, length: {}", inner_mcd_bytes.len());
-
-        // Now try deserializing with full tracing enabled
-        println!("Starting MCD deserialization with tracing...");
-        let mcd_result: Result<MobileIdCapabilityDescriptor, _> =
-            ciborium::from_reader(&inner_mcd_bytes[..]);
-
-        match mcd_result {
-            Ok(mcd) => {
-                println!("Deserialized MCD: {mcd:#?}");
-            }
-            Err(err) => {
-                println!("Failed to deserialize MCD: {err}");
-            }
-        }
+        let _: MobileIdCapabilityDescriptor =
+            ciborium::from_reader(&inner_mcd_bytes[..]).expect("Failed to deserialize MCD");
     }
 
     #[test]
     fn test_working_mcd_deserialization() {
-        // First, let's try the original test case with the corrected approach
         let mcd_bytes = base64::decode_config(MCD_BASE64_DATA, base64::STANDARD)
             .expect("failed to parse mcd base64 payload");
 
-        // Extract the inner MCD bytes from the COSE structure
         let inner_mcd_bytes = extract_mcd_payload_bytes(&mcd_bytes)
             .expect("failed to extract MCD payload from COSE structure");
 
-        // Now try deserializing directly - this should work after our fixes
-        let mcd_result: MobileIdCapabilityDescriptor =
+        let _: MobileIdCapabilityDescriptor =
             ciborium::from_reader(&inner_mcd_bytes[..]).expect("failed to deserialize");
-
-        println!("MCD: {mcd_result:?}");
     }
 
     // Helper function to extract the MCD payload bytes from COSE structure
@@ -809,213 +665,4 @@ mod tests {
 
         Err("Could not extract MCD payload from COSE structure".into())
     }
-
-    #[test]
-    fn test_serde_path_to_error_demonstration() {
-        use serde_path_to_error as spte;
-
-        println!("Demonstrating serde_path_to_error with problematic MCD data");
-
-        let mcd_bytes = base64::decode_config(MCD_BASE64_DATA, base64::STANDARD)
-            .expect("failed to parse mcd base64 payload");
-        // let inner_mcd_bytes = extract_mcd_payload_bytes(&mcd_bytes)
-        //     .expect("failed to extract MCD payload from COSE structure");
-
-        // Convert CBOR to JSON for better serde_path_to_error compatibility
-        let cbor_value: ciborium::Value =
-            ciborium::from_reader(&mcd_bytes[..]).expect("failed to parse CBOR");
-        let json_string = ciborium_to_json_string(&cbor_value);
-
-        // Create a deserializer that serde_path_to_error can track
-        let json_deserializer = &mut serde_json::Deserializer::from_str(&json_string);
-
-        // Attempt deserialization with path tracking
-        let result: Result<MobileIdCapabilityDescriptor, spte::Error<serde_json::Error>> =
-            spte::deserialize(json_deserializer);
-
-        match result {
-            Ok(mcd) => {
-                println!("Unexpected success! MCD deserialized:");
-                println!("  Version: {}", mcd.version);
-                println!(
-                    "  Attestation objects: {}",
-                    mcd.secure_area_attestation_objects.len()
-                );
-            }
-            Err(path_err) => {
-                println!("❌ Deserialization failed at path: '{}'", path_err.path());
-                println!("   Error details: {}", path_err.inner());
-                println!("");
-                println!(
-                    "This shows exactly where in the nested structure the deserialization fails!"
-                );
-                println!(
-                    "The path '{}' indicates the JSON path to the problematic field.",
-                    path_err.path()
-                );
-
-                // Show some context around the error
-                let path_str = path_err.path().to_string();
-                if path_str.contains("secureAreaAttestationObjects") {
-                    println!("The error is in the secure area attestation objects section");
-                } else if path_str.contains("mobileIdApplicationDescriptor") {
-                    println!("The error is in the mobile ID application descriptor section");
-                } else {
-                    println!("The error is at the root level or in an unexpected location");
-                }
-            }
-        }
-    }
-
-    // Helper function to convert ciborium::Value to JSON string for serde_path_to_error
-    fn ciborium_to_json_string(cbor_value: &ciborium::Value) -> String {
-        use serde_json::Value as JsonValue;
-
-        fn cbor_to_json(cbor: &ciborium::Value) -> JsonValue {
-            match cbor {
-                ciborium::Value::Integer(i) => {
-                    if let Ok(i64_val) = i64::try_from(i.clone()) {
-                        JsonValue::Number(serde_json::Number::from(i64_val))
-                    } else if let Ok(u64_val) = u64::try_from(i.clone()) {
-                        JsonValue::Number(serde_json::Number::from(u64_val))
-                    } else {
-                        JsonValue::String(format!("{:?}", i))
-                    }
-                }
-                ciborium::Value::Bytes(bytes) => {
-                    // Convert bytes to array of numbers for JSON compatibility
-                    JsonValue::Array(
-                        bytes
-                            .iter()
-                            .map(|b| JsonValue::Number(serde_json::Number::from(*b)))
-                            .collect(),
-                    )
-                }
-                ciborium::Value::Float(f) => JsonValue::Number(
-                    serde_json::Number::from_f64(*f).unwrap_or(serde_json::Number::from(0)),
-                ),
-                ciborium::Value::Text(s) => JsonValue::String(s.clone()),
-                ciborium::Value::Bool(b) => JsonValue::Bool(*b),
-                ciborium::Value::Null => JsonValue::Null,
-                ciborium::Value::Array(arr) => {
-                    JsonValue::Array(arr.iter().map(cbor_to_json).collect())
-                }
-                ciborium::Value::Map(map) => {
-                    let mut json_map = serde_json::Map::new();
-                    for (key, value) in map {
-                        let key_str = match key {
-                            ciborium::Value::Text(s) => s.clone(),
-                            ciborium::Value::Integer(i) => format!("{:?}", i),
-                            _ => format!("{:?}", key),
-                        };
-                        json_map.insert(key_str, cbor_to_json(value));
-                    }
-                    JsonValue::Object(json_map)
-                }
-                ciborium::Value::Tag(tag_num, inner_value) => {
-                    // For tagged values, create a special structure
-                    let mut tag_map = serde_json::Map::new();
-                    tag_map.insert(
-                        "tag".to_string(),
-                        JsonValue::Number(serde_json::Number::from(*tag_num)),
-                    );
-                    tag_map.insert("value".to_string(), cbor_to_json(inner_value));
-                    JsonValue::Object(tag_map)
-                }
-                _ => {
-                    // Handle any other CBOR value types by converting to debug string
-                    JsonValue::String(format!("{:?}", cbor))
-                }
-            }
-        }
-
-        serde_json::to_string_pretty(&cbor_to_json(cbor_value)).unwrap_or_else(|_| "{}".to_string())
-    }
-
-    // #[test]
-    // fn test_serialization_cbor_inspection() {
-    //     use hex::FromHex;
-
-    //     const EC_P256: &str = include_str!("../../test/definitions/cose_key/ec_p256.cbor");
-
-    //     println!("Testing serialization and CBOR byte inspection");
-
-    //     let key_bytes = <Vec<u8>>::from_hex(EC_P256).expect("unable to convert cbor hex to bytes");
-    //     let cose_key = ByteStr(key_bytes);
-    //     // let cose_key: CoseKey =
-    //     //     crate::cbor::from_slice(&key_bytes).expect("Failed to parse COSE key from CBOR");
-
-    //     // Create test data structure
-    //     let mcd = MobileIdCapabilityDescriptor {
-    //         version: 1,
-    //         mobile_id_application_descriptor: MobileIdApplicationDescriptor {
-    //             app_supported_dev_features: vec![
-    //                 app_supported_dev_feature::WEBVIEW_FEATURE,
-    //                 app_supported_dev_feature::SIMPLE_VIEW_FEATURE,
-    //             ],
-    //             app_engagement_interface: vec![
-    //                 app_engagement_interface::QR,
-    //                 app_engagement_interface::NFC,
-    //             ],
-    //             app_data_transmission_interface: vec![
-    //                 app_data_transmission_interface::NFC,
-    //                 app_data_transmission_interface::BLE,
-    //             ],
-    //             app_attestation_key_bytes: Tag24::new(cose_key.clone()).ok(),
-    //             certification: vec![
-    //                 // CertificationItem::Text("test-cert-1".to_string()),
-    //                 // CertificationItem::Bytes(ByteStr::from(vec![0xde, 0xad, 0xbe, 0xef])),
-    //             ],
-    //         },
-    //         secure_area_attestation_objects: vec![SecureAreaAttestationObject {
-    //             sa_encoding: sa_encoding::DEFAULT,
-    //             sa_attestation_object_value: SaAttestationObjectValue {
-    //                 sa_index: 42,
-    //                 sa_type: Some(1),
-    //                 sa_supported_user_auth: vec![0, 1, 2],
-    //                 sa_crypto_suites: vec![iana::Algorithm::ES256, iana::Algorithm::ES384],
-    //                 sa_crypto_key_definition: vec![iana::KeyType::EC2],
-    //                 sa_interface: 1,
-    //                 sa_attestation_bytes: Tag24::new(cose_key).ok(),
-    //                 sa_attestation_statement: Some(ByteStr::from(vec![0xca, 0xfe, 0xba, 0xbe])),
-    //                 sa_attestation_format: Some(sa_attestation_format::JWT),
-    //                 certification: vec![CertificationItem::Text("sa-test-cert".to_string())],
-    //             },
-    //         }],
-    //     };
-
-    //     println!("MCD: {mcd:?}");
-
-    //     // Serialize to CBOR bytes
-    //     let mut cbor_bytes = Vec::new();
-    //     ciborium::into_writer(&mcd, &mut cbor_bytes).expect("Failed to serialize to CBOR");
-
-    //     println!("Serialized CBOR payload size: {} bytes", cbor_bytes.len());
-    //     println!("Raw CBOR bytes (hex): {}", hex::encode(&cbor_bytes));
-
-    //     // Parse back the CBOR to inspect structure
-    //     let cbor_value: ciborium::Value =
-    //         ciborium::from_reader(&cbor_bytes[..]).expect("Failed to parse CBOR back");
-    //     println!("CBOR structure: {:#?}", cbor_value);
-
-    //     // Verify round-trip serialization/deserialization
-    //     let deserialized_mcd: MobileIdCapabilityDescriptor =
-    //         ciborium::from_reader(&cbor_bytes[..]).expect("Failed to deserialize back");
-
-    //     assert_eq!(mcd.version, deserialized_mcd.version);
-    //     assert_eq!(
-    //         mcd.secure_area_attestation_objects.len(),
-    //         deserialized_mcd.secure_area_attestation_objects.len()
-    //     );
-
-    //     println!("✅ Round-trip serialization successful!");
-
-    //     // Inspect specific CBOR map keys
-    //     if let ciborium::Value::Map(ref map) = cbor_value {
-    //         println!("Top-level CBOR map keys:");
-    //         for (key, _value) in map {
-    //             println!("  Key: {:?}", key);
-    //         }
-    //     }
-    // }
 }
