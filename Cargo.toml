@@ -1,6 +1,6 @@
 [package]
 name = "isomdl"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "ISO mDL implementation in Rust"
 readme = "README.md"
@@ -50,6 +50,11 @@ der = { version = "0.7", features = ["std", "derive", "alloc"] }
 hex = "0.4.3"
 asn1-rs = { version = "0.5.2", features = ["bits"] }
 
+# Pinned for compatibility with current RustCrypto crate versions.
+# Can be removed once crypto-common 0.2.x is released.
+# See: https://github.com/fizyk20/generic-array/issues/158
+generic-array = "=0.14.7"
+
 strum = "0.24"
 strum_macros = "0.24"
 
@@ -64,6 +69,6 @@ ndef-rs = "0.2.2"
 hex = "0.4.3"
 p256 = "0.13.0"
 rstest = "0.23.0"
-serde_json = "*"
+serde_json = "1.0.145"
 test-log = { version = "0.2.16", features = ["trace"] }
 x509-cert = { version = "0.2.4", features = ["pem", "builder", "hazmat"] }

@@ -239,10 +239,7 @@ where
     extensions
         .map(|e| e.extn_id)
         .filter_map(|id| {
-            if disallowed_extensions
-                .iter()
-                .any(|disallowed_id| *disallowed_id == id)
-            {
+            if disallowed_extensions.contains(&id) {
                 Some(format!(
                     "extension is not allowed: {}",
                     db::DB

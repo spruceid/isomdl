@@ -1,13 +1,13 @@
 use crate::cbor;
 use crate::cose;
+use crate::cose::sign1::VerificationResult;
 use crate::definitions::device_response::Document;
 use crate::definitions::issuer_signed;
+use crate::definitions::session::SessionTranscript;
 use crate::definitions::x509::X5Chain;
 use crate::definitions::DeviceAuth;
 use crate::definitions::Mso;
-use crate::definitions::{
-    device_signed::DeviceAuthentication, helpers::Tag24, SessionTranscript180135,
-};
+use crate::definitions::{device_signed::DeviceAuthentication, helpers::Tag24};
 use crate::presentation::reader::Error;
 use anyhow::Result;
 use elliptic_curve::generic_array::GenericArray;
@@ -30,10 +30,10 @@ pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> 
         .map_err(Error::IssuerAuthentication)
 }
 
-pub fn device_authentication(
-    document: &Document,
-    session_transcript: SessionTranscript180135,
-) -> Result<(), Error> {
+pub fn device_authentication<S>(document: &Document, session_transcript: S) -> Result<(), Error>
+where
+    S: SessionTranscript + Clone,
+{
     let mso_bytes = document
         .issuer_signed
         .issuer_auth
@@ -76,10 +76,14 @@ pub fn device_authentication(
                         Some(&cbor_payload),
                         external_aad,
                     );
-                    if !result.is_success() {
-                        Err(Error::ParsingError)?
-                    } else {
-                        Ok(())
+                    match result {
+                        VerificationResult::Success => Ok(()),
+                        VerificationResult::Failure(e) => Err(Error::MdocAuth(format!(
+                            "failed verifying device signature: {e}"
+                        ))),
+                        VerificationResult::Error(e) => Err(Error::MdocAuth(format!(
+                            "error verifying device signature: {e}"
+                        ))),
                     }
                 }
                 DeviceAuth::DeviceMac(_) => {

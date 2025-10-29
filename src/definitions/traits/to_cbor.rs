@@ -34,7 +34,7 @@ pub enum ToCborError {
 impl fmt::Display for ToCborError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ToCborError::CborError(err) => write!(f, "COSE error: {}", err),
+            ToCborError::CborError(err) => write!(f, "COSE error: {err}"),
         }
     }
 }

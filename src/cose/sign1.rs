@@ -103,7 +103,7 @@ impl VerificationResult {
         match self {
             VerificationResult::Success => Ok(()),
             VerificationResult::Failure(reason) => Err(reason),
-            VerificationResult::Error(e) => Err(format!("{}", e)),
+            VerificationResult::Error(e) => Err(format!("{e}")),
         }
     }
 
@@ -209,7 +209,7 @@ impl MaybeTagged<CoseSign1> {
 
         match verifier.verify(&signature_payload, &signature) {
             Ok(()) => VerificationResult::Success,
-            Err(e) => VerificationResult::Failure(format!("signature is not authentic: {}", e)),
+            Err(e) => VerificationResult::Failure(format!("signature is not authentic: {e}")),
         }
     }
 

@@ -23,12 +23,11 @@ use serde_json::json;
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::authentication::{
-    mdoc::{device_authentication, issuer_authentication},
-    AuthenticationStatus, ResponseAuthenticationOutcome,
-};
+use super::authentication::ResponseAuthenticationOutcome;
+use super::reader_utils::validate_response;
 
-use crate::definitions::x509;
+use crate::definitions::device_engagement::{CentralClientMode, PeripheralServerMode};
+use crate::definitions::device_request::{DeviceRequestInfoBytes, ItemsRequestBytesAll};
 use crate::{
     cbor::{self, CborError},
     definitions::{
@@ -70,6 +69,15 @@ pub struct ReaderAuthentication(
     pub ItemsRequestBytes,
 );
 
+#[derive(Serialize, Deserialize)]
+pub struct ReaderAuthenticationAll<S>(
+    pub String,
+    /// Meant to be the SessionTranscript
+    pub S,
+    pub ItemsRequestBytesAll,
+    pub Option<DeviceRequestInfoBytes>,
+);
+
 /// Various errors that can occur during the interaction with the device.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -105,8 +113,8 @@ pub enum Error {
     #[error("not a valid JSON input.")]
     JsonError,
     /// Unexpected data type for data element.
-    #[error("Unexpected data type for data element.")]
-    ParsingError,
+    #[error("Unexpected data type for data element: {0}.")]
+    ParsingError(String),
     /// Request for data is invalid.
     #[error("Request for data is invalid.")]
     InvalidRequest,
@@ -246,6 +254,7 @@ impl SessionManager {
         Ok((session_manager, session_request, ble_ident))
     }
 
+    #[deprecated(since = "0.2.1", note = "use ble_central_client_options instead")]
     pub fn first_central_client_uuid(&self) -> Option<&Uuid> {
         self.session_transcript
             .0
@@ -262,6 +271,40 @@ impl SessionManager {
                         _ => None,
                     })
                     .next()
+            })
+    }
+
+    /// Retrieve the connection details for BLE central client mode offered by the mdoc, if any.
+    ///
+    /// The protocol allows for more than one central client mode to be offered, so a consumer
+    /// of this API can use the first one that works.
+    pub fn ble_central_client_options(&self) -> impl Iterator<Item = &CentralClientMode> {
+        self.session_transcript
+            .0
+            .as_ref()
+            .device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.central_client_mode.as_ref(),
+                _ => None,
+            })
+    }
+
+    /// Retrieve the connection details for BLE peripheral server mode offered by the mdoc, if any.
+    ///
+    /// The protocol allows for more than one peripheral server mode to be offered, so a consumer
+    /// of this API can use the first one that works.
+    pub fn ble_peripheral_server_options(&self) -> impl Iterator<Item = &PeripheralServerMode> {
+        self.session_transcript
+            .0
+            .as_ref()
+            .device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.peripheral_server_mode.as_ref(),
+                _ => None,
             })
     }
 
@@ -294,6 +337,8 @@ impl SessionManager {
         let device_request = DeviceRequest {
             version: DeviceRequest::VERSION.to_string(),
             doc_requests: NonEmptyVec::new(doc_request),
+            device_request_info: None,
+            reader_auth_all: None,
         };
         let device_request_bytes = cbor::to_vec(&device_request)?;
         session::encrypt_reader_data(
@@ -326,79 +371,32 @@ impl SessionManager {
         let device_response = match self.decrypt_response(response) {
             Ok(device_response) => device_response,
             Err(e) => {
-                validated_response.errors.insert(
-                    "decryption_errors".to_string(),
-                    json!(vec![format!("{e:?}")]),
-                );
+                validated_response
+                    .errors
+                    .insert("decryption_errors".to_string(), json!(vec![format!("{e}")]));
                 return validated_response;
             }
         };
 
         match parse(&device_response) {
-            Ok((document, x5chain, namespaces)) => {
-                self.validate_response(x5chain, document.clone(), namespaces)
-            }
+            Ok((document, x5chain, namespaces)) => validate_response(
+                self.session_transcript.clone(),
+                self.trust_anchor_registry.clone(),
+                x5chain,
+                document.clone(),
+                namespaces,
+            ),
             Err(e) => {
                 validated_response
                     .errors
-                    .insert("parsing_errors".to_string(), json!(vec![format!("{e:?}")]));
+                    .insert("parsing_errors".to_string(), json!(vec![format!("{e}")]));
                 validated_response
             }
         }
     }
-
-    fn validate_response(
-        &mut self,
-        x5chain: X5Chain,
-        document: Document,
-        namespaces: BTreeMap<String, serde_json::Value>,
-    ) -> ResponseAuthenticationOutcome {
-        let mut validated_response = ResponseAuthenticationOutcome {
-            response: namespaces,
-            ..Default::default()
-        };
-
-        match device_authentication(&document, self.session_transcript.clone()) {
-            Ok(_) => {
-                validated_response.device_authentication = AuthenticationStatus::Valid;
-            }
-            Err(e) => {
-                validated_response.device_authentication = AuthenticationStatus::Invalid;
-                validated_response.errors.insert(
-                    "device_authentication_errors".to_string(),
-                    json!(vec![format!("{e:?}")]),
-                );
-            }
-        }
-
-        let validation_errors = x509::validation::ValidationRuleset::Mdl
-            .validate(&x5chain, &self.trust_anchor_registry)
-            .errors;
-        if validation_errors.is_empty() {
-            match issuer_authentication(x5chain, &document.issuer_signed) {
-                Ok(_) => {
-                    validated_response.issuer_authentication = AuthenticationStatus::Valid;
-                }
-                Err(e) => {
-                    validated_response.issuer_authentication = AuthenticationStatus::Invalid;
-                    validated_response.errors.insert(
-                        "issuer_authentication_errors".to_string(),
-                        serde_json::json!(vec![format!("{e:?}")]),
-                    );
-                }
-            }
-        } else {
-            validated_response
-                .errors
-                .insert("certificate_errors".to_string(), json!(validation_errors));
-            validated_response.issuer_authentication = AuthenticationStatus::Invalid
-        };
-
-        validated_response
-    }
 }
 
-fn parse(
+pub fn parse(
     device_response: &DeviceResponse,
 ) -> Result<(&Document, X5Chain, BTreeMap<String, Value>), Error> {
     let document = get_document(device_response)?;
@@ -418,13 +416,12 @@ fn parse(
 fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     match value {
         ciborium::Value::Text(s) => Ok(Value::String(s)),
-        ciborium::Value::Tag(_t, v) => {
-            if let ciborium::Value::Text(d) = *v {
-                Ok(Value::String(d))
-            } else {
-                Err(Error::ParsingError)
-            }
-        }
+        ciborium::Value::Tag(_t, v) => match *v {
+            ciborium::Value::Text(d) => Ok(Value::String(d)),
+            a => Err(Error::ParsingError(format!(
+                "found {a:?} when expecting text"
+            ))),
+        },
         ciborium::Value::Array(v) => {
             let mut array_response = Vec::<Value>::new();
             for a in v {
@@ -447,7 +444,9 @@ fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
         ciborium::Value::Bytes(b) => Ok(json!(b)),
         ciborium::Value::Bool(b) => Ok(json!(b)),
         ciborium::Value::Integer(i) => Ok(json!(<ciborium::value::Integer as Into<i128>>::into(i))),
-        _ => Err(Error::ParsingError),
+        a => Err(Error::ParsingError(format!(
+            "found {a:?} when expecting anything but floats and nulls"
+        ))),
     }
 }
 
@@ -484,7 +483,7 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
 }
 
 // TODO: Support other namespaces.
-fn parse_namespaces(
+pub fn parse_namespaces(
     device_response: &DeviceResponse,
 ) -> Result<BTreeMap<String, serde_json::Value>, Error> {
     let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();

@@ -10,6 +10,12 @@ use crate::definitions::traits::{FromJson, FromJsonError};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Latin1(String);
 
+impl Latin1 {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
     #[error("contains characters that are not in the Latin1 alphabet: {0:?}")]

@@ -4,10 +4,16 @@ use std::{collections::BTreeMap, ops::Deref};
 
 /// `age_over_xx` in the org.iso.18013.5.1 namespace.
 #[derive(Debug, Clone)]
-pub struct AgeOver(BTreeMap<Age, bool>);
+pub struct AgeOver(pub BTreeMap<Age, bool>);
 
 #[derive(Debug, Clone, Ord, Eq, PartialOrd, PartialEq)]
 pub struct Age(char, char);
+
+impl Age {
+    pub fn digits(&self) -> (char, char) {
+        (self.0, self.1)
+    }
+}
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {

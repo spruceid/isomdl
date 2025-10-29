@@ -42,6 +42,7 @@
 pub mod authentication;
 pub mod device;
 pub mod reader;
+pub mod reader_utils;
 
 use anyhow::Result;
 use base64::{decode, encode};

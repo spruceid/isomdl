@@ -1,13 +1,13 @@
-mod county_code;
-mod dhs_compliance;
-mod domestic_driving_privileges;
-mod edl_indicator;
-mod name_suffix;
-mod name_truncation;
-mod present;
-mod race_and_ethnicity;
-mod sex;
-mod weight_range;
+pub mod county_code;
+pub mod dhs_compliance;
+pub mod domestic_driving_privileges;
+pub mod edl_indicator;
+pub mod name_suffix;
+pub mod name_truncation;
+pub mod present;
+pub mod race_and_ethnicity;
+pub mod sex;
+pub mod weight_range;
 
 pub use super::{fulldate::FullDate, latin1::Latin1};
 pub use county_code::CountyCode;

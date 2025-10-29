@@ -98,7 +98,7 @@ impl VerificationResult {
         match self {
             VerificationResult::Success => Ok(()),
             VerificationResult::Failure(reason) => Err(reason),
-            VerificationResult::Error(e) => Err(format!("{}", e)),
+            VerificationResult::Error(e) => Err(format!("{e}")),
         }
     }
 
@@ -195,7 +195,7 @@ impl MaybeTagged<CoseMac0> {
         mac.update(&tag_payload);
         match mac.verify_slice(tag) {
             Ok(()) => VerificationResult::Success,
-            Err(e) => VerificationResult::Failure(format!("tag is not authentic: {}", e)),
+            Err(e) => VerificationResult::Failure(format!("tag is not authentic: {e}")),
         }
     }
 
