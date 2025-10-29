@@ -106,8 +106,8 @@ impl<'a> TryFrom<RawNdefRecord<'a>> for NdefRecord<'a> {
 
 impl<'a> NdefRecord<'a> {
     pub fn iterator_from_bytes(
-        bytes: &[u8],
-    ) -> impl Iterator<Item = Result<NdefRecord, ReadRecordError>> {
+        bytes: &'_ [u8],
+    ) -> impl Iterator<Item = Result<NdefRecord<'_>, ReadRecordError>> {
         let mut failed = false;
         RawNdefRecord::iterator_from_bytes(bytes).flat_map(move |raw| {
             if failed {
@@ -144,8 +144,8 @@ impl<'a> NdefRecord<'a> {
 #[allow(clippy::identity_op)]
 impl<'a> RawNdefRecord<'a> {
     pub fn iterator_from_bytes(
-        bytes: &[u8],
-    ) -> impl Iterator<Item = Result<RawNdefRecord, ReadRecordError>> {
+        bytes: &'_ [u8],
+    ) -> impl Iterator<Item = Result<RawNdefRecord<'_>, ReadRecordError>> {
         let mut cursor = 0;
         let mut failed = false;
         std::iter::from_fn(move || {
