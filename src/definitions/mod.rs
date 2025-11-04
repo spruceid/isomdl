@@ -6,6 +6,7 @@ pub mod device_response;
 pub mod device_signed;
 pub mod helpers;
 pub mod issuer_signed;
+pub mod mcd;
 pub mod mso;
 pub mod namespaces;
 pub mod session;
