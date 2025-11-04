@@ -644,7 +644,7 @@ mod tests {
     // Helper function to extract the MCD payload bytes from COSE structure
     fn extract_mcd_payload_bytes(cose_bytes: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         // Parse the top-level CBOR structure
-        let value: ciborium::Value = ciborium::from_reader(&cose_bytes[..])?;
+        let value: ciborium::Value = ciborium::from_reader(cose_bytes)?;
 
         // Extract from COSE array structure
         if let ciborium::Value::Array(arr) = value {
