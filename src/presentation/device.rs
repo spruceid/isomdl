@@ -251,7 +251,6 @@ pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdent
 
 /// Generate an ephemeral key for device engagement.
 /// Returns: (private_key, public_key)
-// TODO: Move me!
 pub fn ephemeral_key() -> Result<(Vec<u8>, Security), Error> {
     let (e_device_key, e_device_key_pub) =
         session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;

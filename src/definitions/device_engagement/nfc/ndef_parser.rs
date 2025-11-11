@@ -1,5 +1,4 @@
 // The NDEF crate has a broken parser. It parses TNF fields as 4 bits, rather than 3.
-// TODO: Should we trust its message creation if its message reader is fundamentally broken?
 
 use thiserror::Error;
 

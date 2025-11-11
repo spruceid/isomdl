@@ -137,7 +137,6 @@ impl<'a> Apdu<'a> {
             apdu_fail!(ResponseCode::IncorrectLength);
         }
 
-        #[allow(unused_variables)]
         let (cla, ins, p1, p2) = (
             command_bytes[0],
             command_bytes[1],
@@ -193,9 +192,6 @@ impl<'a> Apdu<'a> {
             (0xA4, _, _) => {
                 // Select §7.1.1
                 let (occurrence, control_info) = select::get_request_info(p2);
-
-                // TODO: Is ignoring occurrence correct? We'll never support
-                //       multiple files with the same ID, so it shouldn't really matter.
 
                 match p1 {
                     0x00 => {

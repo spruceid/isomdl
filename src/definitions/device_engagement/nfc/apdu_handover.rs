@@ -102,6 +102,12 @@ impl ApduHandoverDriver {
     /// * `negotiated`: true -> use negotiated handover (not implemented yet), false -> use static handover.
     /// * `strict`: require selecting the MDOC AID before responding to NDEF reads. If strict is false, we will always return NDEF messages.
     pub fn new(negotiated: bool, strict: bool) -> Result<Self, HandoverError> {
+        if negotiated {
+            return Err(anyhow::anyhow!(
+                "Negotiated handover is not implemented yet. Please use static handover."
+            )
+            .into());
+        }
         Ok(Self {
             strict,
             state: ndef_handover::HandoverState::Init,
@@ -157,6 +163,9 @@ impl ApduHandoverDriver {
                 file_id,
                 ..
             } => match file_id {
+                // BREAKING SPEC: We ignore occurrence because NDEF doesn't require indexing
+                //                multiple files with the same ID. This should have no impact
+                //                since we only respond to requests for NDEF communication.
                 KnownOrRaw::Known(apdu::FileId::CapabilityContainer) => {
                     self.selected_file = Some(file_id);
                     let response = match control_info.get_payload(&u16::to_be_bytes(
