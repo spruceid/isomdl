@@ -117,6 +117,8 @@ fn calculate_ble_ident(e_device_key: &Tag24<CoseKey>) -> Result<[u8; 16]> {
 
     Hkdf::<Sha256>::new(None, &e_device_key_bytes)
         .expand("BLEIdent".as_bytes(), &mut ble_ident)
+        // TODO: Need to expand further the `L` 16 octets to the end of this hash
+        // See page 37-38 for the hash calculation
         .map_err(|e| anyhow::anyhow!("unable to perform HKDF: {}", e))?;
 
     Ok(ble_ident)

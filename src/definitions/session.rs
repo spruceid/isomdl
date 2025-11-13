@@ -4,6 +4,8 @@
 //! based on a message count and a flag indicating whether the vector is for the reader or the device.
 use super::helpers::Tag24;
 use super::DeviceEngagement;
+use crate::cbor::CborError;
+
 use crate::definitions::device_engagement::EReaderKeyBytes;
 use crate::definitions::device_key::cose_key::EC2Y;
 use crate::definitions::device_key::CoseKey;
@@ -24,6 +26,7 @@ use elliptic_curve::{
     sec1::FromEncodedPoint,
 };
 use hkdf::Hkdf;
+use ndef_rs::error::NdefError;
 use p256::NistP256;
 use p384::NistP384;
 use rand::rngs::OsRng;
@@ -34,7 +37,6 @@ pub type EReaderKey = CoseKey;
 pub type EDeviceKey = CoseKey;
 pub type DeviceEngagementBytes = Tag24<DeviceEngagement>;
 pub type SessionTranscriptBytes = Tag24<SessionTranscript180135>;
-pub type NfcHandover = (ByteStr, Option<ByteStr>);
 
 /// Represents the establishment of a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,12 +52,12 @@ pub struct SessionEstablishment {
 /// Represents session data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
-    /// An optional [ByteStr] that represents the data associated with the session.  
+    /// An optional [ByteStr] that represents the data associated with the session.
     /// The field is skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<ByteStr>,
 
-    /// An optional [Status] that represents the status of the session.  
+    /// An optional [Status] that represents the status of the session.
     /// Similarly, the field is skipped during serialization if it is [None].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
@@ -104,7 +106,7 @@ pub struct SessionTranscript180135(
 
 impl SessionTranscript for SessionTranscript180135 {}
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Curve not supported for DH exchange")]
     UnsupportedCurve,
@@ -114,6 +116,13 @@ pub enum Error {
     SessionKeyError,
     #[error("Something went wrong generating ephemeral keys")]
     EphemeralKeyError,
+    #[error("Serialization error")]
+    Cbor(#[from] CborError),
+    #[error("NFC negotiation error")]
+    Ndef(#[from] NdefError),
+    // I don't like using anyhow in an API, but ndef_rs itself returns anyhow errors.
+    #[error("Failed serializing NFC NDEF message")]
+    NdefSerialization(anyhow::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,7 +134,7 @@ pub enum Handover {
 }
 
 pub enum EphemeralSecrets {
-    /// Represents an Eph256 session.  
+    /// Represents an Eph256 session.
     /// This enum variant holds an `EphemeralSecret` of type `NistP256`.
     Eph256(EphemeralSecret<NistP256>),
 
@@ -137,17 +146,17 @@ pub enum EncodedPoints {
     /// Represents a session with an Ep256 encoded point.
     Ep256(EncodedPoint<NistP256>),
 
-    /// Represents an Ep384 session.  
+    /// Represents an Ep384 session.
     /// This struct holds an encoded point of type `EncodedPoint<NistP384>`.
     Ep384(EncodedPoint<NistP384>),
 }
 
 pub enum SharedSecrets {
-    /// Represents a session with a shared secret using the `SS256` algorithm.  
+    /// Represents a session with a shared secret using the `SS256` algorithm.
     /// The shared secret is generated using the `NistP256` elliptic curve.
     Ss256(SharedSecret<NistP256>),
 
-    /// Represents a session with a shared secret using the `Ss384` algorithm.  
+    /// Represents a session with a shared secret using the `Ss384` algorithm.
     /// The shared secret is of type [`SharedSecret<NistP384>`].
     Ss384(SharedSecret<NistP384>),
 }
@@ -337,42 +346,6 @@ mod test {
             cbor::from_slice(&cbor).expect("failed to deserialize as handover");
         if !matches!(handover, Handover::QR) {
             panic!("expected 'Handover::QR', received {handover:?}")
-        } else {
-            let roundtripped =
-                cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
-            assert_eq!(
-                cbor, roundtripped,
-                "re-serialized handover did not match initial bytes"
-            )
-        }
-    }
-
-    #[test]
-    fn nfc_static_handover() {
-        // ['hello', null]
-        let cbor = hex::decode("824568656C6C6FF6").expect("failed to decode hex");
-        let handover: Handover =
-            cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::NFC(..)) {
-            panic!("expected 'Handover::NFC(..)', received {handover:?}")
-        } else {
-            let roundtripped =
-                cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
-            assert_eq!(
-                cbor, roundtripped,
-                "re-serialized handover did not match initial bytes"
-            )
-        }
-    }
-
-    #[test]
-    fn nfc_negotiated_handover() {
-        // ['hello', 'world']
-        let cbor = hex::decode("824568656C6C6F45776F726C64").expect("failed to decode hex");
-        let handover: Handover =
-            cbor::from_slice(&cbor).expect("failed to deserialize as handover");
-        if !matches!(handover, Handover::NFC(..)) {
-            panic!("expected 'Handover::NFC(..)', received {handover:?}")
         } else {
             let roundtripped =
                 cbor::to_vec(&handover).expect("failed to serialize handover as cbor");
