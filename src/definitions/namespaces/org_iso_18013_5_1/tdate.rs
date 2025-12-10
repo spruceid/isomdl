@@ -2,11 +2,12 @@ pub use super::FullDate;
 
 use crate::definitions::traits::{FromJson, FromJsonError};
 use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
 /// `tdate` as per RFC8610 and restrictions in 18013-5.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TDate(String);
 
 /// `tdate` or `full-date`.
