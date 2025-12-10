@@ -56,7 +56,7 @@ mod tests {
         let mut builder = X5Chain::builder();
         for cert in data.attestation_statement.x5c.iter() {
             builder = builder
-                .with_der_certificate(&cert)
+                .with_der_certificate(cert)
                 .expect("failed to parse DER certificate");
         }
 
