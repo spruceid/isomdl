@@ -6,7 +6,7 @@ use crate::cbor;
 /// This definition is based on the Apple developer documentation
 /// for the attestation object.
 ///
-/// For more information, see: https://developer.apple.com/documentation/devicecheck/attestation-object-validation-guide
+/// For more information, see: <https://developer.apple.com/documentation/devicecheck/attestation-object-validation-guide>
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AppleAppAttestData {
     #[serde(rename = "fmt")]
