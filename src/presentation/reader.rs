@@ -26,6 +26,7 @@ use uuid::Uuid;
 use super::authentication::ResponseAuthenticationOutcome;
 use super::reader_utils::validate_response;
 
+use crate::definitions::device_engagement::nfc::ReaderNegotiatedCarrierInfo;
 use crate::definitions::device_engagement::{CentralClientMode, PeripheralServerMode};
 use crate::definitions::device_request::{DeviceRequestInfoBytes, ItemsRequestBytesAll};
 use crate::{
@@ -37,7 +38,7 @@ use crate::{
         device_response::Document,
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
         session::{
-            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
+            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret,
             SessionEstablishment,
         },
         x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain},
@@ -180,6 +181,12 @@ impl From<asn1_rs::Error> for Error {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Handover {
+    QR(String),
+    NFC(Box<ReaderNegotiatedCarrierInfo>),
+}
+
 impl SessionManager {
     /// Establish a session with the device.
     ///
@@ -187,12 +194,16 @@ impl SessionManager {
     /// derives the shared secret, and derives the session keys
     /// (using **Diffie–Hellman key exchange**).
     pub fn establish_session(
-        qr_code: String,
+        handover: Handover,
         namespaces: device_request::Namespaces,
         trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
-        let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
-            .context("failed to construct QR code")?;
+        let device_engagement_bytes = match handover {
+            Handover::NFC(carrier_info) => Tag24::new(carrier_info.device_engagement)
+                .context("Failed to build tag24 device engagement")?,
+            Handover::QR(qr_code) => Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
+                .context("failed to construct QR code")?,
+        };
 
         //generate own keys
         let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
@@ -218,7 +229,7 @@ impl SessionManager {
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
             e_reader_key_public.clone(),
-            Handover::QR,
+            crate::definitions::session::Handover::QR,
         );
 
         let session_transcript_bytes = Tag24::new(session_transcript.clone())

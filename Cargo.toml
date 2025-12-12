@@ -63,7 +63,7 @@ ciborium = "0.2.2"
 digest = "0.10.7"
 tracing = "0.1.41"
 sha1 = "0.10.6"
-ndef-rs = "0.2.2"
+ndef-rs = "0.2.3"
 
 [dev-dependencies]
 hex = "0.4.3"
