@@ -15,26 +15,26 @@
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use std::collections::BTreeMap;
 
-use anyhow::Context;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use coset::Label;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::authentication::ResponseAuthenticationOutcome;
-use super::reader_utils::validate_response;
+use super::{authentication::ResponseAuthenticationOutcome, reader_utils::validate_response};
 
-use crate::definitions::device_engagement::nfc::ReaderNegotiatedCarrierInfo;
-use crate::definitions::device_engagement::{CentralClientMode, PeripheralServerMode};
-use crate::definitions::device_request::{DeviceRequestInfoBytes, ItemsRequestBytesAll};
 use crate::{
     cbor::{self, CborError},
     definitions::{
-        device_engagement::DeviceRetrievalMethod,
+        device_engagement::{
+            nfc::{LeRole, ReaderNegotiatedCarrierInfo},
+            BleMode, CentralClientMode, PeripheralServerMode,
+        },
         device_key::cose_key::Error as CoseError,
-        device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
+        device_request::{
+            self, DeviceRequest, DeviceRequestInfoBytes, DocRequest, ItemsRequest,
+            ItemsRequestBytesAll,
+        },
         device_response::Document,
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
         session::{
@@ -61,6 +61,9 @@ pub struct SessionManager {
     sk_reader: [u8; 32],
     reader_message_counter: u32,
     trust_anchor_registry: TrustAnchorRegistry,
+    holder_le_role: Option<LeRole>,
+    holder_central_client_modes: Vec<CentralClientMode>,
+    holder_peripheral_server_modes: Vec<PeripheralServerMode>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -198,11 +201,74 @@ impl SessionManager {
         namespaces: device_request::Namespaces,
         trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
-        let device_engagement_bytes = match handover {
-            Handover::NFC(carrier_info) => Tag24::new(carrier_info.device_engagement)
-                .context("Failed to build tag24 device engagement")?,
-            Handover::QR(qr_code) => Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
-                .context("failed to construct QR code")?,
+        let (
+            device_engagement_bytes,
+            session_transcript_handover,
+            holder_le_role,
+            holder_central_client_modes,
+            holder_peripheral_server_modes,
+        ) = match handover {
+            Handover::NFC(carrier_info) => {
+                let device_engagement_bytes = Tag24::new(carrier_info.device_engagement)
+                    .context("Failed to build tag24 device engagement")?;
+                let le_role = Some(carrier_info.holder_le_role);
+                let uuid = carrier_info.uuid;
+                let central_client_modes: Vec<_> = device_engagement_bytes
+                    .as_ref()
+                    .ble_central_client_options()
+                    .cloned()
+                    .collect();
+                let peripheral_server_modes: Vec<_> = device_engagement_bytes
+                    .as_ref()
+                    .ble_peripheral_server_options()
+                    .cloned()
+                    .collect();
+                let central_client_modes = if central_client_modes.is_empty() {
+                    vec![CentralClientMode { uuid }]
+                } else {
+                    central_client_modes
+                };
+                let peripheral_server_modes = if peripheral_server_modes.is_empty() {
+                    vec![PeripheralServerMode {
+                        uuid,
+                        ble_device_address: None, // TODO
+                    }]
+                } else {
+                    peripheral_server_modes
+                };
+                (
+                    device_engagement_bytes,
+                    crate::definitions::session::Handover::NFC(
+                        carrier_info.hs_message,
+                        carrier_info.hr_message,
+                    ),
+                    le_role,
+                    central_client_modes,
+                    peripheral_server_modes,
+                )
+            }
+            Handover::QR(qr_code) => {
+                let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
+                    .context("failed to construct QR code")?;
+                let le_role = None;
+                let central_client_modes = device_engagement_bytes
+                    .as_ref()
+                    .ble_central_client_options()
+                    .cloned()
+                    .collect();
+                let peripheral_server_modes = device_engagement_bytes
+                    .as_ref()
+                    .ble_peripheral_server_options()
+                    .cloned()
+                    .collect();
+                (
+                    device_engagement_bytes,
+                    crate::definitions::session::Handover::QR,
+                    le_role,
+                    central_client_modes,
+                    peripheral_server_modes,
+                )
+            }
         };
 
         //generate own keys
@@ -229,7 +295,7 @@ impl SessionManager {
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
             e_reader_key_public.clone(),
-            crate::definitions::session::Handover::QR,
+            session_transcript_handover,
         );
 
         let session_transcript_bytes = Tag24::new(session_transcript.clone())
@@ -250,6 +316,9 @@ impl SessionManager {
             sk_reader,
             reader_message_counter: 0,
             trust_anchor_registry,
+            holder_le_role,
+            holder_central_client_modes,
+            holder_peripheral_server_modes,
         };
 
         let request = session_manager
@@ -267,22 +336,7 @@ impl SessionManager {
 
     #[deprecated(since = "0.2.1", note = "use ble_central_client_options instead")]
     pub fn first_central_client_uuid(&self) -> Option<&Uuid> {
-        self.session_transcript
-            .0
-            .as_ref()
-            .device_retrieval_methods
-            .as_ref()
-            .and_then(|ms| {
-                ms.as_ref()
-                    .iter()
-                    .filter_map(|m| match m {
-                        DeviceRetrievalMethod::BLE(opt) => {
-                            opt.central_client_mode.as_ref().map(|cc| &cc.uuid)
-                        }
-                        _ => None,
-                    })
-                    .next()
-            })
+        self.ble_central_client_options().next().map(|cc| &cc.uuid)
     }
 
     /// Retrieve the connection details for BLE central client mode offered by the mdoc, if any.
@@ -290,16 +344,7 @@ impl SessionManager {
     /// The protocol allows for more than one central client mode to be offered, so a consumer
     /// of this API can use the first one that works.
     pub fn ble_central_client_options(&self) -> impl Iterator<Item = &CentralClientMode> {
-        self.session_transcript
-            .0
-            .as_ref()
-            .device_retrieval_methods
-            .iter()
-            .flat_map(|ms| ms.as_ref().iter())
-            .filter_map(|m| match m {
-                DeviceRetrievalMethod::BLE(opt) => opt.central_client_mode.as_ref(),
-                _ => None,
-            })
+        self.holder_central_client_modes.iter()
     }
 
     /// Retrieve the connection details for BLE peripheral server mode offered by the mdoc, if any.
@@ -307,16 +352,25 @@ impl SessionManager {
     /// The protocol allows for more than one peripheral server mode to be offered, so a consumer
     /// of this API can use the first one that works.
     pub fn ble_peripheral_server_options(&self) -> impl Iterator<Item = &PeripheralServerMode> {
-        self.session_transcript
-            .0
-            .as_ref()
-            .device_retrieval_methods
-            .iter()
-            .flat_map(|ms| ms.as_ref().iter())
-            .filter_map(|m| match m {
-                DeviceRetrievalMethod::BLE(opt) => opt.peripheral_server_mode.as_ref(),
-                _ => None,
-            })
+        self.holder_peripheral_server_modes.iter()
+    }
+
+    /// Retrieve the mdoc's preferred connection details.
+    pub fn preferred_ble_mode(&self) -> Option<BleMode> {
+        let first_central = self
+            .holder_central_client_modes
+            .first()
+            .map(|m| BleMode::CentralClient(m.clone()));
+        let first_peripheral = self
+            .holder_peripheral_server_modes
+            .first()
+            .map(|m| BleMode::PeripheralServer(m.clone()));
+        match self.holder_le_role {
+            None | Some(LeRole::CentralPreferred) => first_central.or(first_peripheral),
+            Some(LeRole::CentralOnly) => first_central,
+            Some(LeRole::PeripheralOnly) => first_peripheral,
+            Some(LeRole::PeripheralPreferred) => first_peripheral.or(first_central),
+        }
     }
 
     /// Creates a new request with specified elements to request.

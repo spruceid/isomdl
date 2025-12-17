@@ -14,6 +14,7 @@ mod apdu_handover_reader;
 pub use apdu_handover_reader::*;
 
 pub use ndef_handover::BleInfo as NegotiatedBleInfo;
+pub use ndef_handover::LeRole;
 pub use ndef_handover::NegotiatedCarrierInfo;
 pub use ndef_handover_reader::ReaderNegotiatedCarrierInfo;
 

@@ -58,9 +58,12 @@ impl Device {
 
         let trust_anchors = TrustAnchorRegistry::default();
 
-        let (reader_sm, session_request, _ble_ident) =
-            reader::SessionManager::establish_session(reader::Handover::QR(qr), requested_elements, trust_anchors)
-                .context("failed to establish reader session")?;
+        let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
+            reader::Handover::QR(qr),
+            requested_elements,
+            trust_anchors,
+        )
+        .context("failed to establish reader session")?;
         Ok((reader_sm, session_request))
     }
 

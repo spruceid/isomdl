@@ -283,7 +283,7 @@ mod test {
     fn roundtrip_static_handover() {
         let mut holder = ApduHandoverDriver::new(false, false)
             .expect("failed to build holder apdu handover driver");
-        let (mut reader, mut apdu) = ReaderApduHandoverDriver::new(false);
+        let (mut reader, mut apdu) = ReaderApduHandoverDriver::new();
         let mut rapdu;
         for _ in 0..5 {
             rapdu = holder.process_apdu(&apdu);
