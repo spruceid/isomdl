@@ -231,7 +231,7 @@ impl SessionManager {
                 let peripheral_server_modes = if peripheral_server_modes.is_empty() {
                     vec![PeripheralServerMode {
                         uuid,
-                        ble_device_address: None, // TODO
+                        ble_device_address: carrier_info.ble_device_address,
                     }]
                 } else {
                     peripheral_server_modes

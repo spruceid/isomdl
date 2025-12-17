@@ -138,7 +138,9 @@ pub enum BleInfo {
 pub struct NegotiatedCarrierInfo {
     pub ble: BleInfo,
     pub uuid: uuid::Uuid,
+    /// Handover Select Message
     pub hs_message: ByteStr,
+    /// Handover Request Message
     pub hr_message: Option<ByteStr>,
 }
 
