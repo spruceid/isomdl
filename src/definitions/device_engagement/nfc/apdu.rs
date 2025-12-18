@@ -1,4 +1,5 @@
 use strum_macros::EnumIter;
+use tracing::warn;
 
 // This has been written according to ISO 7816-4 (2005).
 // This only implements what is required for NFC handover to BLE.
@@ -165,6 +166,14 @@ pub mod select {
     }
 }
 
+fn serialize_l_c_len(len: usize) -> Vec<u8> {
+    if len < 256 {
+        (len as u8).to_be_bytes().to_vec()
+    } else {
+        [&[0x00], (len as u16).to_be_bytes().as_slice()].concat()
+    }
+}
+
 impl<'a> Apdu<'a> {
     pub fn parse(command_bytes: &'a [u8]) -> Result<Self, Response> {
         tracing::debug!("APDU: {command_bytes:?}");
@@ -323,8 +332,8 @@ impl<'a> Apdu<'a> {
                 let p1 = 0x00;
                 let p2 = *control_info as u8 | *occurrence as u8;
                 let payload = file_id.into_raw().to_be_bytes().to_vec();
-                let payload_len = (payload.len() as u8).to_be_bytes().to_vec(); // TODO not sure this is correct
-                let l_e_len = vec![]; // TODO not sure this is correct
+                let payload_len = serialize_l_c_len(payload.len());
+                let l_e_len = vec![]; // no restrictions on the response length
                 let remainder = [payload_len, payload, l_e_len].concat();
                 (ins, p1, p2, remainder)
             }
@@ -336,16 +345,20 @@ impl<'a> Apdu<'a> {
                 let ins = 0xA4;
                 let p1 = 0x04;
                 let p2 = *control_info as u8 | *occurrence as u8;
-                let aid_len = aid.len() as u8; // TODO not sure this is correct
-                let payload_len = aid_len.to_be_bytes().to_vec();
-                let l_e_len = vec![0x00]; // TODO not sure this is correct
+                let payload_len = serialize_l_c_len(aid.len());
+                let l_e_len = vec![0x00]; // a short response seems enough
                 let remainder = [payload_len, aid.to_vec(), l_e_len].concat();
                 (ins, p1, p2, remainder)
             }
             Apdu::ReadBinary { slice } => {
                 let ins = 0xB0; // data is absent
-                let p = (slice.start as u16).to_be_bytes(); // TODO
+                let p = (slice.start as u16).to_be_bytes();
+                // assuming b8 of P1 will be 0 so the holder knows the two bytes are one number
+                // (see 7.2.2 of ISO 7816-4)
                 let p1 = p[0];
+                if p1 > 127 {
+                    warn!("P1 has b8 with a value of 1 which might impact the ReadBinary instruction's interpretation");
+                }
                 let p2 = p[1];
                 let payload_len = (slice.len() as u8).to_be_bytes().to_vec();
                 let remainder = payload_len;
@@ -353,10 +366,15 @@ impl<'a> Apdu<'a> {
             }
             Apdu::UpdateBinary { offset, data } => {
                 let ins = 0xD6; // string of data
-                let p = (*offset as u16).to_be_bytes(); // TODO
+                let p = (*offset as u16).to_be_bytes();
+                // assuming b8 of P1 will be 0 so the holder knows the two bytes are one number
+                // (see 7.2.2 of ISO 7816-4)
                 let p1 = p[0];
+                if p1 > 127 {
+                    warn!("P1 has b8 with a value of 1 which might impact the UpdateBinary instruction's interpretation");
+                }
                 let p2 = p[1];
-                let payload_len = (data.len() as u8).to_be_bytes().to_vec(); // TODO
+                let payload_len = serialize_l_c_len(data.len());
                 let remainder = [payload_len, data.to_vec()].concat();
                 (ins, p1, p2, remainder)
             }

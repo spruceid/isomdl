@@ -1,3 +1,6 @@
+// The base specs for this are Bluetooth® Secure Simple Pairing Using NFC, with some bits coming
+// from ISO 7816-4 and ISO 18013-5.
+
 use anyhow::{anyhow, bail, Context, Result};
 use ndef_rs::{NdefRecord, TNF};
 use serde::{Deserialize, Serialize};
