@@ -25,7 +25,8 @@ pub enum ReaderHandoverState {
     WaitingForCapabilitiesFileResponse,
     WaitingForCapabilitiesReadResponse,
     WaitingForNdefFileResponse,
-    WaitingForNdefReadResponse,
+    WaitingForNdefReadResponseLength,
+    WaitingForNdefReadResponseData { total_length: usize, data: Vec<u8> },
     Done,
 }
 

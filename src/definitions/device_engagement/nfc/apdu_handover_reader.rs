@@ -31,6 +31,9 @@ pub enum ReaderApduError {
 #[derive(Debug, Clone)]
 pub struct ReaderApduHandoverDriver {
     state: ReaderHandoverState,
+    /// Maximum amount of bytes in an APDU command or response. Used to be able to transmit large
+    /// amount of data in multiple chunks.
+    max_buffer_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -41,12 +44,13 @@ pub enum ReaderApduProgress {
 
 impl ReaderApduHandoverDriver {
     /// Create a new APDU handover driver.
-    ///
-    /// * `negotiated`: true -> use negotiated handover (not implemented yet), false -> use static handover.
-    /// * `strict`: require selecting the MDOC AID before responding to NDEF reads. If strict is false, we will always return NDEF messages.
     pub fn new() -> (Self, Vec<u8>) {
         let self_ = Self {
             state: ReaderHandoverState::WaitingForAidResponse,
+            // hardcoding the buffer size to the standard short APDU limit for now, but in the
+            // future we might have to make it configurable if we see either the need to use
+            // extended APDUs or encounter discrepancies between platforms.
+            max_buffer_size: 264,
         };
         let apdu = Apdu::SelectAid {
             occurrence: Occurrence::FirstOrOnly,
@@ -68,7 +72,7 @@ impl ReaderApduHandoverDriver {
                 rapdu.code
             )));
         }
-        match self.state {
+        match &self.state {
             ReaderHandoverState::WaitingForAidResponse => {
                 self.state = ReaderHandoverState::WaitingForCapabilitiesFileResponse;
                 let apdu = Apdu::SelectFile {
@@ -110,23 +114,53 @@ impl ReaderApduHandoverDriver {
                 Ok(ReaderApduProgress::InProgress(apdu.to_bytes()))
             }
             ReaderHandoverState::WaitingForNdefFileResponse => {
-                self.state = ReaderHandoverState::WaitingForNdefReadResponse;
+                self.state = ReaderHandoverState::WaitingForNdefReadResponseLength;
                 let apdu = Apdu::ReadBinary { slice: 0..2 };
                 Ok(ReaderApduProgress::InProgress(apdu.to_bytes()))
             }
-            ReaderHandoverState::WaitingForNdefReadResponse => {
+            ReaderHandoverState::WaitingForNdefReadResponseLength => {
                 let ndef_recv = rapdu.payload;
-                if ndef_recv.len() == 2 {
-                    let ndef_len = u16::from_be_bytes(*ndef_recv.first_chunk::<2>().unwrap());
-                    let apdu = Apdu::ReadBinary {
-                        slice: 2..2 + ndef_len as usize, // TODO can it be larger than 1 chunk?
-                    };
-                    Ok(ReaderApduProgress::InProgress(apdu.to_bytes()))
+                if ndef_recv.len() != 2 {
+                    return Err(ReaderApduError::InvalidApduResponse("Expected to receive length indication, but payload doesn't have a payload of 2 bytes".into()));
+                }
+                let ndef_len = u16::from_be_bytes(*ndef_recv.first_chunk::<2>().unwrap()) as usize;
+                let chunk_len = if ndef_len <= self.max_buffer_size {
+                    ndef_len
                 } else {
-                    let carrier_info = ReaderNegotiatedCarrierInfo::parse_ndef_message(&ndef_recv)
+                    self.max_buffer_size
+                };
+                let apdu = Apdu::ReadBinary {
+                    slice: 2..2 + chunk_len,
+                };
+                self.state = ReaderHandoverState::WaitingForNdefReadResponseData {
+                    total_length: ndef_len,
+                    data: vec![],
+                };
+                Ok(ReaderApduProgress::InProgress(apdu.to_bytes()))
+            }
+            ReaderHandoverState::WaitingForNdefReadResponseData { total_length, data } => {
+                let ndef_recv = rapdu.payload;
+                let data = [data, ndef_recv.as_slice()].concat();
+                let offset = data.len();
+                if &offset == total_length {
+                    let carrier_info = ReaderNegotiatedCarrierInfo::parse_ndef_message(&data)
                         .map_err(ReaderApduError::NdefMessageError)?;
                     self.state = ReaderHandoverState::Done;
                     Ok(ReaderApduProgress::Done(Box::new(carrier_info)))
+                } else {
+                    let chunk_len = if total_length - offset <= self.max_buffer_size {
+                        total_length - offset
+                    } else {
+                        self.max_buffer_size
+                    };
+                    let apdu = Apdu::ReadBinary {
+                        slice: offset..offset + chunk_len,
+                    };
+                    self.state = ReaderHandoverState::WaitingForNdefReadResponseData {
+                        total_length: *total_length,
+                        data,
+                    };
+                    Ok(ReaderApduProgress::InProgress(apdu.to_bytes()))
                 }
             }
             ReaderHandoverState::Done => Err(ReaderApduError::Done),
