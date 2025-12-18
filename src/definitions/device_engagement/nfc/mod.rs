@@ -17,5 +17,3 @@ pub use ndef_handover::BleInfo as NegotiatedBleInfo;
 pub use ndef_handover::LeRole;
 pub use ndef_handover::NegotiatedCarrierInfo;
 pub use ndef_handover_reader::ReaderNegotiatedCarrierInfo;
-
-// TODO don't use Reader prefix, just rely on paths
