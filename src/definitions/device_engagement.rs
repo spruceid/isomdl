@@ -58,6 +58,28 @@ pub struct DeviceEngagement {
     pub protocol_info: Option<ProtocolInfo>,
 }
 
+impl DeviceEngagement {
+    pub fn ble_central_client_options(&self) -> impl Iterator<Item = &CentralClientMode> {
+        self.device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.central_client_mode.as_ref(),
+                _ => None,
+            })
+    }
+
+    pub fn ble_peripheral_server_options(&self) -> impl Iterator<Item = &PeripheralServerMode> {
+        self.device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.peripheral_server_mode.as_ref(),
+                _ => None,
+            })
+    }
+}
+
 impl PartialEq for DeviceEngagement {
     fn eq(&self, other: &Self) -> bool {
         self.version == other.version
@@ -117,7 +139,7 @@ pub struct BleOptions {
 }
 
 /// Represents a peripheral server mode.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PeripheralServerMode {
     /// The 'UUID' of the peripheral server.
     pub uuid: Uuid,
@@ -127,9 +149,15 @@ pub struct PeripheralServerMode {
 }
 
 /// Represents the central client mode for device engagement.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CentralClientMode {
     pub uuid: Uuid,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum BleMode {
+    PeripheralServer(PeripheralServerMode),
+    CentralClient(CentralClientMode),
 }
 
 /// Represents the options for a `Wi-Fi` device engagement.

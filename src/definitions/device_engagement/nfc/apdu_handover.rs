@@ -13,6 +13,9 @@ use crate::definitions::{
 use thiserror::Error;
 use uuid::Uuid;
 
+pub(crate) const APDU_AID_MDOC: &[u8] = &[0xA0, 0x00, 0x00, 0x02, 0x48, 0x04, 0x00];
+pub(crate) const APDU_AID_NDEF_APPLICATION: &[u8] = &[0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
+
 #[derive(Clone)]
 pub struct StaticHandoverState {
     pub uuid: uuid::Uuid,
@@ -64,7 +67,7 @@ const APDU_MAX_SIZE: usize = NFC_MAX_PAYLOAD_SIZE + 10;
 const APDU_MAX_SIZE_BYTES: [u8; 2] = u16::to_be_bytes(APDU_MAX_SIZE as u16);
 
 #[rustfmt::skip]
-const CC_FILE_TEMPLATE: &[u8] = &[
+pub(super) const CC_FILE_TEMPLATE: &[u8] = &[
     0x00, 0x0f, // Length of the CC file
     0x20, // Mapping version
     APDU_MAX_SIZE_BYTES[0], APDU_MAX_SIZE_BYTES[1], // Maximum R-APDU (reader -> app) size
@@ -77,7 +80,7 @@ const CC_FILE_TEMPLATE: &[u8] = &[
     0x00, // Write access condition. 00 for negotiated, ff for static
 ];
 
-fn cc_file(negotiated: bool) -> Vec<u8> {
+pub(super) fn cc_file(negotiated: bool) -> Vec<u8> {
     let mut cc = CC_FILE_TEMPLATE.to_vec();
     cc[14] = if negotiated { 0x00 } else { 0xff };
     cc
@@ -220,25 +223,20 @@ impl ApduHandoverDriver {
             },
             apdu::Apdu::SelectAid {
                 control_info, aid, ..
-            } => {
-                const APDU_AID_MDOC: &[u8] = &[0xA0, 0x00, 0x00, 0x02, 0x48, 0x04, 0x00];
-                const APDU_AID_NDEF_APPLICATION: &[u8] =
-                    &[0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
-                match aid {
-                    APDU_AID_MDOC => match control_info.get_payload(aid) {
-                        Ok(response) => {
-                            self.listen_for_ndef = true;
-                            response
-                        }
-                        Err(err) => err,
-                    },
-                    APDU_AID_NDEF_APPLICATION => match control_info.get_payload(aid) {
-                        Ok(response) => response,
-                        Err(err) => err,
-                    },
-                    _ => apdu::ResponseCode::FileOrApplicationNotFound.into(),
-                }
-            }
+            } => match aid {
+                APDU_AID_MDOC => match control_info.get_payload(aid) {
+                    Ok(response) => {
+                        self.listen_for_ndef = true;
+                        response
+                    }
+                    Err(err) => err,
+                },
+                APDU_AID_NDEF_APPLICATION => match control_info.get_payload(aid) {
+                    Ok(response) => response,
+                    Err(err) => err,
+                },
+                _ => apdu::ResponseCode::FileOrApplicationNotFound.into(),
+            },
             apdu::Apdu::ReadBinary { slice } => {
                 let Some(read_bytes) = self.ndef_send.as_ref() else {
                     return apdu::ResponseCode::ConditionsNotSatisfied.into();
@@ -270,5 +268,39 @@ impl ApduHandoverDriver {
         } else {
             apdu::Response::from(apdu::ResponseCode::ConditionsNotSatisfied).into()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::definitions::device_engagement::nfc::{
+        ReaderApduHandoverDriver, ReaderApduProgress,
+    };
+
+    use super::*;
+
+    #[test]
+    fn roundtrip_static_handover() {
+        let mut holder = ApduHandoverDriver::new(false, false)
+            .expect("failed to build holder apdu handover driver");
+        let (mut reader, mut apdu) = ReaderApduHandoverDriver::new();
+        let mut rapdu;
+        for _ in 0..5 {
+            rapdu = holder.process_apdu(&apdu);
+            apdu = match reader
+                .process_rapdu(&rapdu)
+                .expect("failed to process rpdu")
+            {
+                ReaderApduProgress::InProgress(r) => r,
+                ReaderApduProgress::Done(_) => {
+                    panic!("there should be a follow-up apdu")
+                }
+            };
+        }
+        let rapdu = holder.process_apdu(&apdu);
+        let res = reader
+            .process_rapdu(&rapdu)
+            .expect("failed to process rpdu");
+        assert!(matches!(res, ReaderApduProgress::Done(_)));
     }
 }

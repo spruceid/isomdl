@@ -102,9 +102,12 @@ fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u
     );
     let trust_anchor_registry = TrustAnchorRegistry::default();
 
-    let (reader_sm, session_request, _ble_ident) =
-        reader::SessionManager::establish_session(qr, requested_elements, trust_anchor_registry)
-            .context("failed to establish reader session")?;
+    let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
+        reader::Handover::QR(qr),
+        requested_elements,
+        trust_anchor_registry,
+    )
+    .context("failed to establish reader session")?;
     Ok((reader_sm, session_request))
 }
 

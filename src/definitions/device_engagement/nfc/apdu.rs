@@ -1,4 +1,5 @@
 use strum_macros::EnumIter;
+use tracing::warn;
 
 // This has been written according to ISO 7816-4 (2005).
 // This only implements what is required for NFC handover to BLE.
@@ -8,6 +9,7 @@ use crate::definitions::device_engagement::nfc::{
     util::{IntoRaw, KnownOrRaw},
 };
 
+#[derive(Debug)]
 pub struct Response {
     pub code: ResponseCode,
     pub payload: Vec<u8>,
@@ -18,6 +20,23 @@ impl From<Response> for Vec<u8> {
         response_bytes.extend_from_slice(&response.payload);
         response_bytes.extend_from_slice(&response.code.to_bytes());
         response_bytes
+    }
+}
+impl TryFrom<&[u8]> for Response {
+    type Error = &'static str;
+    fn try_from(response: &[u8]) -> Result<Self, Self::Error> {
+        if response.len() < 2 {
+            return Err("Response is not long enough");
+        }
+        let (payload, code) = response.split_last_chunk::<2>().unwrap();
+        let code: ResponseCode = match u16::from_be_bytes(*code).try_into() {
+            Ok(c) => c,
+            Err(_) => return Err("Unknown response code: {code}"),
+        };
+        Ok(Self {
+            code,
+            payload: payload.to_vec(),
+        })
     }
 }
 
@@ -31,6 +50,22 @@ pub enum ResponseCode {
     FileOrApplicationNotFound = 0x6A82,
     InstructionNotSupported = 0x6D00,
     Unspecified = 0x6F00,
+}
+
+impl TryFrom<u16> for ResponseCode {
+    type Error = ();
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            0x9000 => Ok(ResponseCode::Ok),
+            0x6700 => Ok(ResponseCode::IncorrectLength),
+            0x6B00 => Ok(ResponseCode::IncorrectP1OrP2),
+            0x6985 => Ok(ResponseCode::ConditionsNotSatisfied),
+            0x6A82 => Ok(ResponseCode::FileOrApplicationNotFound),
+            0x6D00 => Ok(ResponseCode::InstructionNotSupported),
+            0x6F00 => Ok(ResponseCode::Unspecified),
+            _ => Err(()),
+        }
+    }
 }
 
 impl ResponseCode {
@@ -131,8 +166,17 @@ pub mod select {
     }
 }
 
+fn serialize_l_c_len(len: usize) -> Vec<u8> {
+    if len < 256 {
+        (len as u8).to_be_bytes().to_vec()
+    } else {
+        [&[0x00], (len as u16).to_be_bytes().as_slice()].concat()
+    }
+}
+
 impl<'a> Apdu<'a> {
     pub fn parse(command_bytes: &'a [u8]) -> Result<Self, Response> {
+        tracing::debug!("APDU: {command_bytes:?}");
         if command_bytes.len() < 4 {
             apdu_fail!(ResponseCode::IncorrectLength);
         }
@@ -273,5 +317,196 @@ impl<'a> Apdu<'a> {
             }
             _ => apdu_fail!(ResponseCode::InstructionNotSupported),
         })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let cla = 0x00;
+
+        let (ins, p1, p2, remainder) = match self {
+            Apdu::SelectFile {
+                occurrence,
+                control_info,
+                file_id,
+            } => {
+                let ins = 0xA4;
+                let p1 = 0x00;
+                let p2 = *control_info as u8 | *occurrence as u8;
+                let payload = file_id.into_raw().to_be_bytes().to_vec();
+                let payload_len = serialize_l_c_len(payload.len());
+                let l_e_len = vec![]; // no restrictions on the response length
+                let remainder = [payload_len, payload, l_e_len].concat();
+                (ins, p1, p2, remainder)
+            }
+            Apdu::SelectAid {
+                occurrence,
+                control_info,
+                aid,
+            } => {
+                let ins = 0xA4;
+                let p1 = 0x04;
+                let p2 = *control_info as u8 | *occurrence as u8;
+                let payload_len = serialize_l_c_len(aid.len());
+                let l_e_len = vec![0x00]; // a short response seems enough
+                let remainder = [payload_len, aid.to_vec(), l_e_len].concat();
+                (ins, p1, p2, remainder)
+            }
+            Apdu::ReadBinary { slice } => {
+                let ins = 0xB0; // data is absent
+                let p = (slice.start as u16).to_be_bytes();
+                // assuming b8 of P1 will be 0 so the holder knows the two bytes are one number
+                // (see 7.2.2 of ISO 7816-4)
+                let p1 = p[0];
+                if p1 > 127 {
+                    warn!("P1 has b8 with a value of 1 which might impact the ReadBinary instruction's interpretation");
+                }
+                let p2 = p[1];
+                let payload_len = (slice.len() as u8).to_be_bytes().to_vec();
+                let remainder = payload_len;
+                (ins, p1, p2, remainder)
+            }
+            Apdu::UpdateBinary { offset, data } => {
+                let ins = 0xD6; // string of data
+                let p = (*offset as u16).to_be_bytes();
+                // assuming b8 of P1 will be 0 so the holder knows the two bytes are one number
+                // (see 7.2.2 of ISO 7816-4)
+                let p1 = p[0];
+                if p1 > 127 {
+                    warn!("P1 has b8 with a value of 1 which might impact the UpdateBinary instruction's interpretation");
+                }
+                let p2 = p[1];
+                let payload_len = serialize_l_c_len(data.len());
+                let remainder = [payload_len, data.to_vec()].concat();
+                (ins, p1, p2, remainder)
+            }
+        };
+        [vec![cla, ins, p1, p2], remainder].concat()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn test_apdus(apdus: Vec<Vec<u8>>) {
+        for apdu in apdus {
+            let parsed_apdu = Apdu::parse(&apdu).expect("Failed to parse APDU");
+            println!("APDU: {parsed_apdu:?}");
+            assert_eq!(apdu, parsed_apdu.to_bytes());
+        }
+    }
+
+    #[test]
+    /// real APDUs from the GET verifier app
+    fn get_apdus() {
+        let apdus = vec![
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xA0, 0x00, 0x00, 0x02, 0x48, 0x04, 0x00, 0x00,
+            ],
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x0F],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x0F],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x02, 0xCC],
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x0F],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x02, 0xCC],
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x0F],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x02, 0xCC],
+        ];
+        test_apdus(apdus);
+    }
+
+    #[test]
+    /// real APDUs from the Idemia verifier app
+    fn idemia_apdus() {
+        let apdus = vec![
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x0F],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x02, 0xCC],
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x0F],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x02, 0xCC],
+            vec![
+                0x00, 0xA4, 0x04, 0x00, 0x07, 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01, 0x00,
+            ],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x0F],
+            vec![0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x04],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x00, 0x02],
+            vec![0x00, 0xB0, 0x00, 0x02, 0xCC],
+        ];
+        test_apdus(apdus);
+    }
+
+    #[test]
+    /// test APDUs from multipaz
+    /// https://github.com/openwallet-foundation/multipaz/blob/96b82c9ff7a34d18a67f09473e51200a202bee48/multipaz/src/commonTest/kotlin/org/multipaz/mdoc/nfc/MdocNfcEngagementHelperTest.kt#L10
+    fn multipaz_tests_apdus() {
+        let apdus = vec![
+            // static
+            // multipaz does not append Le when it's 0, the trailing 00 was added manually
+            hex::decode("00a4040007d276000085010100").unwrap(),
+            hex::decode("00a4000c02e103").unwrap(),
+            hex::decode("00b000000f").unwrap(),
+            hex::decode("00a4000c02e104").unwrap(),
+            hex::decode("00b0000002").unwrap(),
+            hex::decode("00b00002fe").unwrap(),
+            // negotiated
+            // multipaz does not append Le when it's 0, the trailing 00 was added manually
+            hex::decode("00a4040007d276000085010100").unwrap(),
+            hex::decode("00a4000c02e103").unwrap(),
+            hex::decode("00b000000f").unwrap(),
+            hex::decode("00a4000c02e104").unwrap(),
+            hex::decode("00b0000002").unwrap(),
+            hex::decode("00b000021f").unwrap(),
+            hex::decode("00d600001b0019d1021454731375726e3a6e66633a736e3a68616e646f766572").unwrap(),
+            hex::decode("00b0000002").unwrap(),
+            hex::decode("00b0000206").unwrap(),
+            hex::decode("00d60000aa00a8910215487215910204616301013000510206616301036e6663001c1e060a69736f2e6f72673a31383031333a726561646572656e676167656d656e746d646f63726561646572a10063312e301a2015016170706c69636174696f6e2f766e642e626c7565746f6f74682e6c652e6f6f6230021c031107b66eef55ee782ea2514bb6a1c42ad5b35c110a0369736f2e6f72673a31383031333a6e66636e6663010301ffff0402010000").unwrap(),
+            hex::decode("00b0000002").unwrap(),
+            hex::decode("00b00002ba").unwrap(),
+        ];
+        test_apdus(apdus);
     }
 }

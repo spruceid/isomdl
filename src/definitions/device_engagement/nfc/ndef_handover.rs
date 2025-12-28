@@ -91,6 +91,21 @@ impl RecordType {
     }
 }
 
+#[repr(u8)]
+#[rustfmt::skip]
+#[derive(strum_macros::FromRepr, Debug, Clone, Copy, Serialize, Deserialize)]
+/// The LE Role data type defines the LE role capabilities of the device.
+pub enum LeRole {
+    /// Only Peripheral Role supported
+    PeripheralOnly = 0x00,
+    /// Only Central Role supported
+    CentralOnly = 0x01,
+    /// Peripheral and Central Role supported, Peripheral Role preferred for connection establishment
+    PeripheralPreferred = 0x02,
+    /// Peripheral and Central Role supported, Central Role preferred for connection establishment
+    CentralPreferred = 0x03,
+}
+
 // ndef_rs provides ExternalPayload, but this seems to have semantic meaning.
 // We'll implement our own form of it with no implied semantics.
 // This also allows us to use local borrows (since ExternalPayload only uses 'static),
@@ -123,7 +138,9 @@ pub enum BleInfo {
 pub struct NegotiatedCarrierInfo {
     pub ble: BleInfo,
     pub uuid: uuid::Uuid,
+    /// Handover Select Message
     pub hs_message: ByteStr,
+    /// Handover Request Message
     pub hr_message: Option<ByteStr>,
 }
 
@@ -202,8 +219,8 @@ pub fn get_static_handover_ndef_response(
             [
                 0x02, // Length of LE Role Payload
                 BleTypeByte::LeRole as u8,
-                0x01, // Central Client Mode BLE role
-                0x11, // Length of UUID payload
+                LeRole::CentralOnly as u8, // Central Client Mode BLE role
+                0x11,                      // Length of UUID payload
                 BleTypeByte::CompleteList128BitServiceUuids as u8,
             ]
             .as_slice(),
