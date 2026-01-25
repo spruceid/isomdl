@@ -98,6 +98,7 @@ mod test {
 
     // https://vical.dts.aamva.org/
     static AAMVA_VICAL: &[u8] = include_bytes!("../../test/vical/vc-2025-11-18-1763491092481.cbor");
+    // TODO verify cert with chain from https://vical.dts.aamva.org/trustcertificates
 
     #[test]
     fn process_aamva_vical() {
