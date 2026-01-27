@@ -16,8 +16,7 @@ use crate::definitions::{
     DigestId,
 };
 use coset::CoseSign1;
-use serde::{de, Deserialize, Deserializer, Serialize};
-use std::fmt;
+use serde::{Deserialize, Serialize};
 
 /// Represents an issuer-signed object.
 ///
@@ -27,71 +26,12 @@ use std::fmt;
 ///
 /// During deserialization, both "nameSpaces" and "digestIdMapping" are accepted and mapped to the `namespaces` field.
 /// During serialization, the field is serialized as "nameSpaces".
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IssuerSigned {
     #[serde(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
     pub namespaces: Option<IssuerNamespaces>,
     pub issuer_auth: MaybeTagged<CoseSign1>,
-}
-
-impl<'de> Deserialize<'de> for IssuerSigned {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct IssuerSignedVisitor;
-
-        impl<'de> de::Visitor<'de> for IssuerSignedVisitor {
-            type Value = IssuerSigned;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter
-                    .write_str("a map with issuerAuth and optionally nameSpaces or digestIdMapping")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: de::MapAccess<'de>,
-            {
-                let mut namespaces: Option<IssuerNamespaces> = None;
-                let mut issuer_auth: Option<MaybeTagged<CoseSign1>> = None;
-
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "nameSpaces" | "digestIdMapping" => {
-                            if namespaces.is_some() {
-                                return Err(de::Error::duplicate_field(
-                                    "nameSpaces/digestIdMapping",
-                                ));
-                            }
-                            namespaces = map.next_value()?;
-                        }
-                        "issuerAuth" => {
-                            if issuer_auth.is_some() {
-                                return Err(de::Error::duplicate_field("issuerAuth"));
-                            }
-                            issuer_auth = Some(map.next_value()?);
-                        }
-                        _ => {
-                            // Skip unknown fields
-                            let _ = map.next_value::<de::IgnoredAny>()?;
-                        }
-                    }
-                }
-
-                let issuer_auth =
-                    issuer_auth.ok_or_else(|| de::Error::missing_field("issuerAuth"))?;
-
-                Ok(IssuerSigned {
-                    namespaces,
-                    issuer_auth,
-                })
-            }
-        }
-
-        deserializer.deserialize_map(IssuerSignedVisitor)
-    }
 }
 
 pub type IssuerNamespaces = NonEmptyMap<String, NonEmptyVec<IssuerSignedItemBytes>>;
