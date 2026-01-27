@@ -1,6 +1,6 @@
 //! This module contains the definition of the [IssuerSigned] struct and related types.
 //!
-//! The [IssuerSigned] struct represents a signed issuer object, which includes information about `namespaces`, `authentication`, and `signed items`.
+//! The [IssuerSigned] struct represents a signed issuer object, which includes information about `namespaces`, `authentication`, and `signed items`.  
 //!
 //! # Notes
 //!
@@ -20,13 +20,10 @@ use serde::{Deserialize, Serialize};
 
 /// Represents an issuer-signed object.
 ///
-/// This struct is used to store information about an issuer-signed object, which includes namespaces and issuer authentication.
-/// [IssuerSigned::namespaces] field is an optional [IssuerNamespaces] object that contains namespaces associated with the issuer.
+/// This struct is used to store information about an issuer-signed object, which includes namespaces and issuer authentication.  
+/// [IssuerSigned::namespaces] field is an optional [IssuerNamespaces] object that contains namespaces associated with the issuer.  
 /// [IssuerSigned::issuer_auth] field is a [CoseSign1] object that represents the issuer authentication.
-///
-/// During deserialization, both "nameSpaces" and "digestIdMapping" are accepted and mapped to the `namespaces` field.
-/// During serialization, the field is serialized as "nameSpaces".
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IssuerSigned {
     #[serde(skip_serializing_if = "Option::is_none", rename = "nameSpaces")]
