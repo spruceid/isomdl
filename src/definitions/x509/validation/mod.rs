@@ -11,6 +11,7 @@ use validity::check_validity_period;
 use x509_cert::Certificate;
 
 use super::{
+    crl::{check_certificate_revocation, CrlFetcher, RevocationStatus},
     trust_anchor::{TrustAnchorRegistry, TrustPurpose},
     X5Chain,
 };
@@ -39,6 +40,13 @@ pub enum ValidationRuleset {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ValidationOutcome {
     pub errors: Vec<String>,
+    /// Errors encountered while checking CRL revocation status (e.g., fetch failures,
+    /// parse errors, missing distribution points).
+    ///
+    /// These are kept separate from `errors` because they represent infrastructure
+    /// failures rather than security failures. Actual certificate revocation is
+    /// reported in `errors`, not here.
+    pub revocation_errors: Vec<String>,
 }
 
 impl ValidationOutcome {
@@ -48,22 +56,33 @@ impl ValidationOutcome {
 }
 
 impl ValidationRuleset {
-    pub fn validate(
+    /// Validate the certificate chain with CRL revocation checking.
+    ///
+    /// # Arguments
+    /// * `x5chain` - The certificate chain to validate
+    /// * `trust_anchors` - The trust anchor registry
+    /// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks
+    ///   (a warning will be added to `revocation_errors`).
+    pub async fn validate<C: CrlFetcher>(
         self,
         x5chain: &X5Chain,
         trust_anchors: &TrustAnchorRegistry,
+        crl_fetcher: &C,
     ) -> ValidationOutcome {
         match self {
-            Self::Mdl => mdl_validate(x5chain, trust_anchors),
-            Self::AamvaMdl => aamva_mdl_validate(x5chain, trust_anchors),
-            Self::MdlReaderOneStep => mdl_reader_one_step_validate(x5chain, trust_anchors),
+            Self::Mdl => mdl_validate(x5chain, trust_anchors, crl_fetcher).await,
+            Self::AamvaMdl => aamva_mdl_validate(x5chain, trust_anchors, crl_fetcher).await,
+            Self::MdlReaderOneStep => {
+                mdl_reader_one_step_validate(x5chain, trust_anchors, crl_fetcher).await
+            }
         }
     }
 }
 
-fn mdl_validate_inner<'a: 'b, 'b>(
+async fn mdl_validate_inner<'a: 'b, 'b, C: CrlFetcher>(
     x5chain: &'a X5Chain,
     trust_anchors: &'b TrustAnchorRegistry,
+    crl_fetcher: &C,
 ) -> Result<(ValidationOutcome, &'a Certificate, &'b Certificate), ValidationOutcome> {
     let mut outcome = ValidationOutcome::default();
 
@@ -105,13 +124,32 @@ fn mdl_validate_inner<'a: 'b, 'b>(
         .map(ErrorWithContext::iaca);
     outcome.errors.extend(iaca_extension_errors);
 
-    // TODO: CRL check on DS and IACA.
+    // CRL check on DS certificate (signed by IACA)
+    match check_certificate_revocation(crl_fetcher, document_signer, iaca).await {
+        Ok(RevocationStatus::Valid) => {}
+        Ok(RevocationStatus::Revoked { .. }) => {
+            // Actual revocation is a hard security failure
+            outcome
+                .errors
+                .push(ErrorWithContext::ds("certificate is revoked"));
+        }
+        Err(e) => {
+            // Infrastructure failures are non-fatal warnings
+            outcome
+                .revocation_errors
+                .push(ErrorWithContext::ds(e.to_string()));
+        }
+    }
 
     Ok((outcome, document_signer, iaca))
 }
 
-fn mdl_validate(x5chain: &X5Chain, trust_anchors: &TrustAnchorRegistry) -> ValidationOutcome {
-    match mdl_validate_inner(x5chain, trust_anchors) {
+async fn mdl_validate<C: CrlFetcher>(
+    x5chain: &X5Chain,
+    trust_anchors: &TrustAnchorRegistry,
+    crl_fetcher: &C,
+) -> ValidationOutcome {
+    match mdl_validate_inner(x5chain, trust_anchors, crl_fetcher).await {
         Ok((mut outcome, ds, iaca)) => {
             if has_rdn(ds, STATE_OR_PROVINCE_NAME) || has_rdn(iaca, STATE_OR_PROVINCE_NAME) {
                 if let Some(error) = state_or_province_name_matches(ds, iaca) {
@@ -125,8 +163,12 @@ fn mdl_validate(x5chain: &X5Chain, trust_anchors: &TrustAnchorRegistry) -> Valid
     }
 }
 
-fn aamva_mdl_validate(x5chain: &X5Chain, trust_anchors: &TrustAnchorRegistry) -> ValidationOutcome {
-    match mdl_validate_inner(x5chain, trust_anchors) {
+async fn aamva_mdl_validate<C: CrlFetcher>(
+    x5chain: &X5Chain,
+    trust_anchors: &TrustAnchorRegistry,
+    crl_fetcher: &C,
+) -> ValidationOutcome {
+    match mdl_validate_inner(x5chain, trust_anchors, crl_fetcher).await {
         Ok((mut outcome, ds, iaca)) => {
             if let Some(error) = state_or_province_name_matches(ds, iaca) {
                 outcome.errors.push(ErrorWithContext::comparison(error))
@@ -138,9 +180,10 @@ fn aamva_mdl_validate(x5chain: &X5Chain, trust_anchors: &TrustAnchorRegistry) ->
     }
 }
 
-fn mdl_reader_one_step_validate(
+async fn mdl_reader_one_step_validate<C: CrlFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
+    crl_fetcher: &C,
 ) -> ValidationOutcome {
     let mut outcome = ValidationOutcome::default();
 
@@ -159,7 +202,7 @@ fn mdl_reader_one_step_validate(
     let mut trust_anchor_candidates =
         find_trust_anchor_candidates(reader, trust_anchors, TrustPurpose::ReaderCa);
 
-    let Some(_reader_ca) = trust_anchor_candidates.next() else {
+    let Some(reader_ca) = trust_anchor_candidates.next() else {
         outcome
             .errors
             .push(ErrorWithContext::reader_ca("no valid trust anchor found"));
@@ -170,7 +213,22 @@ fn mdl_reader_one_step_validate(
         tracing::warn!("more than one trust anchor candidate found, using the first one");
     }
 
-    // TODO: CRL or OCSP check on reader and reader CA.
+    // CRL check on reader certificate (signed by Reader CA)
+    match check_certificate_revocation(crl_fetcher, reader, reader_ca).await {
+        Ok(RevocationStatus::Valid) => {}
+        Ok(RevocationStatus::Revoked { .. }) => {
+            // Actual revocation is a hard security failure
+            outcome
+                .errors
+                .push(ErrorWithContext::reader("certificate is revoked"));
+        }
+        Err(e) => {
+            // Infrastructure failures are non-fatal warnings
+            outcome
+                .revocation_errors
+                .push(ErrorWithContext::reader(e.to_string()));
+        }
+    }
 
     outcome
 }
