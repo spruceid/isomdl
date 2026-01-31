@@ -2,8 +2,8 @@ mod common;
 
 use crate::common::{Device, Reader};
 
-#[test]
-pub fn simulated_device_and_reader_interaction() {
+#[test_log::test(tokio::test)]
+pub async fn simulated_device_and_reader_interaction() {
     let key: p256::ecdsa::SigningKey =
         p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))
             .unwrap()
@@ -18,7 +18,9 @@ pub fn simulated_device_and_reader_interaction() {
 
     // Device accepting request
     let (device_session_manager, validated_request) =
-        Device::handle_request(engaged_state, request, Default::default()).unwrap();
+        Device::handle_request(engaged_state, request, Default::default())
+            .await
+            .unwrap();
 
     // Prepare response with required elements
     let response = Device::create_response(
@@ -29,5 +31,7 @@ pub fn simulated_device_and_reader_interaction() {
     .unwrap();
 
     // Reader Processing mDL data
-    Reader::reader_handle_device_response(&mut reader_session_manager, response).unwrap();
+    Reader::reader_handle_device_response(&mut reader_session_manager, response)
+        .await
+        .unwrap();
 }

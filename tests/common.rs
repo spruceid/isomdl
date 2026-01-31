@@ -68,7 +68,7 @@ impl Device {
     }
 
     /// The Device handles the request from the reader and advances the state.
-    pub fn handle_request(
+    pub async fn handle_request(
         state: SessionManagerEngaged,
         request: Vec<u8>,
         trusted_verifiers: TrustAnchorRegistry,
@@ -76,8 +76,10 @@ impl Device {
         let (session_manager, validated_request) = {
             let session_establishment: definitions::SessionEstablishment =
                 cbor::from_slice(&request).context("could not deserialize request")?;
+            // Use () to skip CRL checks in tests
             state
-                .process_session_establishment(session_establishment, trusted_verifiers)
+                .process_session_establishment(session_establishment, trusted_verifiers, &())
+                .await
                 .context("could not process process session establishment")?
         };
         if session_manager.get_next_signature_payload().is_some() {
@@ -120,11 +122,12 @@ pub struct Reader {}
 
 impl Reader {
     /// Reader Processing mDL data.
-    pub fn reader_handle_device_response(
+    pub async fn reader_handle_device_response(
         reader_sm: &mut reader::SessionManager,
         response: Vec<u8>,
     ) -> Result<()> {
-        let validated = reader_sm.handle_response(&response);
+        // Use () to skip CRL checks in tests
+        let validated = reader_sm.handle_response(&response, &()).await;
         println!("Validated Response: {validated:?}");
         Ok(())
     }

@@ -15,6 +15,7 @@ use crate::{
         helpers::{ByteStr, NonEmptyVec},
         namespaces::org_iso_18013_5_1::TDate,
         x509::{
+            crl::CrlFetcher,
             trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
             validation::{ValidationOutcome, ValidationRuleset},
             SupportedCurve, X5Chain,
@@ -175,14 +176,22 @@ impl VerifiedVical {
     /// # Arguments
     /// * `bytes` - The CBOR-encoded COSE_Sign1 containing the VICAL
     /// * `trust_anchors` - Registry of trusted root/intermediate certificates for chain validation
+    /// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks.
     ///
     /// # Returns
     /// A `VerifiedVical` containing the parsed VICAL and the X.509 certificate chain on success.
-    pub fn from_bytes(
+    pub async fn from_bytes<C: CrlFetcher>(
         bytes: &[u8],
         trust_anchors: &TrustAnchorRegistry,
+        crl_fetcher: &C,
     ) -> Result<Self, VerificationError> {
-        Self::from_bytes_with_options(bytes, trust_anchors, &ValidationOptions::default())
+        Self::from_bytes_with_options(
+            bytes,
+            trust_anchors,
+            crl_fetcher,
+            &ValidationOptions::default(),
+        )
+        .await
     }
 
     /// Verify a VICAL from its CBOR-encoded COSE_Sign1 representation with custom options.
@@ -193,13 +202,15 @@ impl VerifiedVical {
     /// # Arguments
     /// * `bytes` - The CBOR-encoded COSE_Sign1 containing the VICAL
     /// * `trust_anchors` - Registry of trusted root/intermediate certificates for chain validation
+    /// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks.
     /// * `options` - Custom validation options
     ///
     /// # Returns
     /// A `VerifiedVical` containing the parsed VICAL and the X.509 certificate chain on success.
-    pub fn from_bytes_with_options(
+    pub async fn from_bytes_with_options<C: CrlFetcher>(
         bytes: &[u8],
         trust_anchors: &TrustAnchorRegistry,
+        crl_fetcher: &C,
         options: &ValidationOptions,
     ) -> Result<Self, VerificationError> {
         let cose_sign1: MaybeTagged<CoseSign1> =
@@ -244,8 +255,9 @@ impl VerifiedVical {
         }
 
         // Validate certificate chain against trust anchors.
-        let validation_outcome =
-            ValidationRuleset::Vical.validate_with_options(&x5chain, trust_anchors, options);
+        let validation_outcome = ValidationRuleset::Vical
+            .validate_with_options(&x5chain, trust_anchors, crl_fetcher, options)
+            .await;
         if !validation_outcome.success() {
             return Err(VerificationError::ChainValidationFailed(validation_outcome));
         }
@@ -363,8 +375,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn verify_aamva_vical_with_trust_anchors() {
+    #[tokio::test]
+    async fn verify_aamva_vical_with_trust_anchors() {
         // Build trust anchor registry with the root CA.
         // The chain in the COSE_Sign1 is: [signer, intermediate]
         // The root CA must be in the trust anchor registry.
@@ -374,7 +386,8 @@ mod test {
         };
 
         let verified =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await
                 .expect("VICAL verification should succeed");
 
         // Verify the VICAL was parsed correctly.
@@ -396,8 +409,8 @@ mod test {
         );
     }
 
-    #[test]
-    fn verify_aamva_vical_with_intermediate_as_trust_anchor() {
+    #[tokio::test]
+    async fn verify_aamva_vical_with_intermediate_as_trust_anchor() {
         // Alternatively, trust the intermediate CA directly.
         let intermediate_cert = CertificateWithDer::from_pem(AAMVA_INTERMEDIATE_CA)
             .expect("failed to parse intermediate CA certificate");
@@ -413,20 +426,23 @@ mod test {
         };
 
         let verified =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await
                 .expect("VICAL verification should succeed with intermediate as trust anchor");
 
         assert_eq!(verified.vical.version, "1.0");
     }
 
-    #[test]
-    fn verify_aamva_vical_fails_with_empty_trust_anchors() {
+    #[tokio::test]
+    async fn verify_aamva_vical_fails_with_empty_trust_anchors() {
         let trust_anchors = TrustAnchorRegistry::default();
         let options = ValidationOptions {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let result = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options);
+        let result =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -434,8 +450,8 @@ mod test {
         );
     }
 
-    #[test]
-    fn verify_aamva_vical_fails_with_unrelated_trust_anchor() {
+    #[tokio::test]
+    async fn verify_aamva_vical_fails_with_unrelated_trust_anchor() {
         // Use an unrelated certificate as trust anchor - should fail validation.
         static UNRELATED_CERT: &[u8] =
             include_bytes!("../../test/presentation/isomdl_iaca_root_cert.pem");
@@ -453,7 +469,9 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let result = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options);
+        let result =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -461,14 +479,16 @@ mod test {
         );
     }
 
-    #[test]
-    fn verify_aamva_vical_fails_when_signer_cert_expired() {
+    #[tokio::test]
+    async fn verify_aamva_vical_fails_when_signer_cert_expired() {
         let trust_anchors = aamva_trust_anchors();
         let options = ValidationOptions {
             validation_time: Some(validation_time_after_expiry()),
         };
 
-        let result = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options);
+        let result =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
