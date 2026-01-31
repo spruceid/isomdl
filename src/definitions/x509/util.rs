@@ -1,5 +1,5 @@
 use anyhow::{Context, Error};
-use const_oid::{db::rfc4519::COMMON_NAME, AssociatedOid};
+use const_oid::{db::rfc4519::COMMON_NAME, AssociatedOid, ObjectIdentifier};
 use der::{
     asn1::{Ia5StringRef, PrintableStringRef, TeletexStringRef, Utf8StringRef},
     referenced::OwnedToRef,
@@ -10,6 +10,8 @@ use elliptic_curve::{
     sec1::{FromEncodedPoint, ToEncodedPoint},
     AffinePoint, CurveArithmetic, FieldBytesSize, PublicKey,
 };
+use p256::NistP256;
+use p384::NistP384;
 use sec1::point::ModulusSize;
 use x509_cert::{attr::AttributeValue, Certificate};
 
@@ -27,6 +29,51 @@ where
         .try_into()
         .map(|key: PublicKey<C>| key.into())
         .context("could not parse public key from PKCS8 SPKI")
+}
+
+/// Extract the curve OID from a certificate's subject public key info.
+///
+/// Returns `None` if the algorithm parameters are missing or cannot be parsed as an OID.
+pub fn curve_oid(certificate: &Certificate) -> Option<ObjectIdentifier> {
+    let params = certificate
+        .tbs_certificate
+        .subject_public_key_info
+        .algorithm
+        .parameters
+        .as_ref()?;
+    // The parameters field contains a DER-encoded ObjectIdentifier.
+    // We need to decode it from the full DER encoding (tag+length+value).
+    params.decode_as::<ObjectIdentifier>().ok()
+}
+
+/// Supported elliptic curves for X.509 verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupportedCurve {
+    P256,
+    P384,
+}
+
+impl SupportedCurve {
+    /// Determine the curve type from a certificate's public key.
+    pub fn from_certificate(certificate: &Certificate) -> Option<Self> {
+        let oid = curve_oid(certificate)?;
+        if oid == NistP256::OID {
+            Some(SupportedCurve::P256)
+        } else if oid == NistP384::OID {
+            Some(SupportedCurve::P384)
+        } else {
+            None
+        }
+    }
+
+    /// Determine the curve type from a JWK "crv" parameter value.
+    pub fn from_jwk_crv(crv: &str) -> Option<Self> {
+        match crv {
+            "P-256" => Some(SupportedCurve::P256),
+            "P-384" => Some(SupportedCurve::P384),
+            _ => None,
+        }
+    }
 }
 
 /// Get the first CommonName of the X.509 certificate, or return "Unknown".
