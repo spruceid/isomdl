@@ -46,7 +46,9 @@ pub fn curve_oid(certificate: &Certificate) -> Option<ObjectIdentifier> {
     params.decode_as::<ObjectIdentifier>().ok()
 }
 
-/// Supported elliptic curves for X.509 verification.
+/// Supported elliptic curves for verification.
+///
+/// Mostly used to ensure curves have the same level of support throughout the codebase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupportedCurve {
     P256,
