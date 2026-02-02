@@ -139,6 +139,11 @@ impl X5Chain {
     pub fn root_entity_common_name(&self) -> &str {
         common_name_or_unknown(self.root_entity_certificate())
     }
+
+    /// Iterate over the certificates in the chain.
+    pub fn iter(&self) -> impl Iterator<Item = &CertificateWithDer> {
+        self.0.iter()
+    }
 }
 
 #[derive(Default, Debug, Clone)]
