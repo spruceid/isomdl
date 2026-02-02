@@ -215,8 +215,7 @@ impl VerifiedVical {
             .1
             .clone();
 
-        let x5chain =
-            X5Chain::from_cbor(x5chain_cbor).map_err(ParseError::X5ChainParseError)?;
+        let x5chain = X5Chain::from_cbor(x5chain_cbor).map_err(ParseError::X5ChainParseError)?;
 
         // Verify COSE signature with the end-entity certificate's public key.
         let verifier: p256::ecdsa::VerifyingKey = x5chain
@@ -358,8 +357,9 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let verified = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
-            .expect("VICAL verification should succeed");
+        let verified =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
+                .expect("VICAL verification should succeed");
 
         // Verify the VICAL was parsed correctly.
         assert_eq!(verified.vical.version, "1.0");
@@ -396,8 +396,9 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let verified = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
-            .expect("VICAL verification should succeed with intermediate as trust anchor");
+        let verified =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
+                .expect("VICAL verification should succeed with intermediate as trust anchor");
 
         assert_eq!(verified.vical.version, "1.0");
     }
@@ -473,7 +474,9 @@ mod test {
         let parsed = Vical::parse(AAMVA_VICAL).expect("VICAL parsing should succeed");
 
         let cert_info = &parsed.vical.certificate_infos[0];
-        let cert = cert_info.certificate().expect("certificate parsing should succeed");
+        let cert = cert_info
+            .certificate()
+            .expect("certificate parsing should succeed");
 
         // Verify the certificate was parsed correctly by checking it has a subject.
         assert!(!cert.tbs_certificate.subject.is_empty());

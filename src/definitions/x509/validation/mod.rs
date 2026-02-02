@@ -119,8 +119,12 @@ fn mdl_validate_inner<'a: 'b, 'b>(
         .map(ErrorWithContext::ds);
     outcome.errors.extend(ds_extension_errors);
 
-    let mut trust_anchor_candidates =
-        find_trust_anchor_candidates(document_signer, trust_anchors, TrustPurpose::Iaca, validation_time);
+    let mut trust_anchor_candidates = find_trust_anchor_candidates(
+        document_signer,
+        trust_anchors,
+        TrustPurpose::Iaca,
+        validation_time,
+    );
 
     let Some(iaca) = trust_anchor_candidates.next() else {
         outcome
@@ -203,8 +207,12 @@ fn mdl_reader_one_step_validate(
         .map(ErrorWithContext::reader);
     outcome.errors.extend(reader_extension_errors);
 
-    let mut trust_anchor_candidates =
-        find_trust_anchor_candidates(reader, trust_anchors, TrustPurpose::ReaderCa, validation_time);
+    let mut trust_anchor_candidates = find_trust_anchor_candidates(
+        reader,
+        trust_anchors,
+        TrustPurpose::ReaderCa,
+        validation_time,
+    );
 
     let Some(_reader_ca) = trust_anchor_candidates.next() else {
         outcome
@@ -251,7 +259,8 @@ fn vical_validate(
     // Try to find a trust anchor that matches either:
     // 1. The direct issuer of the VICAL signer (single-level chain)
     // 2. The issuer of the last certificate in the chain (multi-level chain)
-    let chain_valid = validate_chain_to_trust_anchor(x5chain, trust_anchors, &mut outcome, validation_time);
+    let chain_valid =
+        validate_chain_to_trust_anchor(x5chain, trust_anchors, &mut outcome, validation_time);
 
     if !chain_valid {
         outcome.errors.push(ErrorWithContext::vical_authority(
@@ -304,7 +313,12 @@ fn validate_chain_to_trust_anchor(
 
         // Check if the issuer (next cert in chain) is a trust anchor.
         // This handles chains like [signer, intermediate] where we trust the intermediate.
-        if is_trusted_certificate(issuer, trust_anchors, TrustPurpose::VicalAuthority, validation_time) {
+        if is_trusted_certificate(
+            issuer,
+            trust_anchors,
+            TrustPurpose::VicalAuthority,
+            validation_time,
+        ) {
             tracing::debug!(
                 "chain terminates at trust anchor at position {} ({})",
                 i + 1,
@@ -316,7 +330,12 @@ fn validate_chain_to_trust_anchor(
 
     // Check if the last certificate in the chain is a trust anchor (self-signed root in chain).
     let last_cert = x5chain.root_entity_certificate();
-    if is_trusted_certificate(last_cert, trust_anchors, TrustPurpose::VicalAuthority, validation_time) {
+    if is_trusted_certificate(
+        last_cert,
+        trust_anchors,
+        TrustPurpose::VicalAuthority,
+        validation_time,
+    ) {
         tracing::debug!(
             "chain terminates at trust anchor (last cert): {}",
             common_name_or_unknown(last_cert)
@@ -326,8 +345,12 @@ fn validate_chain_to_trust_anchor(
 
     // Finally, check if a trust anchor signed the last certificate in the chain.
     // This uses the same matching logic as mDL validation (key identifier + signature).
-    let mut trust_anchor_candidates =
-        find_trust_anchor_candidates(last_cert, trust_anchors, TrustPurpose::VicalAuthority, validation_time);
+    let mut trust_anchor_candidates = find_trust_anchor_candidates(
+        last_cert,
+        trust_anchors,
+        TrustPurpose::VicalAuthority,
+        validation_time,
+    );
 
     if trust_anchor_candidates.next().is_some() {
         tracing::debug!(
