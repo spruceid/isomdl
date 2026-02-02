@@ -143,7 +143,9 @@ pub fn validate_mdoc_reader_certificate_extensions(certificate: &Certificate) ->
 ///
 /// VICAL signer certificates have different requirements than mDL document signer certificates:
 /// - IssuerAlternativeName is not required
-/// - CrlDistributionPoints may contain DirectoryName entries
+/// - CrlDistributionPoints: The spec says "URI for CRL distribution point", but we use a relaxed
+///   validator that also accepts DirectoryName entries because the AAMVA VICAL signer certificate
+///   uses DirectoryName instead of URI.
 pub fn validate_vical_signer_certificate_extensions(certificate: &Certificate) -> Vec<Error> {
     tracing::debug!("validating VICAL signer certificate extensions...");
 
