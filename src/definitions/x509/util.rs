@@ -34,7 +34,7 @@ where
 /// Extract the curve OID from a certificate's subject public key info.
 ///
 /// Returns `None` if the algorithm parameters are missing or cannot be parsed as an OID.
-pub fn curve_oid(certificate: &Certificate) -> Option<ObjectIdentifier> {
+fn curve_oid(certificate: &Certificate) -> Option<ObjectIdentifier> {
     let params = certificate
         .tbs_certificate
         .subject_public_key_info
@@ -56,7 +56,10 @@ pub enum SupportedCurve {
 }
 
 impl SupportedCurve {
-    /// Determine the curve type from a certificate's public key.
+    /// Determine the curve type from a certificate's subject public key.
+    ///
+    /// This is used for verifying signatures made by the certificate holder, not for verifying
+    /// the certificate's own signature (which requires the issuer's key).
     pub fn from_certificate(certificate: &Certificate) -> Option<Self> {
         let oid = curve_oid(certificate)?;
         if oid == NistP256::OID {

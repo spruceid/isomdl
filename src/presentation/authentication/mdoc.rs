@@ -11,6 +11,8 @@ use crate::presentation::reader::Error;
 use anyhow::Result;
 use elliptic_curve::generic_array::GenericArray;
 use issuer_signed::IssuerSigned;
+use p256::NistP256;
+use p384::NistP384;
 use ssi_jwk::Params;
 use ssi_jwk::JWK as SsiJwk;
 
@@ -106,9 +108,9 @@ where
                         false,
                     );
                     let verifying_key =
-                        ecdsa::VerifyingKey::<p256::NistP256>::from_encoded_point(&encoded_point)?;
+                        ecdsa::VerifyingKey::<NistP256>::from_encoded_point(&encoded_point)?;
                     device_signature
-                        .verify::<ecdsa::VerifyingKey<p256::NistP256>, p256::ecdsa::Signature>(
+                        .verify::<ecdsa::VerifyingKey<NistP256>, p256::ecdsa::Signature>(
                             &verifying_key,
                             Some(&cbor_payload),
                             None,
@@ -121,9 +123,9 @@ where
                         false,
                     );
                     let verifying_key =
-                        ecdsa::VerifyingKey::<p384::NistP384>::from_encoded_point(&encoded_point)?;
+                        ecdsa::VerifyingKey::<NistP384>::from_encoded_point(&encoded_point)?;
                     device_signature
-                        .verify::<ecdsa::VerifyingKey<p384::NistP384>, p384::ecdsa::Signature>(
+                        .verify::<ecdsa::VerifyingKey<NistP384>, p384::ecdsa::Signature>(
                             &verifying_key,
                             Some(&cbor_payload),
                             None,

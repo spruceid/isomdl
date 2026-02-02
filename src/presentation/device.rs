@@ -46,7 +46,8 @@ use crate::{
 };
 use coset::Label;
 use coset::{CoseMac0Builder, CoseSign1, CoseSign1Builder};
-use p256::FieldBytes;
+use p256::{FieldBytes, NistP256};
+use p384::NistP384;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use session::SessionTranscript180135;
@@ -723,34 +724,34 @@ impl SessionManager {
 
         let verification_result = match curve {
             x509::SupportedCurve::P256 => {
-                let verifier: ecdsa::VerifyingKey<p256::NistP256> =
-                    match x5chain.end_entity_public_key() {
-                        Ok(v) => v,
-                        Err(e) => {
-                            outcome.errors.push(format!(
-                                "Processing: reader public key cannot be decoded: {e}"
-                            ));
-                            return outcome;
-                        }
-                    };
-                reader_auth.verify::<ecdsa::VerifyingKey<p256::NistP256>, p256::ecdsa::Signature>(
+                let verifier: ecdsa::VerifyingKey<NistP256> = match x5chain.end_entity_public_key()
+                {
+                    Ok(v) => v,
+                    Err(e) => {
+                        outcome.errors.push(format!(
+                            "Processing: reader public key cannot be decoded: {e}"
+                        ));
+                        return outcome;
+                    }
+                };
+                reader_auth.verify::<ecdsa::VerifyingKey<NistP256>, p256::ecdsa::Signature>(
                     &verifier,
                     Some(&detached_payload),
                     None,
                 )
             }
             x509::SupportedCurve::P384 => {
-                let verifier: ecdsa::VerifyingKey<p384::NistP384> =
-                    match x5chain.end_entity_public_key() {
-                        Ok(v) => v,
-                        Err(e) => {
-                            outcome.errors.push(format!(
-                                "Processing: reader public key cannot be decoded: {e}"
-                            ));
-                            return outcome;
-                        }
-                    };
-                reader_auth.verify::<ecdsa::VerifyingKey<p384::NistP384>, p384::ecdsa::Signature>(
+                let verifier: ecdsa::VerifyingKey<NistP384> = match x5chain.end_entity_public_key()
+                {
+                    Ok(v) => v,
+                    Err(e) => {
+                        outcome.errors.push(format!(
+                            "Processing: reader public key cannot be decoded: {e}"
+                        ));
+                        return outcome;
+                    }
+                };
+                reader_auth.verify::<ecdsa::VerifyingKey<NistP384>, p384::ecdsa::Signature>(
                     &verifier,
                     Some(&detached_payload),
                     None,
