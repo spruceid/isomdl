@@ -5,14 +5,16 @@ use x509_cert::Certificate;
 pub fn check_validity_period_at(certificate: &Certificate, at: OffsetDateTime) -> Vec<Error> {
     let validity = certificate.tbs_certificate.validity;
     let mut errors: Vec<Error> = vec![];
-    let at_unix = at.unix_timestamp() as u64;
 
-    if validity.not_after.to_unix_duration().as_secs() < at_unix {
+    let not_after = OffsetDateTime::from(validity.not_after.to_system_time());
+    let not_before = OffsetDateTime::from(validity.not_before.to_system_time());
+
+    if not_after < at {
         errors.push(Error::Expired);
-    };
-    if validity.not_before.to_unix_duration().as_secs() > at_unix {
+    }
+    if not_before > at {
         errors.push(Error::NotYetValid);
-    };
+    }
 
     errors
 }
