@@ -161,10 +161,9 @@ impl From<IssuerSignedItemDehydrated> for IssuerSignedItem {
 
 impl From<IssuerSignedDehydratedItemBytes> for IssuerSignedItemBytes {
     fn from(value: IssuerSignedDehydratedItemBytes) -> Self {
-        Self {
-            inner: value.inner.into(),
-            inner_bytes: value.inner_bytes,
-        }
+        // Re-serialize the inner value to update inner_bytes with the populated element values.
+        // This is necessary because Tag24 serializes using inner_bytes, not inner.
+        Tag24::new(value.inner.into()).expect("failed to re-serialize IssuerSignedItem")
     }
 }
 
