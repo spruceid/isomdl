@@ -60,6 +60,10 @@ impl<T: Clone> NonEmptyVec<T> {
             // and therefore we can safely unwrap.
             .unwrap())
     }
+
+    pub fn last(&self) -> &T {
+        self.0.last().unwrap()
+    }
 }
 
 impl<T: Clone> TryFrom<Vec<T>> for NonEmptyVec<T> {

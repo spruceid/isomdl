@@ -46,6 +46,30 @@ impl<E: fmt::Display> ErrorWithContext<E> {
         }
         .to_string()
     }
+
+    pub fn vical_signer(error: E) -> String {
+        Self {
+            context: ErrorContext::VicalSigner,
+            error,
+        }
+        .to_string()
+    }
+
+    pub fn vical_authority(error: E) -> String {
+        Self {
+            context: ErrorContext::VicalAuthority,
+            error,
+        }
+        .to_string()
+    }
+
+    pub fn chain(error: E) -> String {
+        Self {
+            context: ErrorContext::Chain,
+            error,
+        }
+        .to_string()
+    }
 }
 
 impl<E: fmt::Display> fmt::Display for ErrorWithContext<E> {
@@ -59,6 +83,9 @@ impl<E: fmt::Display> fmt::Display for ErrorWithContext<E> {
                 ErrorContext::Iaca => "IACA certificate",
                 ErrorContext::Reader => "Reader certificate",
                 ErrorContext::ReaderCa => "Reader CA certificate",
+                ErrorContext::VicalSigner => "VICAL signer certificate",
+                ErrorContext::VicalAuthority => "VICAL authority certificate",
+                ErrorContext::Chain => "Certificate chain",
             },
             self.error,
         )
@@ -72,4 +99,7 @@ enum ErrorContext {
     Iaca,
     Reader,
     ReaderCa,
+    VicalSigner,
+    VicalAuthority,
+    Chain,
 }

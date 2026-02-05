@@ -119,6 +119,31 @@ impl X5Chain {
     pub fn end_entity_common_name(&self) -> &str {
         common_name_or_unknown(self.end_entity_certificate())
     }
+
+    /// Retrieve the root-entity certificate.
+    pub fn root_entity_certificate(&self) -> &Certificate {
+        &self.0.last().inner
+    }
+
+    /// Retrieve the public key of the root-entity certificate.
+    pub fn root_entity_public_key<C>(&self) -> Result<VerifyingKey<C>, Error>
+    where
+        C: AssociatedOid + CurveArithmetic + PrimeCurve,
+        AffinePoint<C>: FromEncodedPoint<C> + ToEncodedPoint<C>,
+        FieldBytesSize<C>: ModulusSize,
+    {
+        public_key(self.root_entity_certificate())
+    }
+
+    /// Retrieve the public key of the root-entity certificate.
+    pub fn root_entity_common_name(&self) -> &str {
+        common_name_or_unknown(self.root_entity_certificate())
+    }
+
+    /// Iterate over the certificates in the chain.
+    pub fn iter(&self) -> impl Iterator<Item = &CertificateWithDer> {
+        self.0.iter()
+    }
 }
 
 #[derive(Default, Debug, Clone)]

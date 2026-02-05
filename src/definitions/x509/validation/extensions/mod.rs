@@ -15,10 +15,13 @@ use basic_constraints::BasicConstraintsValidator;
 use const_oid::db;
 use const_oid::AssociatedOid;
 use const_oid::ObjectIdentifier;
-use crl_distribution_points::CrlDistributionPointsValidator;
+use crl_distribution_points::{
+    CrlDistributionPointsValidator, RelaxedCrlDistributionPointsValidator,
+};
 use der::Decode;
 use extended_key_usage::document_signer_extended_key_usage_oid;
 use extended_key_usage::mdoc_reader_extended_key_usage_oid;
+use extended_key_usage::vical_signer_extended_key_usage_oid;
 use extended_key_usage::ExtendedKeyUsageValidator;
 use issuer_alternative_name::IssuerAlternativeNameValidator;
 use key_usage::KeyUsageValidator;
@@ -130,6 +133,35 @@ pub fn validate_mdoc_reader_certificate_extensions(certificate: &Certificate) ->
             .with(KeyUsageValidator::mdoc_reader())
             .with(CrlDistributionPointsValidator)
             .with(IssuerAlternativeNameValidator)
+            .validate_extensions(extensions),
+    );
+
+    errors
+}
+
+/// Validate VICAL signer certificate extensions according to 18013-5 Annex C.
+///
+/// VICAL signer certificates have different requirements than mDL document signer certificates:
+/// - IssuerAlternativeName is not required
+/// - CrlDistributionPoints: The spec says "URI for CRL distribution point", but we use a relaxed
+///   validator that also accepts DirectoryName entries because the AAMVA VICAL signer certificate
+///   uses DirectoryName instead of URI.
+pub fn validate_vical_signer_certificate_extensions(certificate: &Certificate) -> Vec<Error> {
+    tracing::debug!("validating VICAL signer certificate extensions...");
+
+    let extensions = certificate.tbs_certificate.extensions.iter().flatten();
+
+    let mut errors: Vec<Error> = check_for_disallowed_x509_extensions(extensions.clone());
+
+    errors.extend(
+        ExtensionValidators::default()
+            .with(SubjectKeyIdentifierValidator::from_certificate(certificate))
+            .with(ExtendedKeyUsageValidator {
+                expected_oid: vical_signer_extended_key_usage_oid(),
+            })
+            .with(KeyUsageValidator::vical_signer())
+            .with(RelaxedCrlDistributionPointsValidator)
+            // Note: IssuerAlternativeName is not required for VICAL signer certificates.
             .validate_extensions(extensions),
     );
 

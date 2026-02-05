@@ -31,6 +31,12 @@ impl KeyUsageValidator {
         }
     }
 
+    pub fn vical_signer() -> Self {
+        Self {
+            expected_flagset: KeyUsages::NonRepudiation.into(),
+        }
+    }
+
     fn check(&self, ku: KeyUsage) -> Option<Error> {
         if ku.0 != self.expected_flagset {
             Some(format!(
