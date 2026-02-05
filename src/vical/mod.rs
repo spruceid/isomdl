@@ -17,7 +17,7 @@ use crate::{
         x509::{
             trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
             validation::{ValidationOutcome, ValidationRuleset},
-            X5Chain,
+            SupportedCurve, X5Chain,
         },
     },
 };
@@ -218,14 +218,29 @@ impl VerifiedVical {
         let x5chain = X5Chain::from_cbor(x5chain_cbor).map_err(ParseError::X5ChainParseError)?;
 
         // Verify COSE signature with the end-entity certificate's public key.
-        let verifier: p256::ecdsa::VerifyingKey = x5chain
-            .end_entity_public_key()
-            .map_err(VerificationError::PublicKeyError)?;
+        let curve = SupportedCurve::from_certificate(x5chain.end_entity_certificate())
+            .ok_or_else(|| VerificationError::PublicKeyError(anyhow::anyhow!("unsupported curve")))?;
 
-        cose_sign1
-            .verify::<_, p256::ecdsa::Signature>(&verifier, None, None)
-            .into_result()
-            .map_err(VerificationError::SignatureVerificationFailed)?;
+        match curve {
+            SupportedCurve::P256 => {
+                let verifier: p256::ecdsa::VerifyingKey = x5chain
+                    .end_entity_public_key()
+                    .map_err(VerificationError::PublicKeyError)?;
+                cose_sign1
+                    .verify::<_, p256::ecdsa::Signature>(&verifier, None, None)
+                    .into_result()
+                    .map_err(VerificationError::SignatureVerificationFailed)?;
+            }
+            SupportedCurve::P384 => {
+                let verifier: p384::ecdsa::VerifyingKey = x5chain
+                    .end_entity_public_key()
+                    .map_err(VerificationError::PublicKeyError)?;
+                cose_sign1
+                    .verify::<_, p384::ecdsa::Signature>(&verifier, None, None)
+                    .into_result()
+                    .map_err(VerificationError::SignatureVerificationFailed)?;
+            }
+        }
 
         // Validate certificate chain against trust anchors.
         let validation_outcome =
