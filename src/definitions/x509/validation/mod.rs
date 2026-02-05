@@ -298,7 +298,7 @@ async fn mdl_reader_one_step_validate<C: CrlFetcher>(
 async fn vical_validate<C: CrlFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
-    _crl_fetcher: &C,
+    crl_fetcher: &C,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
     let mut outcome = ValidationOutcome::default();
@@ -320,33 +320,98 @@ async fn vical_validate<C: CrlFetcher>(
     // Try to find a trust anchor that matches either:
     // 1. The direct issuer of the VICAL signer (single-level chain)
     // 2. The issuer of the last certificate in the chain (multi-level chain)
-    let chain_valid =
+    let chain_result =
         validate_chain_to_trust_anchor(x5chain, trust_anchors, &mut outcome, validation_time);
 
-    if !chain_valid {
-        outcome.errors.push(ErrorWithContext::vical_authority(
-            "no valid trust anchor found for certificate chain",
-        ));
+    let external_trust_anchor = match chain_result {
+        ChainToTrustAnchorResult::ValidInChainAnchor => None,
+        ChainToTrustAnchorResult::ValidExternalAnchor(anchor) => Some(anchor),
+        ChainToTrustAnchorResult::Invalid => {
+            outcome.errors.push(ErrorWithContext::vical_authority(
+                "no valid trust anchor found for certificate chain",
+            ));
+            None
+        }
+    };
+
+    // CRL check on each certificate in the chain against its issuer.
+    // Walk the chain from end-entity towards root.
+    let certificates: Vec<_> = x5chain.iter().collect();
+    for window in certificates.windows(2) {
+        let subject = &window[0].inner;
+        let issuer = &window[1].inner;
+
+        match check_certificate_revocation(crl_fetcher, subject, issuer).await {
+            Ok(RevocationStatus::Valid) => {}
+            Ok(RevocationStatus::Revoked { .. }) => {
+                outcome.errors.push(ErrorWithContext::chain(format!(
+                    "certificate '{}' is revoked",
+                    common_name_or_unknown(subject)
+                )));
+            }
+            Err(e) => {
+                outcome
+                    .revocation_errors
+                    .push(ErrorWithContext::chain(format!(
+                        "CRL check for '{}': {}",
+                        common_name_or_unknown(subject),
+                        e
+                    )));
+            }
+        }
     }
 
-    // TODO: CRL or OCSP check on VICAL signer and intermediates.
+    // Check the last certificate in the chain against the external trust anchor (if found).
+    if let Some(trust_anchor) = external_trust_anchor {
+        let last_cert = x5chain.root_entity_certificate();
+        match check_certificate_revocation(crl_fetcher, last_cert, trust_anchor).await {
+            Ok(RevocationStatus::Valid) => {}
+            Ok(RevocationStatus::Revoked { .. }) => {
+                outcome.errors.push(ErrorWithContext::chain(format!(
+                    "certificate '{}' is revoked",
+                    common_name_or_unknown(last_cert)
+                )));
+            }
+            Err(e) => {
+                outcome
+                    .revocation_errors
+                    .push(ErrorWithContext::chain(format!(
+                        "CRL check for '{}': {}",
+                        common_name_or_unknown(last_cert),
+                        e
+                    )));
+            }
+        }
+    }
 
     outcome
 }
 
+/// Result of validating a certificate chain to a trust anchor.
+enum ChainToTrustAnchorResult<'a> {
+    /// Chain is valid and the trust anchor is within the chain itself.
+    /// No external issuer certificate is available for CRL checking the last cert.
+    ValidInChainAnchor,
+    /// Chain is valid and signed by an external trust anchor (not in the chain).
+    /// The trust anchor certificate is returned for CRL checking the last cert.
+    ValidExternalAnchor(&'a Certificate),
+    /// Chain is invalid - no valid trust anchor found or signature verification failed.
+    /// Errors have been recorded in the outcome.
+    Invalid,
+}
+
 /// Validate that the certificate chain terminates at a trust anchor.
 ///
-/// Unlike mDL validation which assumes a single-level chain (document signer -> IACA),
-/// VICAL chains can be multi-level (signer -> intermediate -> root). This function
-/// validates each link in the chain and checks if the chain terminates at a trust anchor.
+/// Walks the chain from end-entity towards root, verifying signatures and checking
+/// if any certificate is a trust anchor or if a trust anchor signs the last certificate.
 ///
-/// Returns true if the chain is valid and terminates at a trust anchor.
-fn validate_chain_to_trust_anchor(
-    x5chain: &X5Chain,
-    trust_anchors: &TrustAnchorRegistry,
+/// Any validation errors (signature failures, validity issues) are recorded in `outcome`.
+fn validate_chain_to_trust_anchor<'a>(
+    x5chain: &'a X5Chain,
+    trust_anchors: &'a TrustAnchorRegistry,
     outcome: &mut ValidationOutcome,
     validation_time: OffsetDateTime,
-) -> bool {
+) -> ChainToTrustAnchorResult<'a> {
     let certificates: Vec<_> = x5chain.iter().collect();
 
     // Walk the chain from end-entity towards root, verifying each signature.
@@ -361,7 +426,7 @@ fn validate_chain_to_trust_anchor(
                 common_name_or_unknown(subject),
                 common_name_or_unknown(issuer)
             )));
-            return false;
+            return ChainToTrustAnchorResult::Invalid;
         }
 
         // Check validity of intermediate certificates.
@@ -385,7 +450,7 @@ fn validate_chain_to_trust_anchor(
                 i + 1,
                 common_name_or_unknown(issuer)
             );
-            return true;
+            return ChainToTrustAnchorResult::ValidInChainAnchor;
         }
     }
 
@@ -401,7 +466,7 @@ fn validate_chain_to_trust_anchor(
             "chain terminates at trust anchor (last cert): {}",
             common_name_or_unknown(last_cert)
         );
-        return true;
+        return ChainToTrustAnchorResult::ValidInChainAnchor;
     }
 
     // Finally, check if a trust anchor signed the last certificate in the chain.
@@ -413,15 +478,15 @@ fn validate_chain_to_trust_anchor(
         validation_time,
     );
 
-    if trust_anchor_candidates.next().is_some() {
+    if let Some(trust_anchor) = trust_anchor_candidates.next() {
         tracing::debug!(
             "chain terminates with external trust anchor signing last cert: {}",
             common_name_or_unknown(last_cert)
         );
-        return true;
+        return ChainToTrustAnchorResult::ValidExternalAnchor(trust_anchor);
     }
 
-    false
+    ChainToTrustAnchorResult::Invalid
 }
 
 /// Check if a certificate directly matches a trust anchor.
