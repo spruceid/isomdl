@@ -218,8 +218,9 @@ impl VerifiedVical {
         let x5chain = X5Chain::from_cbor(x5chain_cbor).map_err(ParseError::X5ChainParseError)?;
 
         // Verify COSE signature with the end-entity certificate's public key.
-        let curve = SupportedCurve::from_certificate(x5chain.end_entity_certificate())
-            .ok_or_else(|| VerificationError::PublicKeyError(anyhow::anyhow!("unsupported curve")))?;
+        let curve = SupportedCurve::from_certificate(x5chain.end_entity_certificate()).ok_or_else(
+            || VerificationError::PublicKeyError(anyhow::anyhow!("unsupported curve")),
+        )?;
 
         match curve {
             SupportedCurve::P256 => {
