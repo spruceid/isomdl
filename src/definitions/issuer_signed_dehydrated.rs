@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     cose::MaybeTagged,
     definitions::{
-        helpers::{ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
+        helpers::{tag24, ByteStr, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
         DigestId, IssuerSigned, IssuerSignedItem,
     },
@@ -40,16 +40,29 @@ pub struct IssuerSignedDehydrated {
     pub issuer_auth: MaybeTagged<CoseSign1>,
 }
 
-impl From<IssuerNamespacesDehydrated> for IssuerNamespaces {
-    fn from(value: IssuerNamespacesDehydrated) -> Self {
-        value
-            .into_inner()
-            .into_iter()
-            .map(|(key, items)| (key, items.into()))
-            .collect::<std::collections::BTreeMap<_, _>>()
+impl TryFrom<IssuerNamespacesDehydrated> for IssuerNamespaces {
+    type Error = anyhow::Error;
+
+    fn try_from(value: IssuerNamespacesDehydrated) -> Result<Self, Self::Error> {
+        let mut result = std::collections::BTreeMap::new();
+
+        for (key, items) in value.into_inner() {
+            let converted_items: Result<Vec<_>, _> = items
+                .into_inner()
+                .into_iter()
+                .map(|item| item.try_into())
+                .collect();
+
+            let converted_items = converted_items?;
+            let non_empty_items = NonEmptyVec::maybe_new(converted_items)
+                .ok_or_else(|| anyhow::anyhow!("Empty items vector for namespace '{}'", key))?;
+
+            result.insert(key, non_empty_items);
+        }
+
+        result
             .try_into()
-            // Safe to unwrap: input was NonEmptyMap, so output is non-empty
-            .unwrap()
+            .map_err(|_| anyhow::anyhow!("Empty namespaces map"))
     }
 }
 
@@ -124,7 +137,7 @@ impl IssuerSignedDehydrated {
         }
 
         Ok(IssuerSigned {
-            namespaces: self.namespaces.map(Into::into),
+            namespaces: self.namespaces.map(|ns| ns.try_into()).transpose()?,
             issuer_auth: self.issuer_auth,
         })
     }
@@ -159,11 +172,11 @@ impl From<IssuerSignedItemDehydrated> for IssuerSignedItem {
     }
 }
 
-impl From<IssuerSignedDehydratedItemBytes> for IssuerSignedItemBytes {
-    fn from(value: IssuerSignedDehydratedItemBytes) -> Self {
-        // Re-serialize the inner value to update inner_bytes with the populated element values.
-        // This is necessary because Tag24 serializes using inner_bytes, not inner.
-        Tag24::new(value.inner.into()).expect("failed to re-serialize IssuerSignedItem")
+impl TryFrom<IssuerSignedDehydratedItemBytes> for IssuerSignedItemBytes {
+    type Error = tag24::Error;
+
+    fn try_from(value: IssuerSignedDehydratedItemBytes) -> Result<Self, Self::Error> {
+        Tag24::new(value.inner.into())
     }
 }
 
