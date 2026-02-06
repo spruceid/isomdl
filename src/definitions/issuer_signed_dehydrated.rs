@@ -137,7 +137,7 @@ impl IssuerSignedDehydrated {
         }
 
         Ok(IssuerSigned {
-            namespaces: self.namespaces.map(|ns| ns.try_into()).transpose()?,
+            namespaces: self.namespaces.map(TryInto::try_into).transpose()?,
             issuer_auth: self.issuer_auth,
         })
     }
