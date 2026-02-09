@@ -39,7 +39,7 @@ pub struct HttpResponse {
 /// This trait provides a pure HTTP interface with no knowledge of CRL semantics.
 /// Implementors only need to provide the [`request`](Self::request) method.
 ///
-/// For CRL fetching with caching, wrap this in a [`CrlFetcher`] implementation.
+/// For CRL fetching with caching, wrap this in a [`RevocationFetcher`](super::RevocationFetcher) implementation.
 /// For full revocation checking, use [`check_certificate_revocation`](super::check_certificate_revocation).
 // TODO: Remove async_trait once edition is upgraded and signature crate
 // releases async support without async_trait dependency
