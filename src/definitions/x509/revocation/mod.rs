@@ -33,6 +33,7 @@ pub use reqwest_client::ReqwestClient;
 
 use const_oid::{AssociatedOid, ObjectIdentifier};
 use der::{Decode, Encode};
+use time::OffsetDateTime;
 use tracing::{error, warn};
 use x509_cert::{
     crl::CertificateList,
@@ -42,6 +43,8 @@ use x509_cert::{
     },
     Certificate,
 };
+
+use super::validation::ValidationOptions;
 
 // OIDs for CRL extensions we recognize (RFC 5280 Section 5.2)
 const OID_AUTHORITY_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.35");
@@ -109,18 +112,19 @@ pub fn extract_crl_urls(cert: &Certificate) -> Result<Vec<String>, CrlError> {
     Err(CrlError::NoDistributionPoint)
 }
 
-/// Parse and validate a CRL against the signing certificate.
+/// Validate a CRL against the signing certificate.
 ///
 /// This validates:
 /// - Issuer matches the signing certificate subject
-/// - Validity period (thisUpdate <= now <= nextUpdate)
+/// - Validity period (thisUpdate <= validation_time <= nextUpdate)
 /// - No unrecognized critical extensions (RFC 5280 Section 5.2)
 /// - Signature is valid
 ///
 /// For ISO 18013-5, the IACA root certificate signs all CRLs in the chain.
-pub fn validate_crl_signature(
+pub fn validate_crl(
     crl: &CertificateList,
     signing_cert: &Certificate,
+    options: &ValidationOptions,
 ) -> Result<(), CrlError> {
     // Verify the CRL issuer matches the signing certificate subject
     if crl.tbs_cert_list.issuer != signing_cert.tbs_certificate.subject {
@@ -128,7 +132,7 @@ pub fn validate_crl_signature(
     }
 
     // Verify the CRL validity period
-    validate_crl_validity(crl)?;
+    validate_crl_validity(crl, options.validation_time())?;
 
     // Check for unrecognized critical extensions (RFC 5280 Section 5.2)
     validate_crl_extensions(crl)?;
@@ -178,23 +182,24 @@ fn validate_crl_extensions(crl: &CertificateList) -> Result<(), CrlError> {
     Ok(())
 }
 
-/// Validate CRL validity period (thisUpdate <= now <= nextUpdate).
-fn validate_crl_validity(crl: &CertificateList) -> Result<(), CrlError> {
-    use std::time::SystemTime;
-
-    let now = SystemTime::now();
-
-    // Check thisUpdate <= now
+/// Validate CRL validity period (thisUpdate <= validation_time <= nextUpdate).
+fn validate_crl_validity(
+    crl: &CertificateList,
+    validation_time: OffsetDateTime,
+) -> Result<(), CrlError> {
+    // Check thisUpdate <= validation_time
     let this_update = &crl.tbs_cert_list.this_update;
-    if now < this_update.to_system_time() {
+    let this_update_time = OffsetDateTime::from(this_update.to_system_time());
+    if validation_time < this_update_time {
         return Err(CrlError::NotYetValid {
             this_update: format!("{this_update:?}"),
         });
     }
 
-    // Check now <= nextUpdate (if present)
+    // Check validation_time <= nextUpdate (if present)
     if let Some(next_update) = &crl.tbs_cert_list.next_update {
-        if now > next_update.to_system_time() {
+        let next_update_time = OffsetDateTime::from(next_update.to_system_time());
+        if validation_time > next_update_time {
             return Err(CrlError::Expired {
                 next_update: format!("{next_update:?}"),
             });
@@ -252,6 +257,7 @@ pub fn check_revocation(cert: &Certificate, crl: &CertificateList) -> Revocation
 /// * `revocation_fetcher` - Revocation fetcher to use for fetching CRLs (use [`CachingRevocationFetcher`] for caching)
 /// * `cert` - The certificate to check for revocation
 /// * `crl_signing_cert` - The certificate that signed the CRL (typically the issuer/IACA)
+/// * `options` - Validation options (controls the time used for CRL validity checks)
 ///
 /// # Returns
 /// * `Ok(RevocationStatus::Valid)` if the certificate is not revoked
@@ -261,12 +267,13 @@ pub async fn check_certificate_revocation(
     revocation_fetcher: &impl RevocationFetcher,
     cert: &Certificate,
     crl_signing_cert: &Certificate,
+    options: &ValidationOptions,
 ) -> Result<RevocationStatus, CrlError> {
     let urls = extract_crl_urls(cert)?;
     let mut errors = Vec::new();
 
     for url in &urls {
-        match fetch_and_validate_crl(revocation_fetcher, crl_signing_cert, url).await {
+        match fetch_and_validate_crl(revocation_fetcher, crl_signing_cert, url, options).await {
             Ok(crl) => return Ok(check_revocation(cert, &crl)),
             Err(e) => {
                 warn!("CRL check failed for URL {url}: {e}");
@@ -278,14 +285,15 @@ pub async fn check_certificate_revocation(
     Err(CrlError::AllUrlsFailed { errors })
 }
 
-/// Fetch a CRL from a URL and validate its signature.
+/// Fetch a CRL from a URL and validate it.
 async fn fetch_and_validate_crl(
     revocation_fetcher: &impl RevocationFetcher,
     crl_signing_cert: &Certificate,
     url: &str,
+    options: &ValidationOptions,
 ) -> Result<CertificateList, CrlError> {
     let crl = revocation_fetcher.fetch_crl(url).await?;
-    validate_crl_signature(&crl, crl_signing_cert)?;
+    validate_crl(&crl, crl_signing_cert, options)?;
     Ok(crl)
 }
 

@@ -42,7 +42,7 @@ pub struct ValidationOptions {
 
 impl ValidationOptions {
     /// Get the validation time, defaulting to current time if not set.
-    fn validation_time(&self) -> OffsetDateTime {
+    pub(crate) fn validation_time(&self) -> OffsetDateTime {
         self.validation_time.unwrap_or_else(OffsetDateTime::now_utc)
     }
 }
@@ -184,7 +184,7 @@ async fn mdl_validate_inner<'a: 'b, 'b, R: RevocationFetcher>(
     outcome.errors.extend(iaca_extension_errors);
 
     // CRL check on DS certificate (signed by IACA)
-    match check_certificate_revocation(revocation_fetcher, document_signer, iaca).await {
+    match check_certificate_revocation(revocation_fetcher, document_signer, iaca, options).await {
         Ok(RevocationStatus::Valid) => {}
         Ok(RevocationStatus::Revoked { .. }) => {
             // Actual revocation is a hard security failure
@@ -281,7 +281,7 @@ async fn mdl_reader_one_step_validate<R: RevocationFetcher>(
     }
 
     // CRL check on reader certificate (signed by Reader CA)
-    match check_certificate_revocation(revocation_fetcher, reader, reader_ca).await {
+    match check_certificate_revocation(revocation_fetcher, reader, reader_ca, options).await {
         Ok(RevocationStatus::Valid) => {}
         Ok(RevocationStatus::Revoked { .. }) => {
             // Actual revocation is a hard security failure
@@ -351,7 +351,7 @@ async fn vical_validate<R: RevocationFetcher>(
         let subject = &window[0].inner;
         let issuer = &window[1].inner;
 
-        match check_certificate_revocation(revocation_fetcher, subject, issuer).await {
+        match check_certificate_revocation(revocation_fetcher, subject, issuer, options).await {
             Ok(RevocationStatus::Valid) => {}
             Ok(RevocationStatus::Revoked { .. }) => {
                 outcome.errors.push(ErrorWithContext::chain(format!(
@@ -374,7 +374,9 @@ async fn vical_validate<R: RevocationFetcher>(
     // Check the last certificate in the chain against the external trust anchor (if found).
     if let Some(trust_anchor) = external_trust_anchor {
         let last_cert = x5chain.root_entity_certificate();
-        match check_certificate_revocation(revocation_fetcher, last_cert, trust_anchor).await {
+        match check_certificate_revocation(revocation_fetcher, last_cert, trust_anchor, options)
+            .await
+        {
             Ok(RevocationStatus::Valid) => {}
             Ok(RevocationStatus::Revoked { .. }) => {
                 outcome.errors.push(ErrorWithContext::chain(format!(
