@@ -38,7 +38,7 @@ use crate::{
             self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
         },
         x509::{
-            self, crl::CrlFetcher, trust_anchor::TrustAnchorRegistry,
+            self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry,
             x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
         },
         CoseKey, DeviceEngagement, DeviceResponse, IssuerSignedItem, Mso, SessionEstablishment,
@@ -378,12 +378,12 @@ impl SessionManagerEngaged {
     /// # Arguments
     /// * `session_establishment` - The session establishment data from the reader
     /// * `trusted_verifiers` - Registry of trusted reader CA certificates
-    /// * `http_client` - HTTP client for CRL verification. Use `&()` to skip CRL checks.
-    pub async fn process_session_establishment<C: CrlFetcher>(
+    /// * `revocation_fetcher` - HTTP client for CRL verification. Use `&()` to skip CRL checks.
+    pub async fn process_session_establishment<R: RevocationFetcher>(
         self,
         session_establishment: SessionEstablishment,
         trusted_verifiers: TrustAnchorRegistry,
-        http_client: &C,
+        revocation_fetcher: &R,
     ) -> anyhow::Result<(SessionManager, RequestAuthenticationOutcome)> {
         let e_reader_key = session_establishment.e_reader_key;
         let session_transcript =
@@ -418,7 +418,7 @@ impl SessionManagerEngaged {
                     data: Some(session_establishment.data),
                     status: None,
                 },
-                http_client,
+                revocation_fetcher,
             )
             .await;
 
@@ -439,10 +439,10 @@ impl SessionManager {
         })
     }
 
-    async fn validate_request<C: CrlFetcher>(
+    async fn validate_request<R: RevocationFetcher>(
         &self,
         request: DeviceRequest,
-        http_client: &C,
+        revocation_fetcher: &R,
     ) -> RequestAuthenticationOutcome {
         let items_request: Vec<ItemsRequest> = request
             .doc_requests
@@ -473,7 +473,7 @@ impl SessionManager {
         }
         if let Some(doc_request) = request.doc_requests.first() {
             let outcome = self
-                .reader_authentication(doc_request.clone(), http_client)
+                .reader_authentication(doc_request.clone(), revocation_fetcher)
                 .await;
             if outcome.errors.is_empty() {
                 validated_request.reader_authentication = AuthenticationStatus::Valid;
@@ -516,10 +516,10 @@ impl SessionManager {
         self.state = State::Signing(prepared_response);
     }
 
-    async fn handle_decoded_request<C: CrlFetcher>(
+    async fn handle_decoded_request<R: RevocationFetcher>(
         &mut self,
         request: SessionData,
-        http_client: &C,
+        revocation_fetcher: &R,
     ) -> RequestAuthenticationOutcome {
         let mut validated_request = RequestAuthenticationOutcome::default();
         let data = match request.data {
@@ -558,7 +558,7 @@ impl SessionManager {
             }
         };
 
-        self.validate_request(request, http_client).await
+        self.validate_request(request, revocation_fetcher).await
     }
 
     /// Handle a request from the reader.
@@ -571,11 +571,11 @@ impl SessionManager {
     ///
     /// # Arguments
     /// * `request` - The raw CBOR-encoded request bytes
-    /// * `http_client` - HTTP client for CRL verification. Use `&()` to skip CRL checks.
-    pub async fn handle_request<C: CrlFetcher>(
+    /// * `revocation_fetcher` - HTTP client for CRL verification. Use `&()` to skip CRL checks.
+    pub async fn handle_request<R: RevocationFetcher>(
         &mut self,
         request: &[u8],
-        http_client: &C,
+        revocation_fetcher: &R,
     ) -> RequestAuthenticationOutcome {
         let mut validated_request = RequestAuthenticationOutcome::default();
         let session_data: SessionData = match cbor::from_slice(request) {
@@ -587,7 +587,8 @@ impl SessionManager {
                 return validated_request;
             }
         };
-        self.handle_decoded_request(session_data, http_client).await
+        self.handle_decoded_request(session_data, revocation_fetcher)
+            .await
     }
 
     /// When there are documents to be signed, it will return then next one for signing.
@@ -698,11 +699,11 @@ impl SessionManager {
     ///
     /// # Arguments
     /// * `doc_request` - The document request containing reader authentication
-    /// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks.
-    pub async fn reader_authentication<C: CrlFetcher>(
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip CRL checks.
+    pub async fn reader_authentication<R: RevocationFetcher>(
         &self,
         doc_request: DocRequest,
-        crl_fetcher: &C,
+        revocation_fetcher: &R,
     ) -> ReaderAuthOutcome {
         let mut outcome = ReaderAuthOutcome::default();
 
@@ -739,7 +740,7 @@ impl SessionManager {
         outcome.common_name = Some(x5chain.end_entity_common_name().to_string());
 
         let x5chain_validation_outcome = x509::validation::ValidationRuleset::MdlReaderOneStep
-            .validate(&x5chain, &self.trusted_verifiers, crl_fetcher)
+            .validate(&x5chain, &self.trusted_verifiers, revocation_fetcher)
             .await;
 
         outcome.errors.extend(x5chain_validation_outcome.errors);

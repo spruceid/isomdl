@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use super::{authentication::ResponseAuthenticationOutcome, reader_utils::validate_response};
 
-use crate::definitions::x509::crl::CrlFetcher;
+use crate::definitions::x509::revocation::RevocationFetcher;
 
 use crate::{
     cbor::{self, CborError},
@@ -436,11 +436,11 @@ impl SessionManager {
     ///
     /// # Arguments
     /// * `response` - The encrypted device response
-    /// * `http_client` - HTTP client for CRL fetching. Use `&()` to skip CRL checks.
-    pub async fn handle_response<C: CrlFetcher>(
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
+    pub async fn handle_response<R: RevocationFetcher>(
         &mut self,
         response: &[u8],
-        http_client: &C,
+        revocation_fetcher: &R,
     ) -> ResponseAuthenticationOutcome {
         let mut validated_response = ResponseAuthenticationOutcome::default();
 
@@ -462,7 +462,7 @@ impl SessionManager {
                     x5chain,
                     document.clone(),
                     namespaces,
-                    http_client,
+                    revocation_fetcher,
                 )
                 .await
             }

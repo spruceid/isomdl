@@ -1,7 +1,7 @@
-//! Reqwest-based HTTP client for CRL fetching.
+//! Reqwest-based HTTP client for revocation checking.
 //!
 //! This is a simple HTTP client without caching. For CRL-aware caching,
-//! wrap this in a [`CachingCrlFetcher`](super::CachingCrlFetcher).
+//! wrap this in a [`CachingRevocationFetcher`](super::CachingRevocationFetcher).
 
 use std::time::Duration;
 
@@ -13,13 +13,13 @@ use super::{HttpClient, HttpMethod, HttpRequest, HttpResponse};
 /// Simple HTTP client implementation using reqwest.
 ///
 /// This client provides basic HTTP functionality without caching.
-/// For CRL-aware caching, wrap this client in [`CachingCrlFetcher`](super::CachingCrlFetcher):
+/// For CRL-aware caching, wrap this client in [`CachingRevocationFetcher`](super::CachingRevocationFetcher):
 ///
 /// ```ignore
-/// use isomdl::definitions::x509::crl::{CachingCrlFetcher, ReqwestClient};
+/// use isomdl::definitions::x509::revocation::{CachingRevocationFetcher, ReqwestClient};
 ///
 /// let http_client = ReqwestClient::new()?;
-/// let crl_fetcher = CachingCrlFetcher::new(http_client);
+/// let revocation_fetcher = CachingRevocationFetcher::new(http_client);
 /// ```
 pub struct ReqwestClient {
     client: reqwest::Client,

@@ -1,33 +1,34 @@
-//! CRL (Certificate Revocation List) verification support.
+//! Certificate revocation verification support.
 //!
 //! This module provides functionality for checking certificate revocation status
-//! via CRL distribution points, as required by ISO 18013-5.
+//! via CRL distribution points, as required by ISO 18013-5. OCSP support is
+//! planned for the future.
 //!
 //! # Architecture
 //!
 //! The module separates concerns for cross-platform support:
 //!
 //! - [`HttpClient`]: Pure HTTP abstraction (platform-specific implementations)
-//! - [`CrlFetcher`]: CRL fetching with optional caching (Rust-only logic)
-//! - [`CachingCrlFetcher`]: Caching implementation using [`HttpClient`]
+//! - [`RevocationFetcher`]: Revocation data fetching with optional caching (Rust-only logic)
+//! - [`CachingRevocationFetcher`]: Caching CRL implementation using [`HttpClient`]
 //!
 //! For mobile platforms (iOS/Android), only [`HttpClient`] needs a native
-//! implementation; [`CachingCrlFetcher`] provides all CRL-specific logic in Rust.
+//! implementation; [`CachingRevocationFetcher`] provides all CRL-specific logic in Rust.
 
 mod crl_fetcher;
 mod error;
 mod http;
 
-#[cfg(feature = "crl-reqwest")]
+#[cfg(feature = "reqwest")]
 mod reqwest_client;
 
-#[cfg(feature = "crl-reqwest")]
-pub use crl_fetcher::CachingCrlFetcher;
-pub use crl_fetcher::{CrlFetcher, SimpleCrlFetcher};
+#[cfg(feature = "reqwest")]
+pub use crl_fetcher::CachingRevocationFetcher;
+pub use crl_fetcher::{RevocationFetcher, SimpleRevocationFetcher};
 pub use error::{CrlError, RevocationStatus};
 pub use http::{HttpClient, HttpMethod, HttpRequest, HttpResponse, NoHttpClientError};
 
-#[cfg(feature = "crl-reqwest")]
+#[cfg(feature = "reqwest")]
 pub use reqwest_client::ReqwestClient;
 
 use const_oid::{AssociatedOid, ObjectIdentifier};
@@ -255,12 +256,12 @@ pub fn check_revocation(cert: &Certificate, crl: &CertificateList) -> Revocation
 /// Check if a certificate has been revoked by fetching and validating its CRL.
 ///
 /// This function extracts CRL distribution point URLs from the certificate,
-/// fetches the CRL using the provided CRL fetcher, validates its signature
+/// fetches the CRL using the provided revocation fetcher, validates its signature
 /// against the signing certificate, and checks if the certificate appears
 /// in the revocation list.
 ///
 /// # Arguments
-/// * `crl_fetcher` - CRL fetcher to use for fetching CRLs (use [`CachingCrlFetcher`] for caching)
+/// * `revocation_fetcher` - Revocation fetcher to use for fetching CRLs (use [`CachingRevocationFetcher`] for caching)
 /// * `cert` - The certificate to check for revocation
 /// * `crl_signing_cert` - The certificate that signed the CRL (typically the issuer/IACA)
 ///
@@ -269,7 +270,7 @@ pub fn check_revocation(cert: &Certificate, crl: &CertificateList) -> Revocation
 /// * `Ok(RevocationStatus::Revoked { .. })` if the certificate is revoked
 /// * `Err(CrlError::...)` for failures (fetch, parse, signature, etc.)
 pub async fn check_certificate_revocation(
-    crl_fetcher: &impl CrlFetcher,
+    revocation_fetcher: &impl RevocationFetcher,
     cert: &Certificate,
     crl_signing_cert: &Certificate,
 ) -> Result<RevocationStatus, CrlError> {
@@ -277,7 +278,7 @@ pub async fn check_certificate_revocation(
     let mut errors = Vec::new();
 
     for url in &urls {
-        match fetch_and_validate_crl(crl_fetcher, crl_signing_cert, url).await {
+        match fetch_and_validate_crl(revocation_fetcher, crl_signing_cert, url).await {
             Ok(crl) => return Ok(check_revocation(cert, &crl)),
             Err(e) => {
                 warn!("CRL check failed for URL {url}: {e}");
@@ -291,11 +292,11 @@ pub async fn check_certificate_revocation(
 
 /// Fetch a CRL from a URL and validate its signature.
 async fn fetch_and_validate_crl(
-    crl_fetcher: &impl CrlFetcher,
+    revocation_fetcher: &impl RevocationFetcher,
     crl_signing_cert: &Certificate,
     url: &str,
 ) -> Result<CertificateList, CrlError> {
-    let crl = crl_fetcher.fetch_crl(url).await?;
+    let crl = revocation_fetcher.fetch_crl(url).await?;
     validate_crl_signature(&crl, crl_signing_cert)?;
     Ok(crl)
 }
@@ -319,8 +320,8 @@ mod tests {
     }
 }
 
-/// Integration tests that require the crl-reqwest feature for HTTP mocking.
-#[cfg(all(test, feature = "crl-reqwest"))]
+/// Integration tests that require the reqwest feature for HTTP mocking.
+#[cfg(all(test, feature = "reqwest"))]
 mod integration_tests {
     use der::Encode;
     use p256::NistP256;
@@ -338,7 +339,7 @@ mod integration_tests {
         Version,
     };
 
-    use super::{CachingCrlFetcher, ReqwestClient};
+    use super::{CachingRevocationFetcher, ReqwestClient};
     use crate::definitions::x509::{
         test::setup_with_crl_url,
         trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
@@ -428,7 +429,7 @@ mod integration_tests {
             .unwrap();
 
         let http_client = ReqwestClient::new().unwrap();
-        let crl_fetcher = CachingCrlFetcher::new(http_client);
+        let crl_fetcher = CachingRevocationFetcher::new(http_client);
         let outcome = ValidationRuleset::Mdl
             .validate(&x5chain, &trust_anchor_registry, &crl_fetcher)
             .await;
@@ -472,7 +473,7 @@ mod integration_tests {
             .unwrap();
 
         let http_client = ReqwestClient::new().unwrap();
-        let crl_fetcher = CachingCrlFetcher::new(http_client);
+        let crl_fetcher = CachingRevocationFetcher::new(http_client);
         let outcome = ValidationRuleset::Mdl
             .validate(&x5chain, &trust_anchor_registry, &crl_fetcher)
             .await;
@@ -516,7 +517,7 @@ mod integration_tests {
             .unwrap();
 
         let http_client = ReqwestClient::new().unwrap();
-        let crl_fetcher = CachingCrlFetcher::new(http_client);
+        let crl_fetcher = CachingRevocationFetcher::new(http_client);
         let outcome = ValidationRuleset::Mdl
             .validate(&x5chain, &trust_anchor_registry, &crl_fetcher)
             .await;

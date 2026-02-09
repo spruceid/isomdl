@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::definitions::{
     device_response::Document,
     session::SessionTranscript,
-    x509::{self, crl::CrlFetcher, trust_anchor::TrustAnchorRegistry, X5Chain},
+    x509::{self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry, X5Chain},
 };
 
 use super::authentication::{
@@ -22,18 +22,18 @@ use super::authentication::{
 /// * `x5chain` - The certificate chain to validate
 /// * `document` - The document to validate
 /// * `namespaces` - The namespaces from the response
-/// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks.
-pub async fn validate_response<S, C>(
+/// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
+pub async fn validate_response<S, R>(
     session_transcript: S,
     trust_anchor_registry: TrustAnchorRegistry,
     x5chain: X5Chain,
     document: Document,
     namespaces: BTreeMap<String, serde_json::Value>,
-    crl_fetcher: &C,
+    revocation_fetcher: &R,
 ) -> ResponseAuthenticationOutcome
 where
     S: SessionTranscript + Clone,
-    C: CrlFetcher,
+    R: RevocationFetcher,
 {
     let mut validated_response = ResponseAuthenticationOutcome {
         response: namespaces,
@@ -55,7 +55,7 @@ where
     }
 
     let validation_outcome = x509::validation::ValidationRuleset::Mdl
-        .validate(&x5chain, &trust_anchor_registry, crl_fetcher)
+        .validate(&x5chain, &trust_anchor_registry, revocation_fetcher)
         .await;
 
     // Add revocation errors as warnings (non-fatal)

@@ -71,7 +71,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = tr
 [features]
 default = []
 cli = ["dep:clap", "dep:clap-stdin", "dep:tokio"]
-crl-reqwest = ["dep:reqwest", "dep:moka"]
+reqwest = ["dep:reqwest", "dep:moka"]
 
 [dev-dependencies]
 hex = "0.4.3"

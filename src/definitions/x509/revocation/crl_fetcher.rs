@@ -1,18 +1,18 @@
-//! CRL fetcher trait and caching implementation.
+//! Revocation fetcher trait and CRL implementations.
 //!
 //! This module provides:
-//! - [`CrlFetcher`]: Trait for fetching and parsing CRLs
-//! - [`SimpleCrlFetcher`]: Basic implementation that wraps an [`HttpClient`]
-//! - [`CachingCrlFetcher`]: Caching implementation with stale-while-revalidate (requires `crl-reqwest` feature)
+//! - [`RevocationFetcher`]: Trait for fetching revocation data (CRLs, and in the future OCSP)
+//! - [`SimpleRevocationFetcher`]: Basic CRL implementation that wraps an [`HttpClient`]
+//! - [`CachingRevocationFetcher`]: Caching CRL implementation with stale-while-revalidate (requires `reqwest` feature)
 //!
 //! # Architecture
 //!
-//! The separation of [`HttpClient`] and [`CrlFetcher`] allows:
+//! The separation of [`HttpClient`] and [`RevocationFetcher`] allows:
 //! - Platform-specific HTTP implementations (Rust, Kotlin, Swift) stay simple
 //! - CRL parsing, caching, and expiry logic is shared in Rust
 //!
 //! For cross-platform mobile apps, only [`HttpClient`] needs platform-specific
-//! implementation; [`CachingCrlFetcher`] handles all CRL-specific logic.
+//! implementation; [`CachingRevocationFetcher`] handles all CRL-specific logic.
 
 use async_trait::async_trait;
 use der::Decode;
@@ -23,17 +23,18 @@ use super::{
     http::{HttpClient, HttpMethod, HttpRequest},
 };
 
-/// Trait for fetching CRLs.
+/// Trait for fetching certificate revocation data.
 ///
-/// This trait abstracts CRL fetching, allowing implementations to add
-/// caching, retries, or other middleware behavior.
+/// This trait abstracts revocation data fetching, allowing implementations to add
+/// caching, retries, or other middleware behavior. Currently supports CRL fetching,
+/// with OCSP support planned for the future.
 ///
 /// For full revocation checking (including signature validation), use
 /// [`check_certificate_revocation`](super::check_certificate_revocation).
 // TODO: Remove async_trait once edition is upgraded and signature crate
 // releases async support without async_trait dependency
 #[async_trait]
-pub trait CrlFetcher: Send + Sync {
+pub trait RevocationFetcher: Send + Sync {
     /// Fetch and parse a CRL from a URL.
     ///
     /// This method fetches the CRL and parses it, but does not validate the
@@ -48,11 +49,11 @@ pub trait CrlFetcher: Send + Sync {
 /// - Testing
 /// - Short-lived processes where caching isn't beneficial
 /// - When you want to implement caching at a different layer
-pub struct SimpleCrlFetcher<C> {
+pub struct SimpleRevocationFetcher<C> {
     http_client: C,
 }
 
-impl<C: HttpClient> SimpleCrlFetcher<C> {
+impl<C: HttpClient> SimpleRevocationFetcher<C> {
     /// Create a new simple CRL fetcher wrapping the given HTTP client.
     pub fn new(http_client: C) -> Self {
         Self { http_client }
@@ -60,7 +61,7 @@ impl<C: HttpClient> SimpleCrlFetcher<C> {
 }
 
 #[async_trait]
-impl<C: HttpClient> CrlFetcher for SimpleCrlFetcher<C> {
+impl<C: HttpClient> RevocationFetcher for SimpleRevocationFetcher<C> {
     async fn fetch_crl(&self, url: &str) -> Result<CertificateList, CrlError> {
         let request = HttpRequest {
             url: url.to_string(),
@@ -88,7 +89,7 @@ impl<C: HttpClient> CrlFetcher for SimpleCrlFetcher<C> {
 }
 
 // --- Feature-gated caching implementation ---
-#[cfg(feature = "crl-reqwest")]
+#[cfg(feature = "reqwest")]
 mod caching {
     use std::{sync::Arc, time::Duration};
 
@@ -98,8 +99,8 @@ mod caching {
     use tracing::{debug, error, warn};
     use x509_cert::crl::CertificateList;
 
-    use super::CrlFetcher;
-    use crate::definitions::x509::crl::{
+    use super::RevocationFetcher;
+    use crate::definitions::x509::revocation::{
         error::CrlError,
         http::{HttpClient, HttpMethod, HttpRequest},
     };
@@ -139,14 +140,14 @@ mod caching {
     // TODO: Consider adding configurable retries if real-world usage shows it's needed.
     // If implemented: only retry transient errors (5xx, timeouts), use exponential
     // backoff with jitter, and make retry count/backoff configurable.
-    pub struct CachingCrlFetcher<C> {
+    pub struct CachingRevocationFetcher<C> {
         http_client: C,
         cache: Cache<String, Arc<CachedCrl>>,
         /// How long to continue using a stale CRL if refetch fails.
         max_stale_duration: Duration,
     }
 
-    impl<C: HttpClient> CachingCrlFetcher<C> {
+    impl<C: HttpClient> CachingRevocationFetcher<C> {
         /// Create a new caching CRL fetcher with default settings.
         ///
         /// Default cache capacity: 100 entries
@@ -215,7 +216,7 @@ mod caching {
     }
 
     #[async_trait]
-    impl<C: HttpClient> CrlFetcher for CachingCrlFetcher<C> {
+    impl<C: HttpClient> RevocationFetcher for CachingRevocationFetcher<C> {
         async fn fetch_crl(&self, url: &str) -> Result<CertificateList, CrlError> {
             // Check cache first
             if let Some(cached) = self.cache.get(url).await {
@@ -262,16 +263,16 @@ mod caching {
     }
 }
 
-#[cfg(feature = "crl-reqwest")]
-pub use caching::CachingCrlFetcher;
+#[cfg(feature = "reqwest")]
+pub use caching::CachingRevocationFetcher;
 
-/// Implementation of [`CrlFetcher`] for `()` that always returns an error.
+/// Implementation of [`RevocationFetcher`] for `()` that always returns an error.
 ///
-/// This allows using `()` as the CRL fetcher type parameter when CRL checking
-/// should be skipped. The validation logic will add a warning to revocation_errors
-/// when fetch fails.
+/// This allows using `()` as the revocation fetcher type parameter when revocation
+/// checking should be skipped. The validation logic will add a warning to
+/// revocation_errors when fetch fails.
 #[async_trait]
-impl CrlFetcher for () {
+impl RevocationFetcher for () {
     async fn fetch_crl(&self, url: &str) -> Result<CertificateList, CrlError> {
         Err(CrlError::Fetch {
             url: url.to_string(),

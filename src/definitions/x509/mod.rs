@@ -1,4 +1,4 @@
-pub mod crl;
+pub mod revocation;
 pub mod trust_anchor;
 mod util;
 pub mod validation;

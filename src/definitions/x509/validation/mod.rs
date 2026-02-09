@@ -13,7 +13,7 @@ use validity::check_validity_period_at;
 use x509_cert::Certificate;
 
 use super::{
-    crl::{check_certificate_revocation, CrlFetcher, RevocationStatus},
+    revocation::{check_certificate_revocation, RevocationFetcher, RevocationStatus},
     trust_anchor::{TrustAnchorRegistry, TrustPurpose},
     util::common_name_or_unknown,
     X5Chain,
@@ -26,6 +26,13 @@ pub(super) mod signature;
 mod validity;
 
 /// Options for certificate chain validation.
+///
+/// This struct is intentionally limited to parameters that have safe defaults
+/// and are only tweaked in specific scenarios (e.g., testing with a pinned time).
+/// Parameters like [`TrustAnchorRegistry`] and [`RevocationFetcher`](super::revocation::RevocationFetcher)
+/// are kept as explicit function arguments because they require deliberate choices:
+/// you should always think carefully about which roots you trust and which HTTP
+/// client is appropriate for your platform.
 #[derive(Debug, Clone, Default)]
 pub struct ValidationOptions {
     /// The time to use for validity period checks.
@@ -84,48 +91,51 @@ impl ValidationRuleset {
     /// # Arguments
     /// * `x5chain` - The certificate chain to validate
     /// * `trust_anchors` - The trust anchor registry
-    /// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks
     ///   (a warning will be added to `revocation_errors`).
-    pub async fn validate<C: CrlFetcher>(
+    pub async fn validate<R: RevocationFetcher>(
         self,
         x5chain: &X5Chain,
         trust_anchors: &TrustAnchorRegistry,
-        crl_fetcher: &C,
+        revocation_fetcher: &R,
     ) -> ValidationOutcome {
         self.validate_with_options(
             x5chain,
             trust_anchors,
-            crl_fetcher,
+            revocation_fetcher,
             &ValidationOptions::default(),
         )
         .await
     }
 
     /// Validate the certificate chain with custom options.
-    pub async fn validate_with_options<C: CrlFetcher>(
+    pub async fn validate_with_options<R: RevocationFetcher>(
         self,
         x5chain: &X5Chain,
         trust_anchors: &TrustAnchorRegistry,
-        crl_fetcher: &C,
+        revocation_fetcher: &R,
         options: &ValidationOptions,
     ) -> ValidationOutcome {
         match self {
-            Self::Mdl => mdl_validate(x5chain, trust_anchors, crl_fetcher, options).await,
+            Self::Mdl => mdl_validate(x5chain, trust_anchors, revocation_fetcher, options).await,
             Self::AamvaMdl => {
-                aamva_mdl_validate(x5chain, trust_anchors, crl_fetcher, options).await
+                aamva_mdl_validate(x5chain, trust_anchors, revocation_fetcher, options).await
             }
             Self::MdlReaderOneStep => {
-                mdl_reader_one_step_validate(x5chain, trust_anchors, crl_fetcher, options).await
+                mdl_reader_one_step_validate(x5chain, trust_anchors, revocation_fetcher, options)
+                    .await
             }
-            Self::Vical => vical_validate(x5chain, trust_anchors, crl_fetcher, options).await,
+            Self::Vical => {
+                vical_validate(x5chain, trust_anchors, revocation_fetcher, options).await
+            }
         }
     }
 }
 
-async fn mdl_validate_inner<'a: 'b, 'b, C: CrlFetcher>(
+async fn mdl_validate_inner<'a: 'b, 'b, R: RevocationFetcher>(
     x5chain: &'a X5Chain,
     trust_anchors: &'b TrustAnchorRegistry,
-    crl_fetcher: &C,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> Result<(ValidationOutcome, &'a Certificate, &'b Certificate), ValidationOutcome> {
     let mut outcome = ValidationOutcome::default();
@@ -174,7 +184,7 @@ async fn mdl_validate_inner<'a: 'b, 'b, C: CrlFetcher>(
     outcome.errors.extend(iaca_extension_errors);
 
     // CRL check on DS certificate (signed by IACA)
-    match check_certificate_revocation(crl_fetcher, document_signer, iaca).await {
+    match check_certificate_revocation(revocation_fetcher, document_signer, iaca).await {
         Ok(RevocationStatus::Valid) => {}
         Ok(RevocationStatus::Revoked { .. }) => {
             // Actual revocation is a hard security failure
@@ -193,13 +203,13 @@ async fn mdl_validate_inner<'a: 'b, 'b, C: CrlFetcher>(
     Ok((outcome, document_signer, iaca))
 }
 
-async fn mdl_validate<C: CrlFetcher>(
+async fn mdl_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
-    crl_fetcher: &C,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
-    match mdl_validate_inner(x5chain, trust_anchors, crl_fetcher, options).await {
+    match mdl_validate_inner(x5chain, trust_anchors, revocation_fetcher, options).await {
         Ok((mut outcome, ds, iaca)) => {
             if has_rdn(ds, STATE_OR_PROVINCE_NAME) || has_rdn(iaca, STATE_OR_PROVINCE_NAME) {
                 if let Some(error) = state_or_province_name_matches(ds, iaca) {
@@ -213,13 +223,13 @@ async fn mdl_validate<C: CrlFetcher>(
     }
 }
 
-async fn aamva_mdl_validate<C: CrlFetcher>(
+async fn aamva_mdl_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
-    crl_fetcher: &C,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
-    match mdl_validate_inner(x5chain, trust_anchors, crl_fetcher, options).await {
+    match mdl_validate_inner(x5chain, trust_anchors, revocation_fetcher, options).await {
         Ok((mut outcome, ds, iaca)) => {
             if let Some(error) = state_or_province_name_matches(ds, iaca) {
                 outcome.errors.push(ErrorWithContext::comparison(error))
@@ -231,10 +241,10 @@ async fn aamva_mdl_validate<C: CrlFetcher>(
     }
 }
 
-async fn mdl_reader_one_step_validate<C: CrlFetcher>(
+async fn mdl_reader_one_step_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
-    crl_fetcher: &C,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
     let mut outcome = ValidationOutcome::default();
@@ -271,7 +281,7 @@ async fn mdl_reader_one_step_validate<C: CrlFetcher>(
     }
 
     // CRL check on reader certificate (signed by Reader CA)
-    match check_certificate_revocation(crl_fetcher, reader, reader_ca).await {
+    match check_certificate_revocation(revocation_fetcher, reader, reader_ca).await {
         Ok(RevocationStatus::Valid) => {}
         Ok(RevocationStatus::Revoked { .. }) => {
             // Actual revocation is a hard security failure
@@ -295,10 +305,10 @@ async fn mdl_reader_one_step_validate<C: CrlFetcher>(
 /// This validates the full certificate chain in the x5chain, where the chain must terminate at
 /// a trust anchor with `TrustPurpose::VicalAuthority`. The chain can be multi-level, e.g.,
 /// signer -> intermediate CA -> root CA.
-async fn vical_validate<C: CrlFetcher>(
+async fn vical_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
-    crl_fetcher: &C,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
     let mut outcome = ValidationOutcome::default();
@@ -341,7 +351,7 @@ async fn vical_validate<C: CrlFetcher>(
         let subject = &window[0].inner;
         let issuer = &window[1].inner;
 
-        match check_certificate_revocation(crl_fetcher, subject, issuer).await {
+        match check_certificate_revocation(revocation_fetcher, subject, issuer).await {
             Ok(RevocationStatus::Valid) => {}
             Ok(RevocationStatus::Revoked { .. }) => {
                 outcome.errors.push(ErrorWithContext::chain(format!(
@@ -364,7 +374,7 @@ async fn vical_validate<C: CrlFetcher>(
     // Check the last certificate in the chain against the external trust anchor (if found).
     if let Some(trust_anchor) = external_trust_anchor {
         let last_cert = x5chain.root_entity_certificate();
-        match check_certificate_revocation(crl_fetcher, last_cert, trust_anchor).await {
+        match check_certificate_revocation(revocation_fetcher, last_cert, trust_anchor).await {
             Ok(RevocationStatus::Valid) => {}
             Ok(RevocationStatus::Revoked { .. }) => {
                 outcome.errors.push(ErrorWithContext::chain(format!(

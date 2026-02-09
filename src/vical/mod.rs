@@ -15,7 +15,7 @@ use crate::{
         helpers::{ByteStr, NonEmptyVec},
         namespaces::org_iso_18013_5_1::TDate,
         x509::{
-            crl::CrlFetcher,
+            revocation::RevocationFetcher,
             trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
             validation::{ValidationOutcome, ValidationRuleset},
             SupportedCurve, X5Chain,
@@ -176,19 +176,19 @@ impl VerifiedVical {
     /// # Arguments
     /// * `bytes` - The CBOR-encoded COSE_Sign1 containing the VICAL
     /// * `trust_anchors` - Registry of trusted root/intermediate certificates for chain validation
-    /// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks.
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
     ///
     /// # Returns
     /// A `VerifiedVical` containing the parsed VICAL and the X.509 certificate chain on success.
-    pub async fn from_bytes<C: CrlFetcher>(
+    pub async fn from_bytes<R: RevocationFetcher>(
         bytes: &[u8],
         trust_anchors: &TrustAnchorRegistry,
-        crl_fetcher: &C,
+        revocation_fetcher: &R,
     ) -> Result<Self, VerificationError> {
         Self::from_bytes_with_options(
             bytes,
             trust_anchors,
-            crl_fetcher,
+            revocation_fetcher,
             &ValidationOptions::default(),
         )
         .await
@@ -202,15 +202,15 @@ impl VerifiedVical {
     /// # Arguments
     /// * `bytes` - The CBOR-encoded COSE_Sign1 containing the VICAL
     /// * `trust_anchors` - Registry of trusted root/intermediate certificates for chain validation
-    /// * `crl_fetcher` - CRL fetcher for revocation checking. Use `&()` to skip CRL checks.
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
     /// * `options` - Custom validation options
     ///
     /// # Returns
     /// A `VerifiedVical` containing the parsed VICAL and the X.509 certificate chain on success.
-    pub async fn from_bytes_with_options<C: CrlFetcher>(
+    pub async fn from_bytes_with_options<R: RevocationFetcher>(
         bytes: &[u8],
         trust_anchors: &TrustAnchorRegistry,
-        crl_fetcher: &C,
+        revocation_fetcher: &R,
         options: &ValidationOptions,
     ) -> Result<Self, VerificationError> {
         let cose_sign1: MaybeTagged<CoseSign1> =
@@ -256,7 +256,7 @@ impl VerifiedVical {
 
         // Validate certificate chain against trust anchors.
         let validation_outcome = ValidationRuleset::Vical
-            .validate_with_options(&x5chain, trust_anchors, crl_fetcher, options)
+            .validate_with_options(&x5chain, trust_anchors, revocation_fetcher, options)
             .await;
         if !validation_outcome.success() {
             return Err(VerificationError::ChainValidationFailed(validation_outcome));
@@ -533,11 +533,11 @@ mod test {
     /// Test that VICAL validation fails when a certificate in the chain is revoked.
     ///
     /// This test uses wiremock to serve a CRL that reports the signer certificate as revoked.
-    #[cfg(feature = "crl-reqwest")]
+    #[cfg(feature = "reqwest")]
     #[test_log::test(tokio::test)]
     async fn vical_validation_fails_when_certificate_is_revoked() {
         use crate::definitions::x509::{
-            crl::{CachingCrlFetcher, ReqwestClient},
+            revocation::{CachingRevocationFetcher, ReqwestClient},
             test::setup_with_crl_url,
             validation::ValidationRuleset,
             X5Chain,
@@ -615,9 +615,9 @@ mod test {
             .unwrap();
 
         let http_client = ReqwestClient::new().unwrap();
-        let crl_fetcher = CachingCrlFetcher::new(http_client);
+        let revocation_fetcher = CachingRevocationFetcher::new(http_client);
         let outcome = ValidationRuleset::Vical
-            .validate(&x5chain, &trust_anchors, &crl_fetcher)
+            .validate(&x5chain, &trust_anchors, &revocation_fetcher)
             .await;
 
         assert!(
@@ -635,13 +635,13 @@ mod test {
     /// Test VICAL verification with real CRL fetching against live AAMVA services.
     ///
     /// This test is ignored by default because it makes real network requests.
-    /// Run with: `cargo test --features crl-reqwest verify_aamva_vical_with_live_crl -- --ignored`
-    #[cfg(feature = "crl-reqwest")]
+    /// Run with: `cargo test --features reqwest verify_aamva_vical_with_live_crl -- --ignored`
+    #[cfg(feature = "reqwest")]
     #[tokio::test]
     #[ignore]
     async fn verify_aamva_vical_with_live_crl_fetching() {
         use crate::definitions::x509::{
-            crl::{extract_crl_urls, CachingCrlFetcher, ReqwestClient},
+            revocation::{extract_crl_urls, CachingRevocationFetcher, ReqwestClient},
             validation::ValidationRuleset,
         };
 
@@ -665,10 +665,10 @@ mod test {
 
         // Create the CRL fetcher and perform validation with CRL checking
         let http_client = ReqwestClient::new().expect("failed to create HTTP client");
-        let crl_fetcher = CachingCrlFetcher::new(http_client);
+        let revocation_fetcher = CachingRevocationFetcher::new(http_client);
 
         let outcome = ValidationRuleset::Vical
-            .validate_with_options(x5chain, &trust_anchors, &crl_fetcher, &options)
+            .validate_with_options(x5chain, &trust_anchors, &revocation_fetcher, &options)
             .await;
 
         // Print any revocation errors for debugging
