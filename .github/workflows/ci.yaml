@@ -25,6 +25,10 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+
       - name: Build
         run: cargo build --all-targets
 
@@ -45,3 +49,6 @@ jobs:
           cargo doc --all-features --no-deps
           cd macros
           cargo doc --all-features --no-deps
+
+      - name: Unused dependencies
+        run: cargo machete
