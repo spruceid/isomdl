@@ -33,9 +33,7 @@ pub use reqwest_client::ReqwestClient;
 
 use const_oid::{AssociatedOid, ObjectIdentifier};
 use der::{Decode, Encode};
-use ecdsa::{signature::Verifier, Signature, VerifyingKey};
-use p256::NistP256;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 use x509_cert::{
     crl::CertificateList,
     ext::pkix::{
@@ -44,8 +42,6 @@ use x509_cert::{
     },
     Certificate,
 };
-
-use super::util::public_key;
 
 // OIDs for CRL extensions we recognize (RFC 5280 Section 5.2)
 const OID_AUTHORITY_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.35");
@@ -138,26 +134,18 @@ pub fn validate_crl_signature(
     validate_crl_extensions(crl)?;
 
     // Verify the CRL signature
-    // TODO: Support curves other than P-256
-    let signing_key: VerifyingKey<NistP256> = public_key(signing_cert).map_err(|e| {
-        error!("failed to decode signing certificate public key: {e:?}");
-        CrlError::SignatureInvalid
-    })?;
-
-    let sig: Signature<NistP256> = Signature::from_der(crl.signature.raw_bytes()).map_err(|e| {
-        error!("failed to parse CRL signature: {e:?}");
-        CrlError::SignatureInvalid
-    })?;
-
     let tbs = crl.tbs_cert_list.to_der().map_err(|e| {
         error!("failed to encode CRL TBS: {e:?}");
         CrlError::SignatureInvalid
     })?;
 
-    signing_key.verify(&tbs, &sig).map_err(|e| {
-        info!("CRL signature verification failed: {e:?}");
-        CrlError::SignatureInvalid
-    })?;
+    if !super::validation::signature::verify_signature(
+        signing_cert,
+        crl.signature.raw_bytes(),
+        &tbs,
+    ) {
+        return Err(CrlError::SignatureInvalid);
+    }
 
     Ok(())
 }

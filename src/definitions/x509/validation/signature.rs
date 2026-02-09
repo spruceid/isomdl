@@ -6,32 +6,32 @@ use x509_cert::Certificate;
 
 use crate::definitions::x509::util::{public_key, SupportedCurve};
 
-/// Macro to verify a certificate signature for a specific curve.
+/// Macro to verify a DER-encoded signature for a specific curve.
 ///
 /// This avoids code duplication while sidestepping the complex generic bounds
 /// required for ECDSA verification across multiple curves.
-macro_rules! verify_cert_signature {
-    ($curve:ty, $subject:expr, $issuer:expr, $tbs:expr) => {{
-        let issuer_public_key: VerifyingKey<$curve> = match public_key($issuer) {
+macro_rules! verify_sig {
+    ($curve:ty, $signing_cert:expr, $signature_bytes:expr, $tbs:expr) => {{
+        let signing_key: VerifyingKey<$curve> = match public_key($signing_cert) {
             Ok(pk) => pk,
             Err(e) => {
-                tracing::error!("failed to decode issuer public key: {e:?}");
+                tracing::error!("failed to decode signing certificate public key: {e:?}");
                 return false;
             }
         };
 
-        let sig: Signature<$curve> = match Signature::from_der($subject.signature.raw_bytes()) {
+        let sig: Signature<$curve> = match Signature::from_der($signature_bytes) {
             Ok(sig) => sig,
             Err(e) => {
-                tracing::error!("failed to parse subject signature: {e:?}");
+                tracing::error!("failed to parse signature: {e:?}");
                 return false;
             }
         };
 
-        match issuer_public_key.verify($tbs, &sig) {
+        match signing_key.verify($tbs, &sig) {
             Ok(()) => true,
             Err(e) => {
-                tracing::info!("subject certificate signature could not be validated: {e:?}");
+                tracing::info!("signature verification failed: {e:?}");
                 false
             }
         }
@@ -40,11 +40,6 @@ macro_rules! verify_cert_signature {
 
 /// Check that the issuer certificate signed the subject certificate.
 pub fn issuer_signed_subject(subject: &Certificate, issuer: &Certificate) -> bool {
-    let Some(curve) = SupportedCurve::from_certificate(issuer) else {
-        tracing::error!("unsupported or missing curve OID in issuer certificate");
-        return false;
-    };
-
     let tbs = match subject.tbs_certificate.to_der() {
         Ok(tbs) => tbs,
         Err(e) => {
@@ -53,9 +48,26 @@ pub fn issuer_signed_subject(subject: &Certificate, issuer: &Certificate) -> boo
         }
     };
 
+    verify_signature(issuer, subject.signature.raw_bytes(), &tbs)
+}
+
+/// Verify a DER-encoded signature against a signing certificate's public key.
+///
+/// This is the shared verification primitive used by both certificate chain
+/// validation and CRL signature validation.
+pub(crate) fn verify_signature(
+    signing_cert: &Certificate,
+    signature_bytes: &[u8],
+    tbs: &[u8],
+) -> bool {
+    let Some(curve) = SupportedCurve::from_certificate(signing_cert) else {
+        tracing::error!("unsupported or missing curve OID in signing certificate");
+        return false;
+    };
+
     match curve {
-        SupportedCurve::P256 => verify_cert_signature!(NistP256, subject, issuer, &tbs),
-        SupportedCurve::P384 => verify_cert_signature!(NistP384, subject, issuer, &tbs),
+        SupportedCurve::P256 => verify_sig!(NistP256, signing_cert, signature_bytes, tbs),
+        SupportedCurve::P384 => verify_sig!(NistP384, signing_cert, signature_bytes, tbs),
     }
 }
 
