@@ -29,7 +29,7 @@ mod validity;
 ///
 /// This struct is intentionally limited to parameters that have safe defaults
 /// and are only tweaked in specific scenarios (e.g., testing with a pinned time).
-/// Parameters like [`TrustAnchorRegistry`] and [`RevocationFetcher`](super::revocation::RevocationFetcher)
+/// Parameters like [`TrustAnchorRegistry`] and [`RevocationFetcher`]
 /// are kept as explicit function arguments because they require deliberate choices:
 /// you should always think carefully about which roots you trust and which HTTP
 /// client is appropriate for your platform.
