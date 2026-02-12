@@ -1,18 +1,18 @@
 //! CRL-specific error types.
 
-use x509_cert::ext::pkix::CrlReason;
-
 /// Result of checking a certificate's revocation status.
 #[derive(Debug, Clone)]
 pub enum RevocationStatus {
     /// The certificate is not revoked (not found in CRL).
     Valid,
     /// The certificate has been revoked.
+    ///
+    /// Per ISO 18013-5 B.3.2, a certificate found in the CRL is considered
+    /// revoked with status UNSPECIFIED. CRL entry extensions (including reason
+    /// codes) are not used per the ISO 18013-5 CRL profile.
     Revoked {
         /// The serial number of the revoked certificate (hex encoded).
         serial: String,
-        /// The reason for revocation, if provided.
-        reason: Option<CrlReason>,
     },
 }
 

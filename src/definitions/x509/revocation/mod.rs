@@ -39,7 +39,7 @@ use x509_cert::{
     crl::CertificateList,
     ext::pkix::{
         name::{DistributionPointName, GeneralName},
-        CrlDistributionPoints, CrlReason,
+        CrlDistributionPoints,
     },
     Certificate,
 };
@@ -53,12 +53,6 @@ const OID_CRL_NUMBER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.20
 const OID_ISSUING_DISTRIBUTION_POINT: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.28");
 const OID_FRESHEST_CRL: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.46");
 
-// OIDs for CRL entry extensions we recognize (RFC 5280 Section 5.3)
-const OID_CRL_REASON: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.21");
-const OID_HOLD_INSTRUCTION_CODE: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.23");
-const OID_INVALIDITY_DATE: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.24");
-const OID_CERTIFICATE_ISSUER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.29");
-
 /// Extensions we recognize and can safely process (or ignore).
 /// If a CRL contains a critical extension not in this list, we must reject it.
 const RECOGNIZED_CRL_EXTENSIONS: &[ObjectIdentifier] = &[
@@ -67,13 +61,6 @@ const RECOGNIZED_CRL_EXTENSIONS: &[ObjectIdentifier] = &[
     OID_CRL_NUMBER,
     OID_ISSUING_DISTRIBUTION_POINT,
     OID_FRESHEST_CRL,
-];
-
-const RECOGNIZED_CRL_ENTRY_EXTENSIONS: &[ObjectIdentifier] = &[
-    OID_CRL_REASON,
-    OID_HOLD_INSTRUCTION_CODE,
-    OID_INVALIDITY_DATE,
-    OID_CERTIFICATE_ISSUER,
 ];
 
 /// Extract CRL distribution point URLs from a certificate.
@@ -158,24 +145,15 @@ pub fn validate_crl(
 ///
 /// Per RFC 5280 Section 5.2, if a CRL contains a critical extension that the
 /// application cannot process, the application must not use that CRL.
+///
+/// Note: ISO 18013-5 states "CRL entry extensions shall not be used", so we only
+/// validate CRL-level extensions here.
 fn validate_crl_extensions(crl: &CertificateList) -> Result<(), CrlError> {
-    // Check CRL-level extensions
     for ext in crl.tbs_cert_list.crl_extensions.iter().flatten() {
         if ext.critical && !RECOGNIZED_CRL_EXTENSIONS.contains(&ext.extn_id) {
             return Err(CrlError::UnrecognizedCriticalExtension {
                 oid: ext.extn_id.to_string(),
             });
-        }
-    }
-
-    // Check CRL entry extensions
-    for revoked in crl.tbs_cert_list.revoked_certificates.iter().flatten() {
-        for ext in revoked.crl_entry_extensions.iter().flatten() {
-            if ext.critical && !RECOGNIZED_CRL_ENTRY_EXTENSIONS.contains(&ext.extn_id) {
-                return Err(CrlError::UnrecognizedCriticalExtension {
-                    oid: ext.extn_id.to_string(),
-                });
-            }
         }
     }
 
@@ -211,6 +189,11 @@ fn validate_crl_validity(
 
 /// Check if a certificate's serial number appears in the CRL.
 ///
+/// Per ISO 18013-5 B.3.2: if an entry is found matching the certificate serial number,
+/// the certificate is considered revoked (status UNSPECIFIED). CRL entry extensions are
+/// not checked, as the ISO 18013-5 CRL profile states "CRL entry extensions shall not
+/// be used."
+///
 /// Returns `RevocationStatus::Valid` if not revoked, or `RevocationStatus::Revoked`
 /// with details if the certificate is on the revocation list.
 pub fn check_revocation(cert: &Certificate, crl: &CertificateList) -> RevocationStatus {
@@ -223,22 +206,14 @@ pub fn check_revocation(cert: &Certificate, crl: &CertificateList) -> Revocation
 
     for revoked in revoked_certs.iter() {
         if &revoked.serial_number == cert_serial {
-            // Extract the reason from extensions if present
-            let reason = revoked
-                .crl_entry_extensions
-                .iter()
-                .flatten()
-                .find_map(|ext| {
-                    if ext.extn_id == OID_CRL_REASON {
-                        CrlReason::from_der(ext.extn_value.as_bytes()).ok()
-                    } else {
-                        None
-                    }
-                });
+            // ISO 18013-5 CRL profile: "CRL entry extensions shall not be used."
+            // Per B.3.2, finding the serial in the CRL means cert_status = UNSPECIFIED.
+            if revoked.crl_entry_extensions.is_some() {
+                warn!("CRL entry extensions present but ISO 18013-5 says they shall not be used");
+            }
 
             return RevocationStatus::Revoked {
                 serial: hex::encode(cert_serial.as_bytes()),
-                reason: Some(reason.unwrap_or(CrlReason::Unspecified)),
             };
         }
     }
