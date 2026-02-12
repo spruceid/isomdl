@@ -80,7 +80,9 @@ pub enum CrlError {
     MissingAuthorityKeyIdentifier,
 
     /// CRL Authority Key Identifier does not match the signing certificate's Subject Key Identifier.
-    #[error("CRL Authority Key Identifier does not match signing certificate's Subject Key Identifier")]
+    #[error(
+        "CRL Authority Key Identifier does not match signing certificate's Subject Key Identifier"
+    )]
     AuthorityKeyIdentifierMismatch,
 
     /// CRL is missing the mandatory CRL Number extension.

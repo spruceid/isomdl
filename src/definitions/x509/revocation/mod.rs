@@ -52,8 +52,7 @@ const OID_CRL_NUMBER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.20
 
 /// CRL extensions allowed by the ISO 18013-5 CRL profile (Table B.10).
 /// The profile states "Further extensions shall not be present."
-const ALLOWED_CRL_EXTENSIONS: &[ObjectIdentifier] =
-    &[OID_AUTHORITY_KEY_IDENTIFIER, OID_CRL_NUMBER];
+const ALLOWED_CRL_EXTENSIONS: &[ObjectIdentifier] = &[OID_AUTHORITY_KEY_IDENTIFIER, OID_CRL_NUMBER];
 
 /// Extract CRL distribution point URLs from a certificate.
 ///
@@ -417,8 +416,8 @@ mod integration_tests {
             .flatten()
             .find(|ext| ext.extn_id == SubjectKeyIdentifier::OID)
             .expect("root certificate must have SKI");
-        let ski = SubjectKeyIdentifier::from_der(ski.extn_value.as_bytes())
-            .expect("valid SKI extension");
+        let ski =
+            SubjectKeyIdentifier::from_der(ski.extn_value.as_bytes()).expect("valid SKI extension");
 
         let aki = AuthorityKeyIdentifier {
             key_identifier: Some(OctetString::new(ski.0.as_bytes().to_vec()).unwrap()),
