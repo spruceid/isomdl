@@ -47,9 +47,9 @@ pub enum CrlError {
     #[error("CRL is not yet valid (thisUpdate: {this_update})")]
     NotYetValid { this_update: String },
 
-    /// CRL contains an unrecognized critical extension.
-    #[error("CRL contains unrecognized critical extension: {oid}")]
-    UnrecognizedCriticalExtension { oid: String },
+    /// CRL contains an extension not allowed by the ISO 18013-5 CRL profile.
+    #[error("CRL contains disallowed extension: {oid}")]
+    DisallowedExtension { oid: String },
 
     /// No CRL distribution point found in the certificate.
     #[error("no CRL distribution point in certificate")]

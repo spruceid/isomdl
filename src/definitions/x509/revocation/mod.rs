@@ -46,22 +46,14 @@ use x509_cert::{
 
 use super::validation::ValidationOptions;
 
-// OIDs for CRL extensions we recognize (RFC 5280 Section 5.2)
+// CRL extension OIDs allowed by ISO 18013-5 Table B.10.
 const OID_AUTHORITY_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.35");
-const OID_ISSUER_ALT_NAME: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.18");
 const OID_CRL_NUMBER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.20");
-const OID_ISSUING_DISTRIBUTION_POINT: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.28");
-const OID_FRESHEST_CRL: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.46");
 
-/// Extensions we recognize and can safely process (or ignore).
-/// If a CRL contains a critical extension not in this list, we must reject it.
-const RECOGNIZED_CRL_EXTENSIONS: &[ObjectIdentifier] = &[
-    OID_AUTHORITY_KEY_IDENTIFIER,
-    OID_ISSUER_ALT_NAME,
-    OID_CRL_NUMBER,
-    OID_ISSUING_DISTRIBUTION_POINT,
-    OID_FRESHEST_CRL,
-];
+/// CRL extensions allowed by the ISO 18013-5 CRL profile (Table B.10).
+/// The profile states "Further extensions shall not be present."
+const ALLOWED_CRL_EXTENSIONS: &[ObjectIdentifier] =
+    &[OID_AUTHORITY_KEY_IDENTIFIER, OID_CRL_NUMBER];
 
 /// Extract CRL distribution point URLs from a certificate.
 ///
@@ -170,17 +162,14 @@ pub fn validate_crl(
     Ok(())
 }
 
-/// Check for unrecognized critical extensions in the CRL.
+/// Check that the CRL only contains extensions allowed by ISO 18013-5 Table B.10.
 ///
-/// Per RFC 5280 Section 5.2, if a CRL contains a critical extension that the
-/// application cannot process, the application must not use that CRL.
-///
-/// Note: ISO 18013-5 states "CRL entry extensions shall not be used", so we only
-/// validate CRL-level extensions here.
+/// The profile allows only Authority Key Identifier (5.2.1) and CRL Number (5.2.3),
+/// and states "Further extensions shall not be present."
 fn validate_crl_extensions(crl: &CertificateList) -> Result<(), CrlError> {
     for ext in crl.tbs_cert_list.crl_extensions.iter().flatten() {
-        if ext.critical && !RECOGNIZED_CRL_EXTENSIONS.contains(&ext.extn_id) {
-            return Err(CrlError::UnrecognizedCriticalExtension {
+        if !ALLOWED_CRL_EXTENSIONS.contains(&ext.extn_id) {
+            return Err(CrlError::DisallowedExtension {
                 oid: ext.extn_id.to_string(),
             });
         }
