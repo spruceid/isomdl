@@ -58,4 +58,32 @@ pub enum CrlError {
     /// All CRL distribution point URLs failed.
     #[error("all CRL distribution point URLs failed: {errors:?}")]
     AllUrlsFailed { errors: Vec<String> },
+
+    /// CRL version is not v2 as required by ISO 18013-5.
+    #[error("CRL version is not v2")]
+    InvalidVersion,
+
+    /// CRL TBS signature algorithm does not match outer signature algorithm.
+    #[error("CRL TBS signature algorithm does not match outer signature algorithm")]
+    SignatureAlgorithmMismatch,
+
+    /// CRL is missing the mandatory nextUpdate field.
+    #[error("CRL is missing mandatory nextUpdate field")]
+    MissingNextUpdate,
+
+    /// CRL has an empty revoked certificates list (shall not be present if empty).
+    #[error("CRL has empty revoked certificates list")]
+    EmptyRevokedCertificates,
+
+    /// CRL is missing the mandatory Authority Key Identifier extension.
+    #[error("CRL is missing mandatory Authority Key Identifier extension")]
+    MissingAuthorityKeyIdentifier,
+
+    /// CRL Authority Key Identifier does not match the signing certificate's Subject Key Identifier.
+    #[error("CRL Authority Key Identifier does not match signing certificate's Subject Key Identifier")]
+    AuthorityKeyIdentifierMismatch,
+
+    /// CRL is missing the mandatory CRL Number extension.
+    #[error("CRL is missing mandatory CRL Number extension")]
+    MissingCrlNumber,
 }

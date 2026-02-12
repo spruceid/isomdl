@@ -39,9 +39,9 @@ use x509_cert::{
     crl::CertificateList,
     ext::pkix::{
         name::{DistributionPointName, GeneralName},
-        CrlDistributionPoints,
+        AuthorityKeyIdentifier, CrlDistributionPoints, SubjectKeyIdentifier,
     },
-    Certificate,
+    Certificate, Version,
 };
 
 use super::validation::ValidationOptions;
@@ -99,13 +99,19 @@ pub fn extract_crl_urls(cert: &Certificate) -> Result<Vec<String>, CrlError> {
     Err(CrlError::NoDistributionPoint)
 }
 
-/// Validate a CRL against the signing certificate.
+/// Validate a CRL against the signing certificate per ISO 18013-5 Table B.10.
 ///
 /// This validates:
-/// - Issuer matches the signing certificate subject
-/// - Validity period (thisUpdate <= validation_time <= nextUpdate)
-/// - No unrecognized critical extensions (RFC 5280 Section 5.2)
-/// - Signature is valid
+/// - Version is v2 (5.1.2.1)
+/// - TBS signature algorithm matches outer signature algorithm (5.1.2.2)
+/// - Issuer matches the signing certificate subject (5.1.2.3)
+/// - Validity period: thisUpdate <= validation_time <= nextUpdate (5.1.2.4, 5.1.2.5)
+/// - nextUpdate is present (5.1.2.5, mandatory)
+/// - Revoked certificates list is not empty if present (5.1.2.6)
+/// - No unrecognized critical CRL extensions (RFC 5280 Section 5.2)
+/// - Authority Key Identifier matches signing certificate's SKI (5.2.1)
+/// - CRL Number extension is present (5.2.3)
+/// - Signature is valid (5.1.1.2)
 ///
 /// For ISO 18013-5, the IACA root certificate signs all CRLs in the chain.
 pub fn validate_crl(
@@ -113,18 +119,41 @@ pub fn validate_crl(
     signing_cert: &Certificate,
     options: &ValidationOptions,
 ) -> Result<(), CrlError> {
-    // Verify the CRL issuer matches the signing certificate subject
+    // Version shall be v2 (Table B.10, 5.1.2.1)
+    if crl.tbs_cert_list.version != Version::V2 {
+        return Err(CrlError::InvalidVersion);
+    }
+
+    // TBS signature algorithm must match outer signature algorithm (Table B.10, 5.1.2.2)
+    if crl.tbs_cert_list.signature != crl.signature_algorithm {
+        return Err(CrlError::SignatureAlgorithmMismatch);
+    }
+
+    // Verify the CRL issuer matches the signing certificate subject (Table B.10, 5.1.2.3)
     if crl.tbs_cert_list.issuer != signing_cert.tbs_certificate.subject {
         return Err(CrlError::IssuerMismatch);
     }
 
-    // Verify the CRL validity period
+    // Verify the CRL validity period (Table B.10, 5.1.2.4 & 5.1.2.5)
     validate_crl_validity(crl, options.validation_time())?;
+
+    // Revoked certificates shall not be empty if present (Table B.10, 5.1.2.6)
+    if let Some(revoked) = &crl.tbs_cert_list.revoked_certificates {
+        if revoked.is_empty() {
+            return Err(CrlError::EmptyRevokedCertificates);
+        }
+    }
 
     // Check for unrecognized critical extensions (RFC 5280 Section 5.2)
     validate_crl_extensions(crl)?;
 
-    // Verify the CRL signature
+    // Authority Key Identifier must match signing cert's SKI (Table B.10, 5.2.1)
+    validate_crl_authority_key_identifier(crl, signing_cert)?;
+
+    // CRL Number must be present (Table B.10, 5.2.3)
+    validate_crl_number_present(crl)?;
+
+    // Verify the CRL signature (Table B.10, 5.1.1.2)
     let tbs = crl.tbs_cert_list.to_der().map_err(|e| {
         error!("failed to encode CRL TBS: {e:?}");
         CrlError::SignatureInvalid
@@ -160,7 +189,68 @@ fn validate_crl_extensions(crl: &CertificateList) -> Result<(), CrlError> {
     Ok(())
 }
 
+/// Validate that the CRL's Authority Key Identifier matches the signing certificate's
+/// Subject Key Identifier (Table B.10, 5.2.1).
+fn validate_crl_authority_key_identifier(
+    crl: &CertificateList,
+    signing_cert: &Certificate,
+) -> Result<(), CrlError> {
+    // Extract AKI from CRL extensions
+    let aki = crl
+        .tbs_cert_list
+        .crl_extensions
+        .iter()
+        .flatten()
+        .find(|ext| ext.extn_id == OID_AUTHORITY_KEY_IDENTIFIER)
+        .ok_or(CrlError::MissingAuthorityKeyIdentifier)?;
+    let aki = AuthorityKeyIdentifier::from_der(aki.extn_value.as_bytes()).map_err(|e| {
+        warn!("failed to parse CRL Authority Key Identifier: {e}");
+        CrlError::MissingAuthorityKeyIdentifier
+    })?;
+    let aki_key_id = aki
+        .key_identifier
+        .ok_or(CrlError::MissingAuthorityKeyIdentifier)?;
+
+    // Extract SKI from signing certificate extensions
+    let ski = signing_cert
+        .tbs_certificate
+        .extensions
+        .iter()
+        .flatten()
+        .find(|ext| ext.extn_id == SubjectKeyIdentifier::OID)
+        .ok_or_else(|| {
+            warn!("signing certificate missing Subject Key Identifier");
+            CrlError::AuthorityKeyIdentifierMismatch
+        })?;
+    let ski = SubjectKeyIdentifier::from_der(ski.extn_value.as_bytes()).map_err(|e| {
+        warn!("failed to parse signing certificate Subject Key Identifier: {e}");
+        CrlError::AuthorityKeyIdentifierMismatch
+    })?;
+
+    if aki_key_id != ski.0 {
+        return Err(CrlError::AuthorityKeyIdentifierMismatch);
+    }
+
+    Ok(())
+}
+
+/// Validate that the CRL Number extension is present (Table B.10, 5.2.3).
+fn validate_crl_number_present(crl: &CertificateList) -> Result<(), CrlError> {
+    let has_crl_number = crl
+        .tbs_cert_list
+        .crl_extensions
+        .iter()
+        .flatten()
+        .any(|ext| ext.extn_id == OID_CRL_NUMBER);
+    if !has_crl_number {
+        return Err(CrlError::MissingCrlNumber);
+    }
+    Ok(())
+}
+
 /// Validate CRL validity period (thisUpdate <= validation_time <= nextUpdate).
+///
+/// Per ISO 18013-5 Table B.10, nextUpdate is mandatory.
 fn validate_crl_validity(
     crl: &CertificateList,
     validation_time: OffsetDateTime,
@@ -174,14 +264,17 @@ fn validate_crl_validity(
         });
     }
 
-    // Check validation_time <= nextUpdate (if present)
-    if let Some(next_update) = &crl.tbs_cert_list.next_update {
-        let next_update_time = OffsetDateTime::from(next_update.to_system_time());
-        if validation_time > next_update_time {
-            return Err(CrlError::Expired {
-                next_update: format!("{next_update:?}"),
-            });
-        }
+    // nextUpdate is mandatory per ISO 18013-5 Table B.10 (5.1.2.5)
+    let next_update = crl
+        .tbs_cert_list
+        .next_update
+        .as_ref()
+        .ok_or(CrlError::MissingNextUpdate)?;
+    let next_update_time = OffsetDateTime::from(next_update.to_system_time());
+    if validation_time > next_update_time {
+        return Err(CrlError::Expired {
+            next_update: format!("{next_update:?}"),
+        });
     }
 
     Ok(())
@@ -294,7 +387,8 @@ mod tests {
 /// Integration tests that require the reqwest feature for HTTP mocking.
 #[cfg(all(test, feature = "reqwest"))]
 mod integration_tests {
-    use der::Encode;
+    use const_oid::AssociatedOid;
+    use der::{asn1::OctetString, Decode, Encode};
     use p256::NistP256;
     use signature::Signer;
     use wiremock::{
@@ -303,14 +397,18 @@ mod integration_tests {
     };
     use x509_cert::{
         crl::{CertificateList, RevokedCert, TbsCertList},
+        ext::{
+            pkix::{AuthorityKeyIdentifier, SubjectKeyIdentifier},
+            Extension,
+        },
         name::Name,
         serial_number::SerialNumber,
         spki::SignatureBitStringEncoding,
         time::Time,
-        Version,
+        Certificate, Version,
     };
 
-    use super::{CachingRevocationFetcher, ReqwestClient};
+    use super::{CachingRevocationFetcher, ReqwestClient, OID_CRL_NUMBER};
     use crate::definitions::x509::{
         test::setup_with_crl_url,
         trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
@@ -318,8 +416,45 @@ mod integration_tests {
         X5Chain,
     };
 
+    /// Build CRL extensions per ISO 18013-5 Table B.10:
+    /// - Authority Key Identifier (5.2.1, M) with keyIdentifier matching the IACA's SKI
+    /// - CRL Number (5.2.3, M)
+    fn build_crl_extensions(root_cert: &Certificate) -> Vec<Extension> {
+        // Extract SKI from the root certificate to use as the CRL's AKI
+        let ski = root_cert
+            .tbs_certificate
+            .extensions
+            .iter()
+            .flatten()
+            .find(|ext| ext.extn_id == SubjectKeyIdentifier::OID)
+            .expect("root certificate must have SKI");
+        let ski = SubjectKeyIdentifier::from_der(ski.extn_value.as_bytes())
+            .expect("valid SKI extension");
+
+        let aki = AuthorityKeyIdentifier {
+            key_identifier: Some(OctetString::new(ski.0.as_bytes().to_vec()).unwrap()),
+            ..Default::default()
+        };
+        let aki_ext = Extension {
+            extn_id: super::OID_AUTHORITY_KEY_IDENTIFIER,
+            critical: false,
+            extn_value: OctetString::new(aki.to_der().unwrap()).unwrap(),
+        };
+
+        // CRL Number = 1 (encoded as DER INTEGER)
+        let crl_number_value = 1u64.to_der().unwrap();
+        let crl_number_ext = Extension {
+            extn_id: OID_CRL_NUMBER,
+            critical: false,
+            extn_value: OctetString::new(crl_number_value).unwrap(),
+        };
+
+        vec![aki_ext, crl_number_ext]
+    }
+
     fn create_crl(
         issuer: Name,
+        root_cert: &Certificate,
         root_key: &p256::ecdsa::SigningKey,
         revoked_serials: &[SerialNumber],
     ) -> Vec<u8> {
@@ -342,6 +477,8 @@ mod integration_tests {
             )
         };
 
+        let crl_extensions = build_crl_extensions(root_cert);
+
         let tbs = TbsCertList {
             version: Version::V2,
             signature: x509_cert::spki::AlgorithmIdentifierOwned {
@@ -352,7 +489,7 @@ mod integration_tests {
             this_update,
             next_update: Some(next_update),
             revoked_certificates,
-            crl_extensions: None,
+            crl_extensions: Some(crl_extensions),
         };
 
         let tbs_bytes = tbs.to_der().unwrap();
@@ -378,7 +515,7 @@ mod integration_tests {
         let (root, signer, root_key, issuer) = setup_with_crl_url(crl_url.clone());
 
         // Create CRL with no revoked certificates
-        let crl_bytes = create_crl(issuer, &root_key, &[]);
+        let crl_bytes = create_crl(issuer, &root, &root_key, &[]);
 
         Mock::given(method("GET"))
             .and(path("/crl"))
@@ -422,7 +559,7 @@ mod integration_tests {
 
         // Get the signer's serial number and create CRL with it revoked
         let signer_serial = signer.tbs_certificate.serial_number.clone();
-        let crl_bytes = create_crl(issuer, &root_key, &[signer_serial]);
+        let crl_bytes = create_crl(issuer, &root, &root_key, &[signer_serial]);
 
         Mock::given(method("GET"))
             .and(path("/crl"))

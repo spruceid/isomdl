@@ -348,6 +348,7 @@ mod test {
     /// - Not After:  Apr 18 17:38:41 2026 GMT
     ///
     /// Use a fixed validation time before expiry to ensure tests remain stable.
+    /// Must be after the AAMVA CRL's thisUpdate to pass CRL validity checks.
     fn validation_time_before_expiry() -> OffsetDateTime {
         Date::from_calendar_date(2025, Month::January, 1)
             .unwrap()
@@ -542,7 +543,8 @@ mod test {
             validation::ValidationRuleset,
             X5Chain,
         };
-        use der::Encode;
+        use const_oid::AssociatedOid;
+        use der::{asn1::OctetString, Decode, Encode};
         use p256::NistP256;
         use signature::Signer;
         use wiremock::{
@@ -551,6 +553,10 @@ mod test {
         };
         use x509_cert::{
             crl::{CertificateList, RevokedCert, TbsCertList},
+            ext::{
+                pkix::{AuthorityKeyIdentifier, SubjectKeyIdentifier},
+                Extension,
+            },
             spki::SignatureBitStringEncoding,
             time::Time,
         };
@@ -566,6 +572,31 @@ mod test {
         let this_update = Time::try_from(now).unwrap();
         let next_update = Time::try_from(now + std::time::Duration::from_secs(86400)).unwrap();
 
+        // Build CRL extensions (AKI + CRL Number) per ISO 18013-5 Table B.10
+        let ski = root
+            .tbs_certificate
+            .extensions
+            .iter()
+            .flatten()
+            .find(|ext| ext.extn_id == SubjectKeyIdentifier::OID)
+            .expect("root certificate must have SKI");
+        let ski =
+            SubjectKeyIdentifier::from_der(ski.extn_value.as_bytes()).expect("valid SKI extension");
+        let aki = AuthorityKeyIdentifier {
+            key_identifier: Some(OctetString::new(ski.0.as_bytes().to_vec()).unwrap()),
+            ..Default::default()
+        };
+        let aki_ext = Extension {
+            extn_id: const_oid::ObjectIdentifier::new_unwrap("2.5.29.35"),
+            critical: false,
+            extn_value: OctetString::new(aki.to_der().unwrap()).unwrap(),
+        };
+        let crl_number_ext = Extension {
+            extn_id: const_oid::ObjectIdentifier::new_unwrap("2.5.29.20"),
+            critical: false,
+            extn_value: OctetString::new(1u64.to_der().unwrap()).unwrap(),
+        };
+
         let tbs = TbsCertList {
             version: x509_cert::Version::V2,
             signature: x509_cert::spki::AlgorithmIdentifierOwned {
@@ -580,7 +611,7 @@ mod test {
                 revocation_date: this_update,
                 crl_entry_extensions: None,
             }]),
-            crl_extensions: None,
+            crl_extensions: Some(vec![aki_ext, crl_number_ext]),
         };
 
         let tbs_bytes = tbs.to_der().unwrap();
@@ -646,9 +677,8 @@ mod test {
         };
 
         let trust_anchors = aamva_trust_anchors();
-        let options = ValidationOptions {
-            validation_time: Some(validation_time_before_expiry()),
-        };
+        // Using current time as it fetches a live CRL
+        let options = ValidationOptions::default();
 
         // Parse the VICAL first to get the x5chain for validation
         let parsed = Vical::parse(AAMVA_VICAL).expect("VICAL parsing should succeed");
