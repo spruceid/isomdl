@@ -33,8 +33,8 @@ struct SessionManager {
 
 struct SessionManagerEngaged(device::SessionManagerEngaged);
 
-#[test]
-pub fn simulated_device_and_reader_interaction() -> Result<()> {
+#[test_log::test(tokio::test)]
+pub async fn simulated_device_and_reader_interaction() -> Result<()> {
     let key: Arc<p256::ecdsa::SigningKey> =
         Arc::new(p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))?.into());
 
@@ -53,7 +53,8 @@ pub fn simulated_device_and_reader_interaction() -> Result<()> {
         &mut reader_session_manager,
         request,
         key.clone(),
-    )?;
+    )
+    .await?;
     if request_data.is_none() {
         anyhow::bail!("there were errors processing request");
     }
@@ -63,7 +64,7 @@ pub fn simulated_device_and_reader_interaction() -> Result<()> {
     let response = create_response(request_data.session_manager.clone())?;
 
     // Reader Processing mDL data
-    reader_handle_device_response(&mut reader_session_manager, response)?;
+    reader_handle_device_response(&mut reader_session_manager, response).await?;
 
     Ok(())
 }
@@ -112,7 +113,7 @@ fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u
 }
 
 /// The Device handles the request from the reader and creates the `RequestData` context.
-fn handle_request(
+async fn handle_request(
     state: Arc<SessionManagerEngaged>,
     reader_session_manager: &mut reader::SessionManager,
     request: Vec<u8>,
@@ -121,10 +122,12 @@ fn handle_request(
     let (session_manager, validated_response) = {
         let session_establishment: definitions::SessionEstablishment =
             cbor::from_slice(&request).context("could not deserialize request")?;
+        // Use () to skip CRL checks in tests
         state
             .0
             .clone()
-            .process_session_establishment(session_establishment, Default::default())
+            .process_session_establishment(session_establishment, Default::default(), &())
+            .await
             .context("could not process process session establishment")?
     };
     let session_manager = Arc::new(SessionManager {
@@ -134,7 +137,8 @@ fn handle_request(
     });
     // Propagate any errors back to the reader
     if let Ok(Some(response)) = get_errors(session_manager.clone()) {
-        let validated_response = reader_session_manager.handle_response(&response);
+        // Use () to skip CRL checks in tests
+        let validated_response = reader_session_manager.handle_response(&response, &()).await;
         println!("Reader: {validated_response:?}");
         return Ok(None);
     };
@@ -190,11 +194,12 @@ fn sign_pending_and_retrieve_response(
 }
 
 /// Reader Processing mDL data.
-fn reader_handle_device_response(
+async fn reader_handle_device_response(
     reader_sm: &mut reader::SessionManager,
     response: Vec<u8>,
 ) -> Result<()> {
-    let validated_response = reader_sm.handle_response(&response);
+    // Use () to skip CRL checks in tests
+    let validated_response = reader_sm.handle_response(&response, &()).await;
     println!("Validated Response: {validated_response:?}");
     Ok(())
 }

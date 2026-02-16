@@ -1,3 +1,4 @@
+pub mod revocation;
 pub mod trust_anchor;
 mod util;
 pub mod validation;
@@ -7,7 +8,7 @@ pub use util::SupportedCurve;
 pub use x5chain::{Builder, X5Chain};
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::time::Duration;
 
     use const_oid::ObjectIdentifier;
@@ -35,7 +36,11 @@ mod test {
 
     use super::validation;
 
-    fn prepare_root_certificate<S>(root_key: &S, issuer: Name) -> CertificateBuilder<'_, S>
+    pub(crate) fn prepare_root_certificate<S>(
+        root_key: &S,
+        issuer: Name,
+        crl_url: String,
+    ) -> CertificateBuilder<'_, S>
     where
         S: KeypairRef + DynSignatureAlgorithmIdentifier,
         S::VerifyingKey: EncodePublicKey,
@@ -78,9 +83,7 @@ mod test {
         builder
             .add_extension(&CrlDistributionPoints(vec![DistributionPoint {
                 distribution_point: Some(DistributionPointName::FullName(vec![
-                    GeneralName::UniformResourceIdentifier(
-                        "http://example.com".to_string().try_into().unwrap(),
-                    ),
+                    GeneralName::UniformResourceIdentifier(crl_url.try_into().unwrap()),
                 ])),
                 reasons: None,
                 crl_issuer: None,
@@ -90,10 +93,11 @@ mod test {
         builder
     }
 
-    fn prepare_signer_certificate<'s, S>(
+    pub(crate) fn prepare_signer_certificate<'s, S>(
         signer_key: &'s S,
         root_key: &'s S,
         issuer: Name,
+        crl_url: String,
     ) -> CertificateBuilder<'s, S>
     where
         S: KeypairRef + DynSignatureAlgorithmIdentifier,
@@ -143,9 +147,7 @@ mod test {
         builder
             .add_extension(&CrlDistributionPoints(vec![DistributionPoint {
                 distribution_point: Some(DistributionPointName::FullName(vec![
-                    GeneralName::UniformResourceIdentifier(
-                        "http://example.com".to_string().try_into().unwrap(),
-                    ),
+                    GeneralName::UniformResourceIdentifier(crl_url.try_into().unwrap()),
                 ])),
                 reasons: None,
                 crl_issuer: None,
@@ -162,12 +164,22 @@ mod test {
     }
 
     fn setup() -> (Certificate, Certificate) {
+        let (root, signer, _, _) = setup_with_crl_url("http://example.com/crl".to_string());
+        (root, signer)
+    }
+
+    /// Setup test certificates with a custom CRL URL.
+    /// Returns (root_cert, signer_cert, root_key, issuer_name).
+    pub(crate) fn setup_with_crl_url(
+        crl_url: String,
+    ) -> (Certificate, Certificate, p256::ecdsa::SigningKey, Name) {
         let root_key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
         let signer_key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
 
         let issuer: Name = "CN=issuer,C=US".parse().unwrap();
 
-        let mut prepared_root_certificate = prepare_root_certificate(&root_key, issuer.clone());
+        let mut prepared_root_certificate =
+            prepare_root_certificate(&root_key, issuer.clone(), crl_url.clone());
         let signature: ecdsa::Signature<NistP256> =
             root_key.sign(&prepared_root_certificate.finalize().unwrap());
         let root_certificate: Certificate = prepared_root_certificate
@@ -175,7 +187,7 @@ mod test {
             .unwrap();
 
         let mut prepared_signer_certificate =
-            prepare_signer_certificate(&signer_key, &root_key, issuer.clone());
+            prepare_signer_certificate(&signer_key, &root_key, issuer.clone(), crl_url);
         let signature: ecdsa::Signature<NistP256> =
             root_key.sign(&prepared_signer_certificate.finalize().unwrap());
         let signer_certificate: Certificate = prepared_signer_certificate
@@ -187,7 +199,7 @@ mod test {
             &root_certificate
         ));
 
-        (root_certificate, signer_certificate)
+        (root_certificate, signer_certificate, root_key, issuer)
     }
 
     mod iaca {
@@ -199,8 +211,8 @@ mod test {
             X5Chain,
         };
 
-        #[test_log::test]
-        fn valid_mdoc_issuer_certificate_chain_is_validated() {
+        #[test_log::test(tokio::test)]
+        async fn valid_mdoc_issuer_certificate_chain_is_validated() {
             let (root, signer) = super::setup();
 
             tracing::debug!(
@@ -223,7 +235,10 @@ mod test {
                 .unwrap()
                 .build()
                 .unwrap();
-            let outcome = ValidationRuleset::Mdl.validate(&x5chain, &trust_anchor_registry);
+            // Use () to skip CRL checking in tests
+            let outcome = ValidationRuleset::Mdl
+                .validate(&x5chain, &trust_anchor_registry, &())
+                .await;
             assert!(outcome.success(), "{outcome:?}");
         }
     }

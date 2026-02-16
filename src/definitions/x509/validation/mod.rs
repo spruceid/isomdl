@@ -13,6 +13,7 @@ use validity::check_validity_period_at;
 use x509_cert::Certificate;
 
 use super::{
+    revocation::{check_certificate_revocation, RevocationFetcher, RevocationStatus},
     trust_anchor::{TrustAnchorRegistry, TrustPurpose},
     util::common_name_or_unknown,
     X5Chain,
@@ -25,6 +26,13 @@ pub(super) mod signature;
 mod validity;
 
 /// Options for certificate chain validation.
+///
+/// This struct is intentionally limited to parameters that have safe defaults
+/// and are only tweaked in specific scenarios (e.g., testing with a pinned time).
+/// Parameters like [`TrustAnchorRegistry`] and [`RevocationFetcher`]
+/// are kept as explicit function arguments because they require deliberate choices:
+/// you should always think carefully about which roots you trust and which HTTP
+/// client is appropriate for your platform.
 #[derive(Debug, Clone, Default)]
 pub struct ValidationOptions {
     /// The time to use for validity period checks.
@@ -34,7 +42,7 @@ pub struct ValidationOptions {
 
 impl ValidationOptions {
     /// Get the validation time, defaulting to current time if not set.
-    fn validation_time(&self) -> OffsetDateTime {
+    pub(crate) fn validation_time(&self) -> OffsetDateTime {
         self.validation_time.unwrap_or_else(OffsetDateTime::now_utc)
     }
 }
@@ -62,6 +70,13 @@ pub enum ValidationRuleset {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ValidationOutcome {
     pub errors: Vec<String>,
+    /// Errors encountered while checking CRL revocation status (e.g., fetch failures,
+    /// parse errors, missing distribution points).
+    ///
+    /// These are kept separate from `errors` because they represent infrastructure
+    /// failures rather than security failures. Actual certificate revocation is
+    /// reported in `errors`, not here.
+    pub revocation_errors: Vec<String>,
 }
 
 impl ValidationOutcome {
@@ -72,33 +87,55 @@ impl ValidationOutcome {
 
 impl ValidationRuleset {
     /// Validate the certificate chain with default options.
-    pub fn validate(
+    ///
+    /// # Arguments
+    /// * `x5chain` - The certificate chain to validate
+    /// * `trust_anchors` - The trust anchor registry
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks
+    ///   (a warning will be added to `revocation_errors`).
+    pub async fn validate<R: RevocationFetcher>(
         self,
         x5chain: &X5Chain,
         trust_anchors: &TrustAnchorRegistry,
+        revocation_fetcher: &R,
     ) -> ValidationOutcome {
-        self.validate_with_options(x5chain, trust_anchors, &ValidationOptions::default())
+        self.validate_with_options(
+            x5chain,
+            trust_anchors,
+            revocation_fetcher,
+            &ValidationOptions::default(),
+        )
+        .await
     }
 
     /// Validate the certificate chain with custom options.
-    pub fn validate_with_options(
+    pub async fn validate_with_options<R: RevocationFetcher>(
         self,
         x5chain: &X5Chain,
         trust_anchors: &TrustAnchorRegistry,
+        revocation_fetcher: &R,
         options: &ValidationOptions,
     ) -> ValidationOutcome {
         match self {
-            Self::Mdl => mdl_validate(x5chain, trust_anchors, options),
-            Self::AamvaMdl => aamva_mdl_validate(x5chain, trust_anchors, options),
-            Self::MdlReaderOneStep => mdl_reader_one_step_validate(x5chain, trust_anchors, options),
-            Self::Vical => vical_validate(x5chain, trust_anchors, options),
+            Self::Mdl => mdl_validate(x5chain, trust_anchors, revocation_fetcher, options).await,
+            Self::AamvaMdl => {
+                aamva_mdl_validate(x5chain, trust_anchors, revocation_fetcher, options).await
+            }
+            Self::MdlReaderOneStep => {
+                mdl_reader_one_step_validate(x5chain, trust_anchors, revocation_fetcher, options)
+                    .await
+            }
+            Self::Vical => {
+                vical_validate(x5chain, trust_anchors, revocation_fetcher, options).await
+            }
         }
     }
 }
 
-fn mdl_validate_inner<'a: 'b, 'b>(
+async fn mdl_validate_inner<'a: 'b, 'b, R: RevocationFetcher>(
     x5chain: &'a X5Chain,
     trust_anchors: &'b TrustAnchorRegistry,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> Result<(ValidationOutcome, &'a Certificate, &'b Certificate), ValidationOutcome> {
     let mut outcome = ValidationOutcome::default();
@@ -146,17 +183,33 @@ fn mdl_validate_inner<'a: 'b, 'b>(
         .map(ErrorWithContext::iaca);
     outcome.errors.extend(iaca_extension_errors);
 
-    // TODO: CRL check on DS and IACA.
+    // CRL check on DS certificate (signed by IACA)
+    match check_certificate_revocation(revocation_fetcher, document_signer, iaca, options).await {
+        Ok(RevocationStatus::Valid) => {}
+        Ok(RevocationStatus::Revoked { .. }) => {
+            // Actual revocation is a hard security failure
+            outcome
+                .errors
+                .push(ErrorWithContext::ds("certificate is revoked"));
+        }
+        Err(e) => {
+            // Infrastructure failures are non-fatal warnings
+            outcome
+                .revocation_errors
+                .push(ErrorWithContext::ds(e.to_string()));
+        }
+    }
 
     Ok((outcome, document_signer, iaca))
 }
 
-fn mdl_validate(
+async fn mdl_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
-    match mdl_validate_inner(x5chain, trust_anchors, options) {
+    match mdl_validate_inner(x5chain, trust_anchors, revocation_fetcher, options).await {
         Ok((mut outcome, ds, iaca)) => {
             if has_rdn(ds, STATE_OR_PROVINCE_NAME) || has_rdn(iaca, STATE_OR_PROVINCE_NAME) {
                 if let Some(error) = state_or_province_name_matches(ds, iaca) {
@@ -170,12 +223,13 @@ fn mdl_validate(
     }
 }
 
-fn aamva_mdl_validate(
+async fn aamva_mdl_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
-    match mdl_validate_inner(x5chain, trust_anchors, options) {
+    match mdl_validate_inner(x5chain, trust_anchors, revocation_fetcher, options).await {
         Ok((mut outcome, ds, iaca)) => {
             if let Some(error) = state_or_province_name_matches(ds, iaca) {
                 outcome.errors.push(ErrorWithContext::comparison(error))
@@ -187,9 +241,10 @@ fn aamva_mdl_validate(
     }
 }
 
-fn mdl_reader_one_step_validate(
+async fn mdl_reader_one_step_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
     let mut outcome = ValidationOutcome::default();
@@ -214,7 +269,7 @@ fn mdl_reader_one_step_validate(
         validation_time,
     );
 
-    let Some(_reader_ca) = trust_anchor_candidates.next() else {
+    let Some(reader_ca) = trust_anchor_candidates.next() else {
         outcome
             .errors
             .push(ErrorWithContext::reader_ca("no valid trust anchor found"));
@@ -225,7 +280,22 @@ fn mdl_reader_one_step_validate(
         tracing::warn!("more than one trust anchor candidate found, using the first one");
     }
 
-    // TODO: CRL or OCSP check on reader and reader CA.
+    // CRL check on reader certificate (signed by Reader CA)
+    match check_certificate_revocation(revocation_fetcher, reader, reader_ca, options).await {
+        Ok(RevocationStatus::Valid) => {}
+        Ok(RevocationStatus::Revoked { .. }) => {
+            // Actual revocation is a hard security failure
+            outcome
+                .errors
+                .push(ErrorWithContext::reader("certificate is revoked"));
+        }
+        Err(e) => {
+            // Infrastructure failures are non-fatal warnings
+            outcome
+                .revocation_errors
+                .push(ErrorWithContext::reader(e.to_string()));
+        }
+    }
 
     outcome
 }
@@ -235,9 +305,10 @@ fn mdl_reader_one_step_validate(
 /// This validates the full certificate chain in the x5chain, where the chain must terminate at
 /// a trust anchor with `TrustPurpose::VicalAuthority`. The chain can be multi-level, e.g.,
 /// signer -> intermediate CA -> root CA.
-fn vical_validate(
+async fn vical_validate<R: RevocationFetcher>(
     x5chain: &X5Chain,
     trust_anchors: &TrustAnchorRegistry,
+    revocation_fetcher: &R,
     options: &ValidationOptions,
 ) -> ValidationOutcome {
     let mut outcome = ValidationOutcome::default();
@@ -259,33 +330,100 @@ fn vical_validate(
     // Try to find a trust anchor that matches either:
     // 1. The direct issuer of the VICAL signer (single-level chain)
     // 2. The issuer of the last certificate in the chain (multi-level chain)
-    let chain_valid =
+    let chain_result =
         validate_chain_to_trust_anchor(x5chain, trust_anchors, &mut outcome, validation_time);
 
-    if !chain_valid {
-        outcome.errors.push(ErrorWithContext::vical_authority(
-            "no valid trust anchor found for certificate chain",
-        ));
+    let external_trust_anchor = match chain_result {
+        ChainToTrustAnchorResult::ValidInChainAnchor => None,
+        ChainToTrustAnchorResult::ValidExternalAnchor(anchor) => Some(anchor),
+        ChainToTrustAnchorResult::Invalid => {
+            outcome.errors.push(ErrorWithContext::vical_authority(
+                "no valid trust anchor found for certificate chain",
+            ));
+            None
+        }
+    };
+
+    // CRL check on each certificate in the chain against its issuer.
+    // Walk the chain from end-entity towards root.
+    let certificates: Vec<_> = x5chain.iter().collect();
+    for window in certificates.windows(2) {
+        let subject = &window[0].inner;
+        let issuer = &window[1].inner;
+
+        match check_certificate_revocation(revocation_fetcher, subject, issuer, options).await {
+            Ok(RevocationStatus::Valid) => {}
+            Ok(RevocationStatus::Revoked { .. }) => {
+                outcome.errors.push(ErrorWithContext::chain(format!(
+                    "certificate '{}' is revoked",
+                    common_name_or_unknown(subject)
+                )));
+            }
+            Err(e) => {
+                outcome
+                    .revocation_errors
+                    .push(ErrorWithContext::chain(format!(
+                        "CRL check for '{}': {}",
+                        common_name_or_unknown(subject),
+                        e
+                    )));
+            }
+        }
     }
 
-    // TODO: CRL or OCSP check on VICAL signer and intermediates.
+    // Check the last certificate in the chain against the external trust anchor (if found).
+    if let Some(trust_anchor) = external_trust_anchor {
+        let last_cert = x5chain.root_entity_certificate();
+        match check_certificate_revocation(revocation_fetcher, last_cert, trust_anchor, options)
+            .await
+        {
+            Ok(RevocationStatus::Valid) => {}
+            Ok(RevocationStatus::Revoked { .. }) => {
+                outcome.errors.push(ErrorWithContext::chain(format!(
+                    "certificate '{}' is revoked",
+                    common_name_or_unknown(last_cert)
+                )));
+            }
+            Err(e) => {
+                outcome
+                    .revocation_errors
+                    .push(ErrorWithContext::chain(format!(
+                        "CRL check for '{}': {}",
+                        common_name_or_unknown(last_cert),
+                        e
+                    )));
+            }
+        }
+    }
 
     outcome
 }
 
+/// Result of validating a certificate chain to a trust anchor.
+enum ChainToTrustAnchorResult<'a> {
+    /// Chain is valid and the trust anchor is within the chain itself.
+    /// No external issuer certificate is available for CRL checking the last cert.
+    ValidInChainAnchor,
+    /// Chain is valid and signed by an external trust anchor (not in the chain).
+    /// The trust anchor certificate is returned for CRL checking the last cert.
+    ValidExternalAnchor(&'a Certificate),
+    /// Chain is invalid - no valid trust anchor found or signature verification failed.
+    /// Errors have been recorded in the outcome.
+    Invalid,
+}
+
 /// Validate that the certificate chain terminates at a trust anchor.
 ///
-/// Unlike mDL validation which assumes a single-level chain (document signer -> IACA),
-/// VICAL chains can be multi-level (signer -> intermediate -> root). This function
-/// validates each link in the chain and checks if the chain terminates at a trust anchor.
+/// Walks the chain from end-entity towards root, verifying signatures and checking
+/// if any certificate is a trust anchor or if a trust anchor signs the last certificate.
 ///
-/// Returns true if the chain is valid and terminates at a trust anchor.
-fn validate_chain_to_trust_anchor(
-    x5chain: &X5Chain,
-    trust_anchors: &TrustAnchorRegistry,
+/// Any validation errors (signature failures, validity issues) are recorded in `outcome`.
+fn validate_chain_to_trust_anchor<'a>(
+    x5chain: &'a X5Chain,
+    trust_anchors: &'a TrustAnchorRegistry,
     outcome: &mut ValidationOutcome,
     validation_time: OffsetDateTime,
-) -> bool {
+) -> ChainToTrustAnchorResult<'a> {
     let certificates: Vec<_> = x5chain.iter().collect();
 
     // Walk the chain from end-entity towards root, verifying each signature.
@@ -300,7 +438,7 @@ fn validate_chain_to_trust_anchor(
                 common_name_or_unknown(subject),
                 common_name_or_unknown(issuer)
             )));
-            return false;
+            return ChainToTrustAnchorResult::Invalid;
         }
 
         // Check validity of intermediate certificates.
@@ -324,7 +462,7 @@ fn validate_chain_to_trust_anchor(
                 i + 1,
                 common_name_or_unknown(issuer)
             );
-            return true;
+            return ChainToTrustAnchorResult::ValidInChainAnchor;
         }
     }
 
@@ -340,7 +478,7 @@ fn validate_chain_to_trust_anchor(
             "chain terminates at trust anchor (last cert): {}",
             common_name_or_unknown(last_cert)
         );
-        return true;
+        return ChainToTrustAnchorResult::ValidInChainAnchor;
     }
 
     // Finally, check if a trust anchor signed the last certificate in the chain.
@@ -352,15 +490,15 @@ fn validate_chain_to_trust_anchor(
         validation_time,
     );
 
-    if trust_anchor_candidates.next().is_some() {
+    if let Some(trust_anchor) = trust_anchor_candidates.next() {
         tracing::debug!(
             "chain terminates with external trust anchor signing last cert: {}",
             common_name_or_unknown(last_cert)
         );
-        return true;
+        return ChainToTrustAnchorResult::ValidExternalAnchor(trust_anchor);
     }
 
-    false
+    ChainToTrustAnchorResult::Invalid
 }
 
 /// Check if a certificate directly matches a trust anchor.

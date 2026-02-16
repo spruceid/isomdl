@@ -20,6 +20,11 @@ pub struct RequestAuthenticationOutcome {
     pub reader_authentication: AuthenticationStatus,
     /// Errors that occurred during request processing.
     pub errors: Errors,
+    /// Non-fatal warnings that occurred during request processing.
+    ///
+    /// These represent issues that don't affect the authentication outcome
+    /// but may be worth noting (e.g., CRL fetch failures, missing optional data).
+    pub warnings: Errors,
 }
 
 /// The outcome of the reader device authenticating the device response.
@@ -33,6 +38,11 @@ pub struct ResponseAuthenticationOutcome {
     pub device_authentication: AuthenticationStatus,
     /// Errors that occurred during response processing.
     pub errors: Errors,
+    /// Non-fatal warnings that occurred during response processing.
+    ///
+    /// These represent issues that don't affect the authentication outcome
+    /// but may be worth noting (e.g., CRL fetch failures, missing optional data).
+    pub warnings: Errors,
 }
 
 /// The outcome of authenticity checks.

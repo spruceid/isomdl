@@ -15,6 +15,7 @@ use crate::{
         helpers::{ByteStr, NonEmptyVec},
         namespaces::org_iso_18013_5_1::TDate,
         x509::{
+            revocation::RevocationFetcher,
             trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
             validation::{ValidationOutcome, ValidationRuleset},
             SupportedCurve, X5Chain,
@@ -175,14 +176,22 @@ impl VerifiedVical {
     /// # Arguments
     /// * `bytes` - The CBOR-encoded COSE_Sign1 containing the VICAL
     /// * `trust_anchors` - Registry of trusted root/intermediate certificates for chain validation
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
     ///
     /// # Returns
     /// A `VerifiedVical` containing the parsed VICAL and the X.509 certificate chain on success.
-    pub fn from_bytes(
+    pub async fn from_bytes<R: RevocationFetcher>(
         bytes: &[u8],
         trust_anchors: &TrustAnchorRegistry,
+        revocation_fetcher: &R,
     ) -> Result<Self, VerificationError> {
-        Self::from_bytes_with_options(bytes, trust_anchors, &ValidationOptions::default())
+        Self::from_bytes_with_options(
+            bytes,
+            trust_anchors,
+            revocation_fetcher,
+            &ValidationOptions::default(),
+        )
+        .await
     }
 
     /// Verify a VICAL from its CBOR-encoded COSE_Sign1 representation with custom options.
@@ -193,13 +202,15 @@ impl VerifiedVical {
     /// # Arguments
     /// * `bytes` - The CBOR-encoded COSE_Sign1 containing the VICAL
     /// * `trust_anchors` - Registry of trusted root/intermediate certificates for chain validation
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
     /// * `options` - Custom validation options
     ///
     /// # Returns
     /// A `VerifiedVical` containing the parsed VICAL and the X.509 certificate chain on success.
-    pub fn from_bytes_with_options(
+    pub async fn from_bytes_with_options<R: RevocationFetcher>(
         bytes: &[u8],
         trust_anchors: &TrustAnchorRegistry,
+        revocation_fetcher: &R,
         options: &ValidationOptions,
     ) -> Result<Self, VerificationError> {
         let cose_sign1: MaybeTagged<CoseSign1> =
@@ -244,8 +255,9 @@ impl VerifiedVical {
         }
 
         // Validate certificate chain against trust anchors.
-        let validation_outcome =
-            ValidationRuleset::Vical.validate_with_options(&x5chain, trust_anchors, options);
+        let validation_outcome = ValidationRuleset::Vical
+            .validate_with_options(&x5chain, trust_anchors, revocation_fetcher, options)
+            .await;
         if !validation_outcome.success() {
             return Err(VerificationError::ChainValidationFailed(validation_outcome));
         }
@@ -336,6 +348,7 @@ mod test {
     /// - Not After:  Apr 18 17:38:41 2026 GMT
     ///
     /// Use a fixed validation time before expiry to ensure tests remain stable.
+    /// Must be after the AAMVA CRL's thisUpdate to pass CRL validity checks.
     fn validation_time_before_expiry() -> OffsetDateTime {
         Date::from_calendar_date(2025, Month::January, 1)
             .unwrap()
@@ -363,8 +376,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn verify_aamva_vical_with_trust_anchors() {
+    #[tokio::test]
+    async fn verify_aamva_vical_with_trust_anchors() {
         // Build trust anchor registry with the root CA.
         // The chain in the COSE_Sign1 is: [signer, intermediate]
         // The root CA must be in the trust anchor registry.
@@ -374,7 +387,8 @@ mod test {
         };
 
         let verified =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await
                 .expect("VICAL verification should succeed");
 
         // Verify the VICAL was parsed correctly.
@@ -396,8 +410,8 @@ mod test {
         );
     }
 
-    #[test]
-    fn verify_aamva_vical_with_intermediate_as_trust_anchor() {
+    #[tokio::test]
+    async fn verify_aamva_vical_with_intermediate_as_trust_anchor() {
         // Alternatively, trust the intermediate CA directly.
         let intermediate_cert = CertificateWithDer::from_pem(AAMVA_INTERMEDIATE_CA)
             .expect("failed to parse intermediate CA certificate");
@@ -413,20 +427,23 @@ mod test {
         };
 
         let verified =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options)
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await
                 .expect("VICAL verification should succeed with intermediate as trust anchor");
 
         assert_eq!(verified.vical.version, "1.0");
     }
 
-    #[test]
-    fn verify_aamva_vical_fails_with_empty_trust_anchors() {
+    #[tokio::test]
+    async fn verify_aamva_vical_fails_with_empty_trust_anchors() {
         let trust_anchors = TrustAnchorRegistry::default();
         let options = ValidationOptions {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let result = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options);
+        let result =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -434,8 +451,8 @@ mod test {
         );
     }
 
-    #[test]
-    fn verify_aamva_vical_fails_with_unrelated_trust_anchor() {
+    #[tokio::test]
+    async fn verify_aamva_vical_fails_with_unrelated_trust_anchor() {
         // Use an unrelated certificate as trust anchor - should fail validation.
         static UNRELATED_CERT: &[u8] =
             include_bytes!("../../test/presentation/isomdl_iaca_root_cert.pem");
@@ -453,7 +470,9 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let result = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options);
+        let result =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -461,14 +480,16 @@ mod test {
         );
     }
 
-    #[test]
-    fn verify_aamva_vical_fails_when_signer_cert_expired() {
+    #[tokio::test]
+    async fn verify_aamva_vical_fails_when_signer_cert_expired() {
         let trust_anchors = aamva_trust_anchors();
         let options = ValidationOptions {
             validation_time: Some(validation_time_after_expiry()),
         };
 
-        let result = VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &options);
+        let result =
+            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
+                .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -508,5 +529,202 @@ mod test {
         for anchor in &registry.anchors {
             assert_eq!(anchor.purpose, TrustPurpose::Iaca);
         }
+    }
+
+    /// Test that VICAL validation fails when a certificate in the chain is revoked.
+    ///
+    /// This test uses wiremock to serve a CRL that reports the signer certificate as revoked.
+    #[cfg(feature = "reqwest")]
+    #[test_log::test(tokio::test)]
+    async fn vical_validation_fails_when_certificate_is_revoked() {
+        use crate::definitions::x509::{
+            revocation::{CachingRevocationFetcher, ReqwestClient},
+            test::setup_with_crl_url,
+            validation::ValidationRuleset,
+            X5Chain,
+        };
+        use const_oid::AssociatedOid;
+        use der::{asn1::OctetString, Decode, Encode};
+        use p256::NistP256;
+        use signature::Signer;
+        use wiremock::{
+            matchers::{method, path},
+            Mock, MockServer, ResponseTemplate,
+        };
+        use x509_cert::{
+            crl::{CertificateList, RevokedCert, TbsCertList},
+            ext::{
+                pkix::{AuthorityKeyIdentifier, SubjectKeyIdentifier},
+                Extension,
+            },
+            spki::SignatureBitStringEncoding,
+            time::Time,
+        };
+
+        let mock_server = MockServer::start().await;
+        let crl_url = format!("{}/crl", mock_server.uri());
+
+        let (root, signer, root_key, issuer) = setup_with_crl_url(crl_url.clone());
+
+        // Create CRL with the signer's serial number revoked
+        let signer_serial = signer.tbs_certificate.serial_number.clone();
+        let now = std::time::SystemTime::now();
+        let this_update = Time::try_from(now).unwrap();
+        let next_update = Time::try_from(now + std::time::Duration::from_secs(86400)).unwrap();
+
+        // Build CRL extensions (AKI + CRL Number) per ISO 18013-5 Table B.10
+        let ski = root
+            .tbs_certificate
+            .extensions
+            .iter()
+            .flatten()
+            .find(|ext| ext.extn_id == SubjectKeyIdentifier::OID)
+            .expect("root certificate must have SKI");
+        let ski =
+            SubjectKeyIdentifier::from_der(ski.extn_value.as_bytes()).expect("valid SKI extension");
+        let aki = AuthorityKeyIdentifier {
+            key_identifier: Some(OctetString::new(ski.0.as_bytes().to_vec()).unwrap()),
+            ..Default::default()
+        };
+        let aki_ext = Extension {
+            extn_id: const_oid::ObjectIdentifier::new_unwrap("2.5.29.35"),
+            critical: false,
+            extn_value: OctetString::new(aki.to_der().unwrap()).unwrap(),
+        };
+        let crl_number_ext = Extension {
+            extn_id: const_oid::ObjectIdentifier::new_unwrap("2.5.29.20"),
+            critical: false,
+            extn_value: OctetString::new(1u64.to_der().unwrap()).unwrap(),
+        };
+
+        let tbs = TbsCertList {
+            version: x509_cert::Version::V2,
+            signature: x509_cert::spki::AlgorithmIdentifierOwned {
+                oid: const_oid::db::rfc5912::ECDSA_WITH_SHA_256,
+                parameters: None,
+            },
+            issuer,
+            this_update,
+            next_update: Some(next_update),
+            revoked_certificates: Some(vec![RevokedCert {
+                serial_number: signer_serial,
+                revocation_date: this_update,
+                crl_entry_extensions: None,
+            }]),
+            crl_extensions: Some(vec![aki_ext, crl_number_ext]),
+        };
+
+        let tbs_bytes = tbs.to_der().unwrap();
+        let signature: ecdsa::Signature<NistP256> = root_key.sign(&tbs_bytes);
+
+        let crl = CertificateList {
+            tbs_cert_list: tbs,
+            signature_algorithm: x509_cert::spki::AlgorithmIdentifierOwned {
+                oid: const_oid::db::rfc5912::ECDSA_WITH_SHA_256,
+                parameters: None,
+            },
+            signature: signature.to_der().to_bitstring().unwrap(),
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/crl"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(crl.to_der().unwrap()))
+            .mount(&mock_server)
+            .await;
+
+        let trust_anchors = TrustAnchorRegistry {
+            anchors: vec![TrustAnchor {
+                certificate: root,
+                purpose: TrustPurpose::VicalAuthority,
+            }],
+        };
+
+        let x5chain = X5Chain::builder()
+            .with_certificate(signer)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let http_client = ReqwestClient::new().unwrap();
+        let revocation_fetcher = CachingRevocationFetcher::new(http_client);
+        let outcome = ValidationRuleset::Vical
+            .validate(&x5chain, &trust_anchors, &revocation_fetcher)
+            .await;
+
+        assert!(
+            !outcome.success(),
+            "Expected validation to fail for revoked certificate, but got: {:?}",
+            outcome
+        );
+        assert!(
+            outcome.errors.iter().any(|e| e.contains("revoked")),
+            "Expected revocation error in errors: {:?}",
+            outcome.errors
+        );
+    }
+
+    /// Test VICAL verification with real CRL fetching against live AAMVA services.
+    ///
+    /// This test is ignored by default because it makes real network requests.
+    /// Run with: `cargo test --features reqwest verify_aamva_vical_with_live_crl -- --ignored`
+    #[cfg(feature = "reqwest")]
+    #[tokio::test]
+    #[ignore]
+    async fn verify_aamva_vical_with_live_crl_fetching() {
+        use crate::definitions::x509::{
+            revocation::{extract_crl_urls, CachingRevocationFetcher, ReqwestClient},
+            validation::ValidationRuleset,
+        };
+
+        let trust_anchors = aamva_trust_anchors();
+        // Using current time as it fetches a live CRL
+        let options = ValidationOptions::default();
+
+        // Parse the VICAL first to get the x5chain for validation
+        let parsed = Vical::parse(AAMVA_VICAL).expect("VICAL parsing should succeed");
+        let x5chain = parsed.x5chain.as_ref().expect("x5chain should be present");
+
+        // Check that we have CRL URLs to fetch (this ensures our test is meaningful)
+        let signer_crl_urls = extract_crl_urls(x5chain.end_entity_certificate())
+            .expect("signer should have CRL URLs");
+        println!("Signer certificate CRL URLs: {:?}", signer_crl_urls);
+        assert!(
+            !signer_crl_urls.is_empty(),
+            "Test requires certificates with CRL distribution points"
+        );
+
+        // Create the CRL fetcher and perform validation with CRL checking
+        let http_client = ReqwestClient::new().expect("failed to create HTTP client");
+        let revocation_fetcher = CachingRevocationFetcher::new(http_client);
+
+        let outcome = ValidationRuleset::Vical
+            .validate_with_options(x5chain, &trust_anchors, &revocation_fetcher, &options)
+            .await;
+
+        // Print any revocation errors for debugging
+        if !outcome.revocation_errors.is_empty() {
+            println!(
+                "Revocation errors (non-fatal): {:?}",
+                outcome.revocation_errors
+            );
+        }
+
+        // The validation should succeed (no hard errors)
+        assert!(
+            outcome.success(),
+            "VICAL validation failed with errors: {:?}",
+            outcome.errors
+        );
+
+        // CRL fetching should have succeeded without errors
+        // (if there are revocation_errors, CRL fetching had issues)
+        assert!(
+            outcome.revocation_errors.is_empty(),
+            "CRL fetching had errors: {:?}",
+            outcome.revocation_errors
+        );
+
+        println!("VICAL validation succeeded with CRL checking!");
+        println!("Signer certificate: {}", x5chain.end_entity_common_name());
     }
 }

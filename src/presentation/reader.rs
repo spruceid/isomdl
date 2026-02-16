@@ -23,6 +23,8 @@ use uuid::Uuid;
 
 use super::{authentication::ResponseAuthenticationOutcome, reader_utils::validate_response};
 
+use crate::definitions::x509::revocation::RevocationFetcher;
+
 use crate::{
     cbor::{self, CborError},
     definitions::{
@@ -430,7 +432,16 @@ impl SessionManager {
         Ok(device_response)
     }
 
-    pub fn handle_response(&mut self, response: &[u8]) -> ResponseAuthenticationOutcome {
+    /// Handle a device response, validating it and checking certificate revocation.
+    ///
+    /// # Arguments
+    /// * `response` - The encrypted device response
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
+    pub async fn handle_response<R: RevocationFetcher>(
+        &mut self,
+        response: &[u8],
+        revocation_fetcher: &R,
+    ) -> ResponseAuthenticationOutcome {
         let mut validated_response = ResponseAuthenticationOutcome::default();
 
         let device_response = match self.decrypt_response(response) {
@@ -444,13 +455,17 @@ impl SessionManager {
         };
 
         match parse(&device_response) {
-            Ok((document, x5chain, namespaces)) => validate_response(
-                self.session_transcript.clone(),
-                self.trust_anchor_registry.clone(),
-                x5chain,
-                document.clone(),
-                namespaces,
-            ),
+            Ok((document, x5chain, namespaces)) => {
+                validate_response(
+                    self.session_transcript.clone(),
+                    self.trust_anchor_registry.clone(),
+                    x5chain,
+                    document.clone(),
+                    namespaces,
+                    revocation_fetcher,
+                )
+                .await
+            }
             Err(e) => {
                 validated_response
                     .errors

@@ -35,11 +35,12 @@ jobs:
       - name: Run tests
         run: |
           cargo test
+          cargo test --all-features
           cd macros
           cargo test
 
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets --all-features --no-deps
 
       - name: Fmt
         run: cargo fmt --all -- --check

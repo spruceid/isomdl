@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::definitions::{
     device_response::Document,
     session::SessionTranscript,
-    x509::{self, trust_anchor::TrustAnchorRegistry, X5Chain},
+    x509::{self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry, X5Chain},
 };
 
 use super::authentication::{
@@ -13,15 +13,27 @@ use super::authentication::{
     AuthenticationStatus, ResponseAuthenticationOutcome,
 };
 
-pub fn validate_response<S>(
+/// Validate a device response including device authentication, issuer authentication,
+/// and certificate chain validation with CRL revocation checking.
+///
+/// # Arguments
+/// * `session_transcript` - The session transcript for device authentication
+/// * `trust_anchor_registry` - Registry of trusted root certificates
+/// * `x5chain` - The certificate chain to validate
+/// * `document` - The document to validate
+/// * `namespaces` - The namespaces from the response
+/// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
+pub async fn validate_response<S, R>(
     session_transcript: S,
     trust_anchor_registry: TrustAnchorRegistry,
     x5chain: X5Chain,
     document: Document,
     namespaces: BTreeMap<String, serde_json::Value>,
+    revocation_fetcher: &R,
 ) -> ResponseAuthenticationOutcome
 where
     S: SessionTranscript + Clone,
+    R: RevocationFetcher,
 {
     let mut validated_response = ResponseAuthenticationOutcome {
         response: namespaces,
@@ -42,10 +54,19 @@ where
         }
     }
 
-    let validation_errors = x509::validation::ValidationRuleset::Mdl
-        .validate(&x5chain, &trust_anchor_registry)
-        .errors;
-    if validation_errors.is_empty() {
+    let validation_outcome = x509::validation::ValidationRuleset::Mdl
+        .validate(&x5chain, &trust_anchor_registry, revocation_fetcher)
+        .await;
+
+    // Add revocation errors as warnings (non-fatal)
+    if !validation_outcome.revocation_errors.is_empty() {
+        validated_response.warnings.insert(
+            "revocation_errors".to_string(),
+            json!(validation_outcome.revocation_errors),
+        );
+    }
+
+    if validation_outcome.errors.is_empty() {
         match issuer_authentication(x5chain, &document.issuer_signed) {
             Ok(_) => {
                 validated_response.issuer_authentication = AuthenticationStatus::Valid;
@@ -59,9 +80,10 @@ where
             }
         }
     } else {
-        validated_response
-            .errors
-            .insert("certificate_errors".to_string(), json!(validation_errors));
+        validated_response.errors.insert(
+            "certificate_errors".to_string(),
+            json!(validation_outcome.errors),
+        );
         validated_response.issuer_authentication = AuthenticationStatus::Invalid
     };
 
