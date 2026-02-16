@@ -15,17 +15,17 @@
 //! For mobile platforms (iOS/Android), only [`HttpClient`] needs a native
 //! implementation; [`CachingRevocationFetcher`] provides all CRL-specific logic in Rust.
 
-mod crl_fetcher;
 mod error;
+mod fetcher;
 mod http;
 
 #[cfg(feature = "reqwest")]
 mod reqwest_client;
 
-#[cfg(feature = "reqwest")]
-pub use crl_fetcher::CachingRevocationFetcher;
-pub use crl_fetcher::{RevocationFetcher, SimpleRevocationFetcher};
 pub use error::{CrlError, RevocationStatus};
+#[cfg(feature = "reqwest")]
+pub use fetcher::CachingRevocationFetcher;
+pub use fetcher::{RevocationFetcher, SimpleRevocationFetcher};
 pub use http::{HttpClient, HttpMethod, HttpRequest, HttpResponse, NoHttpClientError};
 
 #[cfg(feature = "reqwest")]
