@@ -140,6 +140,7 @@ mod caching {
     // TODO: Consider adding configurable retries if real-world usage shows it's needed.
     // If implemented: only retry transient errors (5xx, timeouts), use exponential
     // backoff with jitter, and make retry count/backoff configurable.
+    #[derive(Clone)]
     pub struct CachingRevocationFetcher<C> {
         http_client: C,
         cache: Cache<String, Arc<CachedCrl>>,

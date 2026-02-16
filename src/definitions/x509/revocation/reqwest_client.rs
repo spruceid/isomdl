@@ -21,6 +21,7 @@ use super::{HttpClient, HttpMethod, HttpRequest, HttpResponse};
 /// let http_client = ReqwestClient::new()?;
 /// let revocation_fetcher = CachingRevocationFetcher::new(http_client);
 /// ```
+#[derive(Clone)]
 pub struct ReqwestClient {
     client: reqwest::Client,
 }
