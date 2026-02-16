@@ -22,6 +22,7 @@ use super::authentication::{
 /// * `x5chain` - The certificate chain to validate
 /// * `document` - The document to validate
 /// * `namespaces` - The namespaces from the response
+/// * `doc_types` - The document types from the response
 /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
 pub async fn validate_response<S, R>(
     session_transcript: S,
@@ -29,6 +30,7 @@ pub async fn validate_response<S, R>(
     x5chain: X5Chain,
     document: Document,
     namespaces: BTreeMap<String, serde_json::Value>,
+    doc_types: Vec<String>,
     revocation_fetcher: &R,
 ) -> ResponseAuthenticationOutcome
 where
@@ -37,6 +39,7 @@ where
 {
     let mut validated_response = ResponseAuthenticationOutcome {
         response: namespaces,
+        doc_types,
         ..Default::default()
     };
 
