@@ -32,6 +32,8 @@ pub struct RequestAuthenticationOutcome {
 pub struct ResponseAuthenticationOutcome {
     /// The values sent back from the holder device, serialized as JSON.
     pub response: BTreeMap<String, Value>,
+    /// Document types (doctypes) from the presented credentials.
+    pub doc_types: Vec<String>,
     /// Outcome of issuer authentication.
     pub issuer_authentication: AuthenticationStatus,
     /// Outcome of device authentication.

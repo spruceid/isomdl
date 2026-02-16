@@ -454,6 +454,13 @@ impl SessionManager {
             }
         };
 
+        // Extract doc_types from the decrypted device response
+        let doc_types: Vec<String> = device_response
+            .documents
+            .as_ref()
+            .map(|docs| docs.iter().map(|d| d.doc_type.clone()).collect())
+            .unwrap_or_default();
+
         match parse(&device_response) {
             Ok((document, x5chain, namespaces)) => {
                 validate_response(
@@ -462,11 +469,13 @@ impl SessionManager {
                     x5chain,
                     document.clone(),
                     namespaces,
+                    doc_types,
                     revocation_fetcher,
                 )
                 .await
             }
             Err(e) => {
+                validated_response.doc_types = doc_types;
                 validated_response
                     .errors
                     .insert("parsing_errors".to_string(), json!(vec![format!("{e}")]));
