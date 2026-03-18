@@ -40,8 +40,8 @@ use crate::{
         device_response::Document,
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
         session::{
-            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret,
-            SessionEstablishment,
+            self, create_p256_ephemeral_keys, derive_e_mac_key, derive_session_key,
+            get_shared_secret, SessionEstablishment,
         },
         x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain},
         DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
@@ -62,6 +62,8 @@ pub struct SessionManager {
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
+    #[serde(default)]
+    e_mac_key: Option<[u8; 32]>,
     trust_anchor_registry: TrustAnchorRegistry,
     holder_le_role: Option<LeRole>,
     holder_central_client_modes: Vec<CentralClientMode>,
@@ -310,6 +312,10 @@ impl SessionManager {
         let sk_device = derive_session_key(&shared_secret, &session_transcript_bytes, false)
             .context("failed to derive device session key")?
             .into();
+        let e_mac_key: [u8; 32] =
+            derive_e_mac_key(&shared_secret, &session_transcript_bytes)
+                .context("failed to derive e_mac_key")?
+                .into();
 
         let mut session_manager = Self {
             session_transcript,
@@ -317,6 +323,7 @@ impl SessionManager {
             device_message_counter: 0,
             sk_reader,
             reader_message_counter: 0,
+            e_mac_key: Some(e_mac_key),
             trust_anchor_registry,
             holder_le_role,
             holder_central_client_modes,
@@ -471,6 +478,7 @@ impl SessionManager {
                     namespaces,
                     doc_types,
                     revocation_fetcher,
+                    self.e_mac_key,
                 )
                 .await
             }

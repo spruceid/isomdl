@@ -227,6 +227,25 @@ pub fn derive_session_key(
     Ok(okm.into())
 }
 
+/// Derive the EMacKey from the shared secret per ISO 18013-5 section 9.1.1.5.
+///
+/// The EMacKey is used for HMAC-based device authentication (COSE_Mac0) as an
+/// alternative to ECDSA-based device authentication (COSE_Sign1).
+pub fn derive_e_mac_key(
+    shared_secret: &SharedSecret<NistP256>,
+    session_transcript: &SessionTranscriptBytes,
+) -> Result<GenericArray<u8, U32>> {
+    let salt = Sha256::digest(
+        crate::cbor::to_vec(session_transcript)
+            .map_err(|e| anyhow::anyhow!("failed to serialize session transcript: {e}"))?,
+    );
+    let hkdf = shared_secret.extract::<Sha256>(Some(salt.as_ref()));
+    let mut okm = [0u8; 32];
+    // Safe to unwrap as error will only occur if okm.len() is greater than 255 * 32;
+    Hkdf::expand(&hkdf, b"EMacKey", &mut okm).unwrap();
+    Ok(okm.into())
+}
+
 pub fn encrypt_device_data(
     sk_device: &GenericArray<u8, U32>,
     plaintext: &[u8],

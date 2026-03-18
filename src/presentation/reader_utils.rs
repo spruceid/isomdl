@@ -24,6 +24,8 @@ use super::authentication::{
 /// * `namespaces` - The namespaces from the response
 /// * `doc_types` - The document types from the response
 /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
+/// * `e_mac_key` - The EMacKey for COSE_Mac0 device authentication. Required when the device
+///   uses MAC-based authentication; ignored for COSE_Sign1.
 pub async fn validate_response<S, R>(
     session_transcript: S,
     trust_anchor_registry: TrustAnchorRegistry,
@@ -32,6 +34,7 @@ pub async fn validate_response<S, R>(
     namespaces: BTreeMap<String, serde_json::Value>,
     doc_types: Vec<String>,
     revocation_fetcher: &R,
+    e_mac_key: Option<[u8; 32]>,
 ) -> ResponseAuthenticationOutcome
 where
     S: SessionTranscript + Clone,
@@ -43,7 +46,7 @@ where
         ..Default::default()
     };
 
-    match device_authentication(&document, session_transcript.clone()) {
+    match device_authentication(&document, session_transcript.clone(), e_mac_key.as_ref()) {
         Ok(_) => {
             validated_response.device_authentication = AuthenticationStatus::Valid;
         }
