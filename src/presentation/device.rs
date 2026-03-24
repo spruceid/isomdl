@@ -35,7 +35,8 @@ use crate::{
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
-            self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
+            self, derive_e_mac_key, derive_session_key, get_shared_secret, Handover, SessionData,
+            SessionTranscript,
         },
         x509::{
             self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry,
@@ -127,6 +128,8 @@ pub struct SessionManager {
     state: State,
     trusted_verifiers: TrustAnchorRegistry,
     device_auth_type: DeviceAuthType,
+    #[serde(default)]
+    e_mac_key: Option<[u8; 32]>,
 }
 
 /// The internal states of the [SessionManager].
@@ -399,6 +402,8 @@ impl SessionManagerEngaged {
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();
         let sk_device =
             derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
+        let e_mac_key: [u8; 32] = derive_e_mac_key(&shared_secret, &session_transcript_bytes)?
+            .into();
 
         let mut sm = SessionManager {
             documents: self.documents,
@@ -410,6 +415,7 @@ impl SessionManagerEngaged {
             state: State::AwaitingRequest,
             trusted_verifiers,
             device_auth_type: DeviceAuthType::Sign1,
+            e_mac_key: Some(e_mac_key),
         };
 
         let validated_request = sm
@@ -427,6 +433,25 @@ impl SessionManagerEngaged {
 }
 
 impl SessionManager {
+    /// Set the device authentication type.
+    ///
+    /// Defaults to `DeviceAuthType::Sign1`. Set to `DeviceAuthType::Mac0` to use
+    /// HMAC-based device authentication. When using `Mac0`, the signature payload
+    /// from [`get_next_signature_payload`](Self::get_next_signature_payload) should
+    /// be tagged with `HMAC-SHA256` using the key from [`e_mac_key`](Self::e_mac_key).
+    pub fn set_device_auth_type(&mut self, device_auth_type: DeviceAuthType) {
+        self.device_auth_type = device_auth_type;
+    }
+
+    /// Returns the EMacKey for HMAC-based device authentication.
+    ///
+    /// This key is derived from the ECDH shared secret during session establishment.
+    /// Use it with `HMAC-SHA256` to compute the tag for [`submit_next_signature`](Self::submit_next_signature)
+    /// when [`DeviceAuthType::Mac0`] is configured.
+    pub fn e_mac_key(&self) -> Option<&[u8; 32]> {
+        self.e_mac_key.as_ref()
+    }
+
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
         let request: ciborium::Value = cbor::from_slice(request).map_err(|error| {
             tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
@@ -1040,12 +1065,11 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let header = coset::HeaderBuilder::new()
-                .algorithm(signature_algorithm)
-                .build();
-
             let prepared_cose = match self.device_auth_type() {
                 DeviceAuthType::Sign1 => {
+                    let header = coset::HeaderBuilder::new()
+                        .algorithm(signature_algorithm)
+                        .build();
                     let cose_sign1_builder = CoseSign1Builder::new().protected(header);
                     let prepared_cose_sign1 = match PreparedCoseSign1::new(
                         cose_sign1_builder,
@@ -1066,6 +1090,9 @@ pub trait DeviceSession {
                     PreparedCose::Sign1(prepared_cose_sign1)
                 }
                 DeviceAuthType::Mac0 => {
+                    let header = coset::HeaderBuilder::new()
+                        .algorithm(coset::iana::Algorithm::HMAC_256_256)
+                        .build();
                     let cose_mac0_builder = CoseMac0Builder::new().protected(header);
                     let prepared_cose_mac0 = match PreparedCoseMac0::new(
                         cose_mac0_builder,
