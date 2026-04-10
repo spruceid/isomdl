@@ -28,6 +28,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
 
       - name: Build
         run: cargo build --all-targets
@@ -53,3 +56,6 @@ jobs:
 
       - name: Unused dependencies
         run: cargo machete
+
+      - name: Check dependencies licences are compatible
+        run: cargo deny check licenses
