@@ -26,6 +26,7 @@ use super::authentication::{
 /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
 /// * `e_mac_key` - The EMacKey for COSE_Mac0 device authentication. Required when the device
 ///   uses MAC-based authentication; ignored for COSE_Sign1.
+#[allow(clippy::too_many_arguments)]
 pub async fn validate_response<S, R>(
     session_transcript: S,
     trust_anchor_registry: TrustAnchorRegistry,
