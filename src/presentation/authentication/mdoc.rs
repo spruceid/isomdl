@@ -87,76 +87,68 @@ where
     let cbor_payload = cbor::to_vec(&detached_payload)?;
 
     match device_auth {
-        DeviceAuth::DeviceSignature(device_signature) => {
-            match jwk.params {
-                Params::EC(ref p) => {
-                    let x_coordinate = p.x_coordinate.clone();
-                    let y_coordinate = p.y_coordinate.clone();
-                    let (Some(x), Some(y)) = (x_coordinate, y_coordinate) else {
-                        return Err(Error::MdocAuth(
-                            "device key jwk is missing coordinates".to_string(),
-                        ));
-                    };
+        DeviceAuth::DeviceSignature(device_signature) => match jwk.params {
+            Params::EC(ref p) => {
+                let x_coordinate = p.x_coordinate.clone();
+                let y_coordinate = p.y_coordinate.clone();
+                let (Some(x), Some(y)) = (x_coordinate, y_coordinate) else {
+                    return Err(Error::MdocAuth(
+                        "device key jwk is missing coordinates".to_string(),
+                    ));
+                };
 
-                    let curve_name = p.curve.as_ref().ok_or_else(|| {
-                        Error::MdocAuth("device key JWK missing 'crv' parameter".to_string())
-                    })?;
+                let curve_name = p.curve.as_ref().ok_or_else(|| {
+                    Error::MdocAuth("device key JWK missing 'crv' parameter".to_string())
+                })?;
 
-                    let curve = SupportedCurve::from_jwk_crv(curve_name)
-                        .ok_or_else(|| {
-                            Error::MdocAuth(format!("unsupported curve: {curve_name}"))
-                        })?;
+                let curve = SupportedCurve::from_jwk_crv(curve_name)
+                    .ok_or_else(|| Error::MdocAuth(format!("unsupported curve: {curve_name}")))?;
 
-                    let result = match curve {
-                        SupportedCurve::P256 => {
-                            let encoded_point = p256::EncodedPoint::from_affine_coordinates(
-                                GenericArray::from_slice(x.0.as_slice()),
-                                GenericArray::from_slice(y.0.as_slice()),
-                                false,
-                            );
-                            let verifying_key =
-                                ecdsa::VerifyingKey::<NistP256>::from_encoded_point(
-                                    &encoded_point,
-                                )?;
-                            device_signature
-                                .verify::<ecdsa::VerifyingKey<NistP256>, p256::ecdsa::Signature>(
-                                    &verifying_key,
-                                    Some(&cbor_payload),
-                                    None,
-                                )
-                        }
-                        SupportedCurve::P384 => {
-                            let encoded_point = p384::EncodedPoint::from_affine_coordinates(
-                                GenericArray::from_slice(x.0.as_slice()),
-                                GenericArray::from_slice(y.0.as_slice()),
-                                false,
-                            );
-                            let verifying_key =
-                                ecdsa::VerifyingKey::<NistP384>::from_encoded_point(
-                                    &encoded_point,
-                                )?;
-                            device_signature
-                                .verify::<ecdsa::VerifyingKey<NistP384>, p384::ecdsa::Signature>(
-                                    &verifying_key,
-                                    Some(&cbor_payload),
-                                    None,
-                                )
-                        }
-                    };
-
-                    match result {
-                        VerificationResult::Success => Ok(()),
-                        VerificationResult::Failure(e) => Err(Error::MdocAuth(format!(
-                            "failed verifying device signature: {e}"
-                        ))),
-                        VerificationResult::Error(e) => Err(Error::MdocAuth(format!(
-                            "error verifying device signature: {e}"
-                        ))),
+                let result = match curve {
+                    SupportedCurve::P256 => {
+                        let encoded_point = p256::EncodedPoint::from_affine_coordinates(
+                            GenericArray::from_slice(x.0.as_slice()),
+                            GenericArray::from_slice(y.0.as_slice()),
+                            false,
+                        );
+                        let verifying_key =
+                            ecdsa::VerifyingKey::<NistP256>::from_encoded_point(&encoded_point)?;
+                        device_signature
+                            .verify::<ecdsa::VerifyingKey<NistP256>, p256::ecdsa::Signature>(
+                                &verifying_key,
+                                Some(&cbor_payload),
+                                None,
+                            )
                     }
+                    SupportedCurve::P384 => {
+                        let encoded_point = p384::EncodedPoint::from_affine_coordinates(
+                            GenericArray::from_slice(x.0.as_slice()),
+                            GenericArray::from_slice(y.0.as_slice()),
+                            false,
+                        );
+                        let verifying_key =
+                            ecdsa::VerifyingKey::<NistP384>::from_encoded_point(&encoded_point)?;
+                        device_signature
+                            .verify::<ecdsa::VerifyingKey<NistP384>, p384::ecdsa::Signature>(
+                                &verifying_key,
+                                Some(&cbor_payload),
+                                None,
+                            )
+                    }
+                };
+
+                match result {
+                    VerificationResult::Success => Ok(()),
+                    VerificationResult::Failure(e) => Err(Error::MdocAuth(format!(
+                        "failed verifying device signature: {e}"
+                    ))),
+                    VerificationResult::Error(e) => Err(Error::MdocAuth(format!(
+                        "error verifying device signature: {e}"
+                    ))),
                 }
-                _ => Err(Error::MdocAuth("Unsupported device_key type".to_string())),
             }
-        }
+            _ => Err(Error::MdocAuth("Unsupported device_key type".to_string())),
+        },
         DeviceAuth::DeviceMac(device_mac) => {
             let e_mac_key = e_mac_key.ok_or_else(|| {
                 Error::MdocAuth("DeviceMac received but no EMacKey available".to_string())
@@ -168,12 +160,12 @@ where
 
             match result {
                 Mac0VerificationResult::Success => Ok(()),
-                Mac0VerificationResult::Failure(e) => Err(Error::MdocAuth(format!(
-                    "failed verifying device mac: {e}"
-                ))),
-                Mac0VerificationResult::Error(e) => Err(Error::MdocAuth(format!(
-                    "error verifying device mac: {e}"
-                ))),
+                Mac0VerificationResult::Failure(e) => {
+                    Err(Error::MdocAuth(format!("failed verifying device mac: {e}")))
+                }
+                Mac0VerificationResult::Error(e) => {
+                    Err(Error::MdocAuth(format!("error verifying device mac: {e}")))
+                }
             }
         }
     }

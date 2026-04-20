@@ -402,8 +402,8 @@ impl SessionManagerEngaged {
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();
         let sk_device =
             derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
-        let e_mac_key: [u8; 32] = derive_e_mac_key(&shared_secret, &session_transcript_bytes)?
-            .into();
+        let e_mac_key: [u8; 32] =
+            derive_e_mac_key(&shared_secret, &session_transcript_bytes)?.into();
 
         let mut sm = SessionManager {
             documents: self.documents,

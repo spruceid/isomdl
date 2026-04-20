@@ -312,10 +312,9 @@ impl SessionManager {
         let sk_device = derive_session_key(&shared_secret, &session_transcript_bytes, false)
             .context("failed to derive device session key")?
             .into();
-        let e_mac_key: [u8; 32] =
-            derive_e_mac_key(&shared_secret, &session_transcript_bytes)
-                .context("failed to derive e_mac_key")?
-                .into();
+        let e_mac_key: [u8; 32] = derive_e_mac_key(&shared_secret, &session_transcript_bytes)
+            .context("failed to derive e_mac_key")?
+            .into();
 
         let mut session_manager = Self {
             session_transcript,
