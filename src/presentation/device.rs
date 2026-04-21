@@ -16,6 +16,10 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
+use digest::Mac;
+use hmac::Hmac;
+use sha2::Sha256;
+
 use crate::{
     cbor::{self, CborError},
     cose::{mac0::PreparedCoseMac0, sign1::PreparedCoseSign1, MaybeTagged},
@@ -128,8 +132,6 @@ pub struct SessionManager {
     state: State,
     trusted_verifiers: TrustAnchorRegistry,
     device_auth_type: DeviceAuthType,
-    #[serde(default)]
-    e_mac_key: Option<[u8; 32]>,
 }
 
 /// The internal states of the [SessionManager].
@@ -402,8 +404,6 @@ impl SessionManagerEngaged {
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();
         let sk_device =
             derive_session_key(&shared_secret, &session_transcript_bytes, false)?.into();
-        let e_mac_key: [u8; 32] =
-            derive_e_mac_key(&shared_secret, &session_transcript_bytes)?.into();
 
         let mut sm = SessionManager {
             documents: self.documents,
@@ -415,7 +415,6 @@ impl SessionManagerEngaged {
             state: State::AwaitingRequest,
             trusted_verifiers,
             device_auth_type: DeviceAuthType::Sign1,
-            e_mac_key: Some(e_mac_key),
         };
 
         let validated_request = sm
@@ -433,31 +432,33 @@ impl SessionManagerEngaged {
 }
 
 impl SessionManager {
-    /// Set the device authentication type.
+    /// Prepare a Mac0 response using HMAC-SHA256 device authentication (ISO 18013-5 §9.1.3.5).
     ///
-    /// Defaults to `DeviceAuthType::Sign1`. Set to `DeviceAuthType::Mac0` to use
-    /// HMAC-based device authentication. When using `Mac0`, the signature payload
-    /// from [`get_next_signature_payload`](Self::get_next_signature_payload) should
-    /// be tagged with `HMAC-SHA256` using the key from [`e_mac_key`](Self::e_mac_key).
-    pub fn set_device_auth_type(&mut self, device_auth_type: DeviceAuthType) {
-        self.device_auth_type = device_auth_type;
+    /// Derives EMacKey via `ECDH(static_key, EReaderKey) + HKDF`, computes all HMAC-SHA256 tags,
+    /// and advances state to `ReadyToRespond`. Call [`retrieve_response`](Self::retrieve_response)
+    /// afterwards to obtain the encrypted response bytes.
+    pub fn prepare_response_mac0(
+        &mut self,
+        requests: &RequestedItems,
+        permitted: PermittedItems,
+        static_key: &p256::NonZeroScalar,
+    ) -> anyhow::Result<()> {
+        let e_mac_key = self.compute_e_mac_key_from_static_key(static_key)?;
+        self.device_auth_type = DeviceAuthType::Mac0;
+        let prepared_response = DeviceSession::prepare_response(self, requests, permitted);
+        self.state = State::Signing(prepared_response);
+        while let Some(payload) = self.get_next_signature_payload().map(|(_, p)| p.to_vec()) {
+            let mut mac = Hmac::<Sha256>::new_from_slice(&e_mac_key)
+                .map_err(|e| anyhow::anyhow!("failed to create HMAC key: {e}"))?;
+            mac.update(&payload);
+            let tag = mac.finalize().into_bytes().to_vec();
+            self.submit_next_signature(tag)?;
+        }
+        self.device_auth_type = DeviceAuthType::Sign1;
+        Ok(())
     }
 
-    /// Returns the EMacKey for HMAC-based device authentication.
-    ///
-    /// This key is derived from the ECDH shared secret during session establishment.
-    /// Use it with `HMAC-SHA256` to compute the tag for [`submit_next_signature`](Self::submit_next_signature)
-    /// when [`DeviceAuthType::Mac0`] is configured.
-    pub fn e_mac_key(&self) -> Option<&[u8; 32]> {
-        self.e_mac_key.as_ref()
-    }
-
-    /// Compute the EMacKey using the mdoc's static authentication key (SDeviceKey) per
-    /// ISO 18013-5 §9.1.3.5.
-    ///
-    /// This must be used instead of [`e_mac_key`](Self::e_mac_key) when the reader verifies
-    /// the COSE_Mac0 using the device authentication key from the MSO.
-    pub fn compute_e_mac_key_from_static_key(
+    fn compute_e_mac_key_from_static_key(
         &self,
         static_key: &p256::NonZeroScalar,
     ) -> anyhow::Result<[u8; 32]> {
