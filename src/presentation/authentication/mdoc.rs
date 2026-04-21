@@ -3,7 +3,7 @@ use crate::cose::mac0::VerificationResult as Mac0VerificationResult;
 use crate::cose::sign1::VerificationResult;
 use crate::definitions::device_response::Document;
 use crate::definitions::issuer_signed;
-use crate::definitions::session::SessionTranscript;
+use crate::definitions::session::{derive_e_mac_key, get_shared_secret, SessionTranscript};
 use crate::definitions::x509::{SupportedCurve, X5Chain};
 use crate::definitions::DeviceAuth;
 use crate::definitions::Mso;
@@ -14,7 +14,7 @@ use digest::Mac;
 use elliptic_curve::generic_array::GenericArray;
 use hmac::Hmac;
 use issuer_signed::IssuerSigned;
-use p256::NistP256;
+use p256::{FieldBytes, NistP256};
 use p384::NistP384;
 use sha2::Sha256;
 use ssi_jwk::Params;
@@ -60,7 +60,7 @@ pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> 
 pub fn device_authentication<S>(
     document: &Document,
     session_transcript: S,
-    e_mac_key: Option<&[u8; 32]>,
+    e_reader_key_private: &[u8; 32],
 ) -> Result<(), Error>
 where
     S: SessionTranscript + Clone,
@@ -73,13 +73,15 @@ where
         .ok_or(Error::DetachedIssuerAuth)?;
     let mso: Tag24<Mso> = cbor::from_slice(mso_bytes).map_err(|_| Error::MSOParsing)?;
     let device_key = mso.into_inner().device_key_info.device_key;
+    // Clone for MAC ECDH before consuming via JWK conversion
+    let s_device_key = device_key.clone();
     let jwk = SsiJwk::try_from(device_key)?;
 
     let namespaces_bytes = &document.device_signed.namespaces;
     let device_auth: &DeviceAuth = &document.device_signed.device_auth;
 
     let detached_payload = Tag24::new(DeviceAuthentication::new(
-        session_transcript,
+        session_transcript.clone(),
         document.doc_type.clone(),
         namespaces_bytes.clone(),
     ))
@@ -150,9 +152,18 @@ where
             _ => Err(Error::MdocAuth("Unsupported device_key type".to_string())),
         },
         DeviceAuth::DeviceMac(device_mac) => {
-            let e_mac_key = e_mac_key.ok_or_else(|| {
-                Error::MdocAuth("DeviceMac received but no EMacKey available".to_string())
-            })?;
+            let priv_key_bytes = e_reader_key_private;
+            // Per ISO 18013-5 §9.1.3.5, EMacKey uses ECDH with the mdoc authentication key
+            // (SDeviceKey, the static key from the MSO) — not the ephemeral session key.
+            let private_key =
+                p256::SecretKey::from_bytes(FieldBytes::from_slice(priv_key_bytes))
+                    .map_err(|e| Error::MdocAuth(format!("invalid reader private key: {e}")))?;
+            let shared_secret = get_shared_secret(s_device_key, &private_key.into())
+                .map_err(|e| Error::MdocAuth(format!("ECDH with SDeviceKey failed: {e}")))?;
+            let session_transcript_bytes =
+                Tag24::new(session_transcript.clone()).map_err(|_| Error::CborDecodingError)?;
+            let e_mac_key = derive_e_mac_key(&shared_secret, &session_transcript_bytes)
+                .map_err(|e| Error::MdocAuth(format!("failed to derive EMacKey: {e}")))?;
             let verifier = Hmac::<Sha256>::new_from_slice(e_mac_key.as_slice())
                 .map_err(|e| Error::MdocAuth(format!("failed to create HMAC verifier: {e}")))?;
 

@@ -24,8 +24,9 @@ use super::authentication::{
 /// * `namespaces` - The namespaces from the response
 /// * `doc_types` - The document types from the response
 /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
-/// * `e_mac_key` - The EMacKey for COSE_Mac0 device authentication. Required when the device
-///   uses MAC-based authentication; ignored for COSE_Sign1.
+/// * `e_reader_key_private` - The reader's ephemeral private key bytes, used for ECDH with the
+///   device's static authentication key (SDeviceKey) when verifying COSE_Mac0 per §9.1.3.5.
+///   Ignored when the device uses COSE_Sign1.
 #[allow(clippy::too_many_arguments)]
 pub async fn validate_response<S, R>(
     session_transcript: S,
@@ -35,7 +36,7 @@ pub async fn validate_response<S, R>(
     namespaces: BTreeMap<String, serde_json::Value>,
     doc_types: Vec<String>,
     revocation_fetcher: &R,
-    e_mac_key: Option<[u8; 32]>,
+    e_reader_key_private: [u8; 32],
 ) -> ResponseAuthenticationOutcome
 where
     S: SessionTranscript + Clone,
@@ -47,7 +48,7 @@ where
         ..Default::default()
     };
 
-    match device_authentication(&document, session_transcript.clone(), e_mac_key.as_ref()) {
+    match device_authentication(&document, session_transcript.clone(), &e_reader_key_private) {
         Ok(_) => {
             validated_response.device_authentication = AuthenticationStatus::Valid;
         }

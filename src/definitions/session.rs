@@ -227,13 +227,16 @@ pub fn derive_session_key(
     Ok(okm.into())
 }
 
-/// Derive the EMacKey from the shared secret per ISO 18013-5 section 9.1.1.5.
+/// Derive the EMacKey from the shared secret per ISO 18013-5 section 9.1.3.5.
 ///
 /// The EMacKey is used for HMAC-based device authentication (COSE_Mac0) as an
 /// alternative to ECDSA-based device authentication (COSE_Sign1).
-pub fn derive_e_mac_key(
+///
+/// The shared secret must be derived using ECDH with the mdoc authentication key (SDeviceKey)
+/// and the reader's ephemeral key (EReaderKey), not the ephemeral device session key.
+pub fn derive_e_mac_key<T: serde::Serialize>(
     shared_secret: &SharedSecret<NistP256>,
-    session_transcript: &SessionTranscriptBytes,
+    session_transcript: &Tag24<T>,
 ) -> Result<GenericArray<u8, U32>> {
     let salt = Sha256::digest(
         crate::cbor::to_vec(session_transcript)

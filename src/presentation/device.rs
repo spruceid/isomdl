@@ -452,6 +452,23 @@ impl SessionManager {
         self.e_mac_key.as_ref()
     }
 
+    /// Compute the EMacKey using the mdoc's static authentication key (SDeviceKey) per
+    /// ISO 18013-5 §9.1.3.5.
+    ///
+    /// This must be used instead of [`e_mac_key`](Self::e_mac_key) when the reader verifies
+    /// the COSE_Mac0 using the device authentication key from the MSO.
+    pub fn compute_e_mac_key_from_static_key(
+        &self,
+        static_key: &p256::NonZeroScalar,
+    ) -> anyhow::Result<[u8; 32]> {
+        let e_reader_key = self.session_transcript.1.clone().into_inner();
+        let shared_secret = get_shared_secret(e_reader_key, static_key)?;
+        let session_transcript_bytes = Tag24::new(self.session_transcript.clone())
+            .map_err(|e| anyhow::anyhow!("failed to encode session transcript: {e}"))?;
+        let key = derive_e_mac_key(&shared_secret, &session_transcript_bytes)?;
+        Ok(key.into())
+    }
+
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
         let request: ciborium::Value = cbor::from_slice(request).map_err(|error| {
             tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);

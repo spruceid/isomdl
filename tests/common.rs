@@ -118,16 +118,22 @@ impl Device {
     }
 
     /// Prepare response with required elements using COSE_Mac0 device authentication.
+    ///
+    /// Uses the static mdoc authentication key (SDeviceKey) for EMacKey derivation per
+    /// ISO 18013-5 §9.1.3.5.
     pub fn create_response_mac0(
         mut session_manager: device::SessionManager,
         requested_items: &RequestedItems,
+        signing_key: &p256::ecdsa::SigningKey,
     ) -> Result<Vec<u8>> {
         session_manager.set_device_auth_type(DeviceAuthType::Mac0);
+        let static_secret: p256::SecretKey = signing_key.clone().into();
+        let static_scalar: p256::NonZeroScalar = static_secret.into();
         let e_mac_key = session_manager
-            .e_mac_key()
-            .ok_or_else(|| anyhow!("e_mac_key not available"))?;
+            .compute_e_mac_key_from_static_key(&static_scalar)
+            .context("failed to derive e_mac_key from static key")?;
         let hmac_key =
-            Hmac::<Sha256>::new_from_slice(e_mac_key).context("failed to create HMAC key")?;
+            Hmac::<Sha256>::new_from_slice(&e_mac_key).context("failed to create HMAC key")?;
 
         let permitted_items = [(
             DOC_TYPE.to_string(),
