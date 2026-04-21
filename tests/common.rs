@@ -12,7 +12,8 @@ use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
 use isomdl::presentation::{
-    authentication::RequestAuthenticationOutcome, device, reader, Stringify,
+    authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
+    device, reader, Stringify,
 };
 use sha2::Sha256;
 use signature::Signer;
@@ -156,8 +157,10 @@ impl Device {
             .ok_or(anyhow!("cannot prepare response"))
     }
 
+    /// Load the device signing key that matches the public key embedded in the test mDL's MSO.
     pub fn create_signing_key() -> Result<p256::ecdsa::SigningKey> {
-        Ok(p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))?.into())
+        let der = base64::decode(include_str!("../test/issuance/device_key.b64").trim())?;
+        Ok(p256::SecretKey::from_sec1_der(&der)?.into())
     }
 }
 
@@ -172,6 +175,10 @@ impl Reader {
         // Use () to skip CRL checks in tests
         let validated = reader_sm.handle_response(&response, &()).await;
         println!("Validated Response: {validated:?}");
+        // These tests verify the device-reader protocol. Certificate chain validation
+        // (issuer_authentication) requires a full MDL cert setup and is tested separately
+        // in src/definitions/x509/.
+        assert_eq!(validated.device_authentication, AuthenticationStatus::Valid);
         Ok(())
     }
 }

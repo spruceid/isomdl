@@ -4,10 +4,7 @@ use crate::common::{Device, Reader};
 
 #[test_log::test(tokio::test)]
 pub async fn simulated_device_and_reader_interaction() {
-    let key: p256::ecdsa::SigningKey =
-        p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))
-            .unwrap()
-            .into();
+    let key = Device::create_signing_key().unwrap();
 
     // Device initialization and engagement
     let engaged_state = Device::initialise_session().unwrap();
