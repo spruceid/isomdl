@@ -152,11 +152,12 @@ where
             _ => Err(Error::MdocAuth("Unsupported device_key type".to_string())),
         },
         DeviceAuth::DeviceMac(device_mac) => {
-            let priv_key_bytes = e_reader_key_private;
-            // Per ISO 18013-5 §9.1.3.5, EMacKey uses ECDH with the mdoc authentication key
+            // MAC authentication is only defined for cipher suite 1 (ISO 18013-5 §9.1.3.5),
+            // which uses P-256. Other curves are not supported for COSE_Mac0.
+            // Per §9.1.3.5, EMacKey uses ECDH with the mdoc authentication key
             // (SDeviceKey, the static key from the MSO) — not the ephemeral session key.
             let private_key =
-                p256::SecretKey::from_bytes(FieldBytes::from_slice(priv_key_bytes))
+                p256::SecretKey::from_bytes(FieldBytes::from_slice(e_reader_key_private))
                     .map_err(|e| Error::MdocAuth(format!("invalid reader private key: {e}")))?;
             let shared_secret = get_shared_secret(s_device_key, &private_key.into())
                 .map_err(|e| Error::MdocAuth(format!("ECDH with SDeviceKey failed: {e}")))?;
