@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, Context, Result};
+use digest::Mac;
+use hmac::Hmac;
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
+use isomdl::definitions::device_signed::DeviceAuthType;
 use isomdl::definitions::helpers::NonEmptyMap;
 use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
@@ -12,6 +15,7 @@ use isomdl::presentation::{
     authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
     device, reader, Stringify,
 };
+use sha2::Sha256;
 use signature::Signer;
 use uuid::Uuid;
 
@@ -123,8 +127,10 @@ impl Device {
         requested_items: &RequestedItems,
         signing_key: &p256::ecdsa::SigningKey,
     ) -> Result<Vec<u8>> {
-        let static_secret: p256::SecretKey = signing_key.clone().into();
-        let static_scalar: p256::NonZeroScalar = static_secret.into();
+        let static_scalar: p256::NonZeroScalar = p256::SecretKey::from(signing_key.clone()).into();
+        let e_mac_key = session_manager
+            .e_mac_key_from_static_key(&static_scalar)
+            .context("failed to derive EMacKey")?;
         let permitted_items = [(
             DOC_TYPE.to_string(),
             [(NAMESPACE.to_string(), vec![AGE_OVER_21_ELEMENT.to_string()])]
@@ -133,12 +139,22 @@ impl Device {
         )]
         .into_iter()
         .collect();
-        session_manager
-            .prepare_response_mac0(requested_items, permitted_items, &static_scalar)
-            .context("failed to prepare mac0 response")?;
+        session_manager.set_device_auth_type(DeviceAuthType::Mac0);
+        session_manager.prepare_response(requested_items, permitted_items);
+        while let Some((_, payload)) = session_manager
+            .get_next_signature_payload()
+            .map(|(id, p)| (id, p.to_vec()))
+        {
+            let mut mac =
+                Hmac::<Sha256>::new_from_slice(&e_mac_key).context("failed to create HMAC")?;
+            mac.update(&payload);
+            session_manager
+                .submit_next_signature(mac.finalize().into_bytes().to_vec())
+                .context("failed to submit MAC0 tag")?;
+        }
         session_manager
             .retrieve_response()
-            .ok_or(anyhow!("cannot prepare response"))
+            .ok_or(anyhow!("cannot retrieve response"))
     }
 
     /// Load the device signing key that matches the public key embedded in the test mDL's MSO.
