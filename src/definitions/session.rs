@@ -244,8 +244,8 @@ pub fn derive_e_mac_key<T: serde::Serialize>(
     );
     let hkdf = shared_secret.extract::<Sha256>(Some(salt.as_ref()));
     let mut okm = [0u8; 32];
-    // Safe to unwrap as error will only occur if okm.len() is greater than 255 * 32;
-    Hkdf::expand(&hkdf, b"EMacKey", &mut okm).unwrap();
+    Hkdf::expand(&hkdf, b"EMacKey", &mut okm)
+        .map_err(|e| anyhow::anyhow!("HKDF expand failed: {e}"))?;
     Ok(okm.into())
 }
 
