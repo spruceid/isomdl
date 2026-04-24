@@ -62,6 +62,7 @@ pub struct SessionManager {
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
+    e_reader_key_private: [u8; 32],
     trust_anchor_registry: TrustAnchorRegistry,
     holder_le_role: Option<LeRole>,
     holder_central_client_modes: Vec<CentralClientMode>,
@@ -279,6 +280,9 @@ impl SessionManager {
         let e_reader_key_public =
             Tag24::new(key_pair.1).context("failed to encode public cose key")?;
 
+        // Save private key bytes before consuming the key for ECDH
+        let e_reader_key_private_bytes: [u8; 32] = e_reader_key_private.to_bytes().into();
+
         //decode device_engagement
         let device_engagement = device_engagement_bytes.as_ref();
         let e_device_key = &device_engagement.security.1;
@@ -317,6 +321,7 @@ impl SessionManager {
             device_message_counter: 0,
             sk_reader,
             reader_message_counter: 0,
+            e_reader_key_private: e_reader_key_private_bytes,
             trust_anchor_registry,
             holder_le_role,
             holder_central_client_modes,
@@ -471,6 +476,7 @@ impl SessionManager {
                     namespaces,
                     doc_types,
                     revocation_fetcher,
+                    self.e_reader_key_private,
                 )
                 .await
             }

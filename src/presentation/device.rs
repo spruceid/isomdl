@@ -35,7 +35,8 @@ use crate::{
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
-            self, derive_session_key, get_shared_secret, Handover, SessionData, SessionTranscript,
+            self, derive_e_mac_key, derive_session_key, get_shared_secret, Handover, SessionData,
+            SessionTranscript,
         },
         x509::{
             self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry,
@@ -427,6 +428,27 @@ impl SessionManagerEngaged {
 }
 
 impl SessionManager {
+    /// Set the device authentication type used when building the next response.
+    pub fn set_device_auth_type(&mut self, device_auth_type: DeviceAuthType) {
+        self.device_auth_type = device_auth_type;
+    }
+
+    /// Derive EMacKey for MAC0 device authentication (ISO 18013-5 §9.1.3.5).
+    ///
+    /// Computes `ECDH(static_key, EReaderKey)` followed by HKDF to produce the 32-byte key
+    /// used to compute HMAC-SHA256 tags in the signing loop.
+    pub fn e_mac_key_from_static_key(
+        &self,
+        static_key: &p256::NonZeroScalar,
+    ) -> anyhow::Result<[u8; 32]> {
+        let e_reader_key = self.session_transcript.1.clone().into_inner();
+        let shared_secret = get_shared_secret(e_reader_key, static_key)?;
+        let session_transcript_bytes = Tag24::new(self.session_transcript.clone())
+            .map_err(|e| anyhow::anyhow!("failed to encode session transcript: {e}"))?;
+        let key = derive_e_mac_key(&shared_secret, &session_transcript_bytes)?;
+        Ok(key.into())
+    }
+
     fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
         let request: ciborium::Value = cbor::from_slice(request).map_err(|error| {
             tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
@@ -1040,12 +1062,11 @@ pub trait DeviceSession {
                     continue;
                 }
             };
-            let header = coset::HeaderBuilder::new()
-                .algorithm(signature_algorithm)
-                .build();
-
             let prepared_cose = match self.device_auth_type() {
                 DeviceAuthType::Sign1 => {
+                    let header = coset::HeaderBuilder::new()
+                        .algorithm(signature_algorithm)
+                        .build();
                     let cose_sign1_builder = CoseSign1Builder::new().protected(header);
                     let prepared_cose_sign1 = match PreparedCoseSign1::new(
                         cose_sign1_builder,
@@ -1066,6 +1087,12 @@ pub trait DeviceSession {
                     PreparedCose::Sign1(prepared_cose_sign1)
                 }
                 DeviceAuthType::Mac0 => {
+                    // MAC0 device authentication requires p256: EMacKey is derived via
+                    // ECDH(SDeviceKey, EReaderKey) + HKDF (ISO 18013-5 §9.1.3.5), which is
+                    // only defined for NistP256.
+                    let header = coset::HeaderBuilder::new()
+                        .algorithm(coset::iana::Algorithm::HMAC_256_256)
+                        .build();
                     let cose_mac0_builder = CoseMac0Builder::new().protected(header);
                     let prepared_cose_mac0 = match PreparedCoseMac0::new(
                         cose_mac0_builder,
