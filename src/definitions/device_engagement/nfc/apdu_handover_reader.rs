@@ -201,7 +201,7 @@ impl ReaderApduHandoverDriver {
                         "Expected 2-byte Te NDEF length".into(),
                     ));
                 }
-                let te_len = u16::from_be_bytes(*te_len_bytes.first_chunk::<2>().unwrap()) as usize;
+                let te_len = u16::from_be_bytes([te_len_bytes[0], te_len_bytes[1]]) as usize;
                 let chunk_len = te_len.min(self.max_buffer_size);
                 self.state = ReaderHandoverState::WaitingForTeData {
                     total_length: te_len,
@@ -260,7 +260,7 @@ impl ReaderApduHandoverDriver {
                         "Expected 2-byte Hs NDEF length".into(),
                     ));
                 }
-                let hs_len = u16::from_be_bytes(*hs_len_bytes.first_chunk::<2>().unwrap()) as usize;
+                let hs_len = u16::from_be_bytes([hs_len_bytes[0], hs_len_bytes[1]]) as usize;
                 let chunk_len = hs_len.min(self.max_buffer_size);
                 let hr_bytes = hr_bytes.clone();
                 let hr_uuid = *hr_uuid;
