@@ -4,7 +4,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use ndef_rs::{NdefRecord, TNF};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::{
@@ -66,17 +66,22 @@ impl ReaderNegotiatedCarrierInfo {
         if ndef_records.len() < 3 {
             bail!("Not enough NDEF records");
         }
-        // let hs_record = &ndef_records[0];
-        let device_engagement_record = &ndef_records[1];
-        let cc_record = &ndef_records[2];
+        debug!("NDEF records: {:?}", ndef_records);
 
-        let device_engagement: DeviceEngagement = {
-            if device_engagement_record.record_type() != b"iso.org:18013:deviceengagement" {
-                bail!("device engagement record does not have correcty type");
-            }
-            cbor::from_slice(device_engagement_record.payload())
-                .context("Could not parse device engagement CBOR bytes")?
-        };
+        // Not all wallets emit records in the same order, so we locate each
+        // record by its type rather than relying on a fixed index position.
+        let device_engagement_record = ndef_records
+            .iter()
+            .find(|r| r.record_type() == b"iso.org:18013:deviceengagement")
+            .ok_or_else(|| anyhow!("Missing device engagement NDEF record"))?;
+
+        let cc_record = ndef_records
+            .iter()
+            .find(|r| r.record_type() == b"application/vnd.bluetooth.le.oob")
+            .ok_or_else(|| anyhow!("Missing BLE OOB carrier capability NDEF record"))?;
+
+        let device_engagement = cbor::from_slice(device_engagement_record.payload())
+            .context("Could not parse device engagement CBOR bytes")?;
 
         let (holder_le_role, uuid, ble_device_address) =
             parse_cc_record(cc_record).context("failed to parse cc record")?;
@@ -99,9 +104,6 @@ fn parse_cc_record(
     let mut uuid = None;
     let mut ble_device_address = None;
 
-    if cc_record.record_type() != b"application/vnd.bluetooth.le.oob" {
-        bail!("cc record does not have correct type");
-    }
     let mut remains = cc_record.payload();
 
     // Order of AD (Advertising and Scan Response Data) fields isn't mandated, so we have to take
