@@ -102,15 +102,9 @@ pub struct ApduHandoverDriver {
 impl ApduHandoverDriver {
     /// Create a new APDU handover driver.
     ///
-    /// * `negotiated`: true -> use negotiated handover (not implemented yet), false -> use static handover.
+    /// * `negotiated`: true -> use negotiated handover (TNEP), false -> use static handover.
     /// * `strict`: require selecting the MDOC AID before responding to NDEF reads. If strict is false, we will always return NDEF messages.
     pub fn new(negotiated: bool, strict: bool) -> Result<Self, HandoverError> {
-        if negotiated {
-            return Err(anyhow::anyhow!(
-                "Negotiated handover is not implemented yet. Please use static handover."
-            )
-            .into());
-        }
         Ok(Self {
             strict,
             state: ndef_handover::HandoverState::Init,
@@ -193,7 +187,7 @@ impl ApduHandoverDriver {
                     }
 
                     let handover_resp = if self.negotiated {
-                        todo!("Implement negotiated handover");
+                        ndef_handover::get_negotiated_tp_ndef_response()
                     } else {
                         ndef_handover::get_static_handover_ndef_response(self.static_ble.clone())
                     };
@@ -250,13 +244,36 @@ impl ApduHandoverDriver {
                     payload: data,
                 }
             }
-            apdu::Apdu::UpdateBinary { offset, data } => {
+            apdu::Apdu::UpdateBinary { offset: _, data } => {
                 if !self.negotiated {
                     return apdu::ResponseCode::ConditionsNotSatisfied.into();
                 }
-                _ = offset;
-                _ = data;
-                todo!("Implement negotiated handover");
+                let handover_resp = match &self.state {
+                    ndef_handover::HandoverState::WaitingForServiceSelect => {
+                        ndef_handover::handle_ts_write(data)
+                    }
+                    ndef_handover::HandoverState::WaitingForHandoverRequest => {
+                        ndef_handover::handle_hr_write(data, self.static_ble.clone())
+                    }
+                    _ => {
+                        tracing::error!("UpdateBinary in unexpected state: {:?}", self.state);
+                        self.reset();
+                        return apdu::ResponseCode::ConditionsNotSatisfied.into();
+                    }
+                };
+                match handover_resp {
+                    Ok(ndef_handover::HandoverResponse { new_state, ndef }) => {
+                        self.state = new_state;
+                        self.ndef_send =
+                            Some([&u16::to_be_bytes(ndef.len() as u16) as &[u8], &ndef].concat());
+                        apdu::ResponseCode::Ok.into()
+                    }
+                    Err(e) => {
+                        tracing::error!("NDEF handover error during UpdateBinary: {e:?}");
+                        self.reset();
+                        apdu::ResponseCode::Unspecified.into()
+                    }
+                }
             }
         }
     }
@@ -302,5 +319,34 @@ mod test {
             .process_rapdu(&rapdu)
             .expect("failed to process rpdu");
         assert!(matches!(res, ReaderApduProgress::Done(_)));
+    }
+
+    #[test]
+    fn roundtrip_negotiated_handover() {
+        let mut holder = ApduHandoverDriver::new(true, false)
+            .expect("failed to build holder apdu handover driver");
+        let (mut reader, mut apdu) = ReaderApduHandoverDriver::new();
+        let mut iterations = 0;
+        loop {
+            assert!(
+                iterations < 20,
+                "negotiated handover did not complete in 20 iterations"
+            );
+            iterations += 1;
+            let rapdu = holder.process_apdu(&apdu);
+            match reader
+                .process_rapdu(&rapdu)
+                .expect("failed to process rapdu")
+            {
+                ReaderApduProgress::InProgress(next_apdu) => apdu = next_apdu,
+                ReaderApduProgress::Done(_) => {
+                    assert!(
+                        holder.get_carrier_info().is_some(),
+                        "holder carrier_info should be available after negotiated handover"
+                    );
+                    break;
+                }
+            }
+        }
     }
 }
