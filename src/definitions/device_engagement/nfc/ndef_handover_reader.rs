@@ -19,8 +19,6 @@ use crate::{
     },
 };
 
-pub(super) const TNEP_HANDOVER_SERVICE_URI: &str = "urn:nfc:sn:handover";
-
 #[derive(Debug, Clone)]
 pub enum ReaderHandoverState {
     WaitingForAidResponse,
@@ -399,7 +397,8 @@ fn parse_cc_record(
 #[cfg(test)]
 mod test {
     use crate::definitions::device_engagement::nfc::{
-        ndef_handover::get_static_handover_ndef_response, StaticHandoverState,
+        ndef_handover::{get_static_handover_ndef_response, TNEP_HANDOVER_SERVICE_URI},
+        StaticHandoverState,
     };
 
     use super::*;

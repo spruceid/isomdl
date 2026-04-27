@@ -12,6 +12,8 @@ use crate::definitions::{
     DeviceEngagement,
 };
 
+pub(super) const TNEP_HANDOVER_SERVICE_URI: &str = "urn:nfc:sn:handover";
+
 pub(super) const NFC_MAX_PAYLOAD_SIZE: usize = 255 - 2; // 255 minus 2 bytes for the u16 size at the beginning of the payload
 pub(super) const NFC_MAX_PAYLOAD_SIZE_BYTES: [u8; 2] = (NFC_MAX_PAYLOAD_SIZE as u16).to_be_bytes();
 
@@ -149,17 +151,18 @@ pub struct HandoverResponse {
     pub ndef: Vec<u8>,
 }
 
-pub fn get_static_handover_ndef_response(
-    static_handover_state: StaticHandoverState,
-) -> Result<HandoverResponse, HandoverError> {
+fn build_hs_ndef(
+    static_state: StaticHandoverState,
+    hr_message: Option<ByteStr>,
+) -> Result<(Vec<u8>, NegotiatedCarrierInfo), HandoverError> {
     // TODO: I feel like this logic should maybe not live in crate::definitions?
     let StaticHandoverState {
         uuid,
         private_key,
         security,
-    } = static_handover_state;
+    } = static_state;
 
-    tracing::info!("Static handover with UUID: {}", uuid);
+    tracing::info!("Handover with UUID: {}", uuid);
 
     let device_engagement = DeviceEngagement {
         version: "1.0".into(),
@@ -260,22 +263,117 @@ pub fn get_static_handover_ndef_response(
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create handover select NDEF record: {e}"))?;
 
-    let response = ndef_rs::NdefMessage::from([hs_record, device_engagement_record, cc_record])
+    let hs_ndef = ndef_rs::NdefMessage::from([hs_record, device_engagement_record, cc_record])
         .to_buffer()
         .map_err(|e| anyhow::anyhow!("Failed to construct NDEF message: {e}"))?;
 
-    let state = HandoverState::Done(Box::new(NegotiatedCarrierInfo {
+    let carrier_info = NegotiatedCarrierInfo {
         uuid,
         ble: BleInfo::StaticHandover {
             private_key,
             device_engagement: Box::new(device_engagement),
         },
-        hs_message: ByteStr::from(response.clone()),
-        hr_message: None,
-    }));
+        hs_message: ByteStr::from(hs_ndef.clone()),
+        hr_message,
+    };
+
+    Ok((hs_ndef, carrier_info))
+}
+
+pub fn get_static_handover_ndef_response(
+    static_state: StaticHandoverState,
+) -> Result<HandoverResponse, HandoverError> {
+    let (ndef, carrier_info) = build_hs_ndef(static_state, None)?;
+    Ok(HandoverResponse {
+        new_state: HandoverState::Done(Box::new(carrier_info)),
+        ndef,
+    })
+}
+
+pub(super) fn generate_tp_ndef() -> Result<Vec<u8>, HandoverError> {
+    let uri_bytes = TNEP_HANDOVER_SERVICE_URI.as_bytes();
+    let payload = [
+        &[0x10u8, uri_bytes.len() as u8] as &[u8],
+        uri_bytes,
+        &[0x00, 0x0F, 0xFF, 0xFF],
+    ]
+    .concat();
+    let tp_record = ndef_rs::NdefRecord::builder()
+        .tnf(ndef_rs::TNF::WellKnown)
+        .payload(&RawPayload {
+            record_type: RecordType::TnepServiceParameter.as_bytes(),
+            payload: &payload,
+        })
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build Tp NDEF record: {e}"))?;
+    ndef_rs::NdefMessage::from(tp_record)
+        .to_buffer()
+        .map_err(|e| anyhow::anyhow!("Failed to build Tp NDEF message: {e}").into())
+}
+
+pub(super) fn get_negotiated_tp_ndef_response() -> Result<HandoverResponse, HandoverError> {
+    Ok(HandoverResponse {
+        new_state: HandoverState::WaitingForServiceSelect,
+        ndef: generate_tp_ndef()?,
+    })
+}
+
+pub(super) fn handle_ts_write(data: &[u8]) -> Result<HandoverResponse, HandoverError> {
+    let ts_ndef = data.get(2..).ok_or_else(|| {
+        anyhow::anyhow!("Ts UPDATE BINARY payload too short ({} bytes)", data.len())
+    })?;
+    let message = ndef_rs::NdefMessage::decode(ts_ndef)
+        .map_err(|e| anyhow::anyhow!("Failed to decode Ts NDEF: {e}"))?;
+    let ts_record = message
+        .records()
+        .iter()
+        .find(|r| r.record_type() == RecordType::TnepServiceSelect.as_bytes())
+        .ok_or_else(|| anyhow::anyhow!("No Ts record found in UPDATE BINARY payload"))?;
+    let payload = ts_record.payload();
+    let uri_len = *payload
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Ts record has empty payload"))? as usize;
+    let uri_bytes = payload.get(1..1 + uri_len).ok_or_else(|| {
+        anyhow::anyhow!("Ts record payload too short for declared URI length {uri_len}")
+    })?;
+    let uri = std::str::from_utf8(uri_bytes)
+        .map_err(|e| anyhow::anyhow!("Ts URI is not valid UTF-8: {e}"))?;
+    if uri != TNEP_HANDOVER_SERVICE_URI {
+        return Err(anyhow::anyhow!(
+            "Ts selected unknown service URI: {uri:?} (expected {TNEP_HANDOVER_SERVICE_URI:?})"
+        )
+        .into());
+    }
+
+    let te_record = ndef_rs::NdefRecord::builder()
+        .tnf(ndef_rs::TNF::WellKnown)
+        .payload(&RawPayload {
+            record_type: RecordType::TnepStatus.as_bytes(),
+            payload: &[0x00],
+        })
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build Te NDEF record: {e}"))?;
+    let te_ndef = ndef_rs::NdefMessage::from(te_record)
+        .to_buffer()
+        .map_err(|e| anyhow::anyhow!("Failed to build Te NDEF message: {e}"))?;
 
     Ok(HandoverResponse {
-        new_state: state,
-        ndef: response,
+        new_state: HandoverState::WaitingForHandoverRequest,
+        ndef: te_ndef,
+    })
+}
+
+pub(super) fn handle_hr_write(
+    data: &[u8],
+    static_state: StaticHandoverState,
+) -> Result<HandoverResponse, HandoverError> {
+    let hr_ndef_bytes = data.get(2..).ok_or_else(|| {
+        anyhow::anyhow!("Hr UPDATE BINARY payload too short ({} bytes)", data.len())
+    })?;
+    let hr_message = ByteStr::from(hr_ndef_bytes.to_vec());
+    let (hs_ndef, carrier_info) = build_hs_ndef(static_state, Some(hr_message))?;
+    Ok(HandoverResponse {
+        new_state: HandoverState::Done(Box::new(carrier_info)),
+        ndef: hs_ndef,
     })
 }

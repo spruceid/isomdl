@@ -4,9 +4,10 @@ use crate::definitions::device_engagement::nfc::{
         select::{ControlInfo, Occurrence},
         Apdu, FileId,
     },
+    ndef_handover::TNEP_HANDOVER_SERVICE_URI,
     ndef_handover_reader::{
         detect_tp_service, generate_hr_ndef, generate_ts_ndef, parse_te_ndef, ReaderHandoverState,
-        ReaderNegotiatedCarrierInfo, TNEP_HANDOVER_SERVICE_URI,
+        ReaderNegotiatedCarrierInfo,
     },
     util::KnownOrRaw,
     APDU_AID_NDEF_APPLICATION, CC_FILE_TEMPLATE,
