@@ -16,9 +16,11 @@
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Context, Result};
+use async_signature::AsyncSigner;
 use coset::Label;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use signature::SignatureEncoding;
 use uuid::Uuid;
 
 use super::{authentication::ResponseAuthenticationOutcome, reader_utils::validate_response};
@@ -27,6 +29,7 @@ use crate::definitions::x509::revocation::RevocationFetcher;
 
 use crate::{
     cbor::{self, CborError},
+    cose::{sign1::PreparedCoseSign1, SignatureAlgorithm},
     definitions::{
         device_engagement::{
             nfc::{LeRole, ReaderNegotiatedCarrierInfo},
@@ -194,16 +197,66 @@ pub enum Handover {
 }
 
 impl SessionManager {
-    /// Establish a session with the device.
+    /// Establish a session with the device, requesting data from multiple documents.
     ///
-    /// Internally it generates the ephemeral keys,
-    /// derives the shared secret, and derives the session keys
-    /// (using **Diffie–Hellman key exchange**).
-    pub fn establish_session(
+    /// Like [establish_session] but accepts a non-empty list of `(doc_type, namespaces)` pairs so
+    /// the reader can request data from more than one document type in a single engagement.
+    pub fn establish_session_multi(
         handover: Handover,
-        namespaces: device_request::Namespaces,
+        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
         trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
+        let (mut session_manager, ble_ident) = Self::new_session(handover, trust_anchor_registry)?;
+        let request = session_manager
+            .build_request_multi(doc_requests)
+            .context("failed to build device request")?;
+        let e_reader_key = session_manager.session_transcript.1.clone();
+        let session = SessionEstablishment {
+            data: request.into(),
+            e_reader_key,
+        };
+        let session_request =
+            cbor::to_vec(&session).context("failed to encode session establishment")?;
+        Ok((session_manager, session_request, ble_ident))
+    }
+
+    /// Like [establish_session_multi] but signs each `DocRequest` with reader authentication.
+    ///
+    /// Reader authentication (ISO 18013-5 clause 9.1.4) lets the holder verify the relying
+    /// party's identity before sharing credential data. Without it, some wallets (e.g. Google
+    /// Wallet) refuse to transmit any data.
+    pub async fn establish_session_multi_signed<S, Sig>(
+        handover: Handover,
+        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
+        trust_anchor_registry: TrustAnchorRegistry,
+        signer: &S,
+        x5chain: X5Chain,
+    ) -> Result<(Self, Vec<u8>, [u8; 16])>
+    where
+        S: AsyncSigner<Sig> + SignatureAlgorithm + Sync,
+        Sig: SignatureEncoding + Send + 'static,
+    {
+        let (mut session_manager, ble_ident) = Self::new_session(handover, trust_anchor_registry)?;
+        let request = session_manager
+            .build_request_multi_signed(doc_requests, signer, &x5chain)
+            .await
+            .context("failed to build device request")?;
+        let e_reader_key = session_manager.session_transcript.1.clone();
+        let session = SessionEstablishment {
+            data: request.into(),
+            e_reader_key,
+        };
+        let session_request =
+            cbor::to_vec(&session).context("failed to encode session establishment")?;
+        Ok((session_manager, session_request, ble_ident))
+    }
+
+    /// Shared session setup: parse handover, derive keys, create the [SessionManager].
+    /// Returns the manager and the BLE identity bytes.
+    fn new_session(
+        handover: Handover,
+        trust_anchor_registry: TrustAnchorRegistry,
+    ) -> Result<(Self, [u8; 16])> {
         let (
             device_engagement_bytes,
             session_transcript_handover,
@@ -274,24 +327,19 @@ impl SessionManager {
             }
         };
 
-        //generate own keys
         let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
         let e_reader_key_private = key_pair.0;
         let e_reader_key_public =
             Tag24::new(key_pair.1).context("failed to encode public cose key")?;
 
-        // Save private key bytes before consuming the key for ECDH
         let e_reader_key_private_bytes: [u8; 32] = e_reader_key_private.to_bytes().into();
 
-        //decode device_engagement
         let device_engagement = device_engagement_bytes.as_ref();
         let e_device_key = &device_engagement.security.1;
 
-        // calculate ble Ident value
         let ble_ident =
             super::calculate_ble_ident(e_device_key).context("failed to calculate BLE Ident")?;
 
-        // derive shared secret
         let shared_secret = get_shared_secret(
             e_device_key.clone().into_inner(),
             &e_reader_key_private.into(),
@@ -300,14 +348,13 @@ impl SessionManager {
 
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
-            e_reader_key_public.clone(),
+            e_reader_key_public,
             session_transcript_handover,
         );
 
         let session_transcript_bytes = Tag24::new(session_transcript.clone())
             .context("failed to encode session transcript")?;
 
-        //derive session keys
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)
             .context("failed to derive reader session key")?
             .into();
@@ -315,7 +362,7 @@ impl SessionManager {
             .context("failed to derive device session key")?
             .into();
 
-        let mut session_manager = Self {
+        let session_manager = Self {
             session_transcript,
             sk_device,
             device_message_counter: 0,
@@ -328,17 +375,24 @@ impl SessionManager {
             holder_peripheral_server_modes,
         };
 
-        let request = session_manager
-            .build_request(namespaces)
-            .context("failed to build device request")?;
-        let session = SessionEstablishment {
-            data: request.into(),
-            e_reader_key: e_reader_key_public,
-        };
-        let session_request =
-            cbor::to_vec(&session).context("failed to encode session establishment")?;
+        Ok((session_manager, ble_ident))
+    }
 
-        Ok((session_manager, session_request, ble_ident))
+    /// Establish a session with the device.
+    ///
+    /// Internally it generates the ephemeral keys,
+    /// derives the shared secret, and derives the session keys
+    /// (using **Diffie–Hellman key exchange**).
+    pub fn establish_session(
+        handover: Handover,
+        namespaces: device_request::Namespaces,
+        trust_anchor_registry: TrustAnchorRegistry,
+    ) -> Result<(Self, Vec<u8>, [u8; 16])> {
+        Self::establish_session_multi(
+            handover,
+            NonEmptyVec::new(("org.iso.18013.5.1.mDL".to_string(), namespaces)),
+            trust_anchor_registry,
+        )
     }
 
     #[deprecated(since = "0.2.1", note = "use ble_central_client_options instead")]
@@ -391,24 +445,40 @@ impl SessionManager {
     }
 
     fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
-        // if !validate_request(namespaces.clone()).is_ok() {
-        //     return Err(anyhow::Error::msg(
-        //         "At least one of the namespaces contain an invalid combination of fields to request",
-        //     ));
-        // }
-        let items_request = ItemsRequest {
-            doc_type: "org.iso.18013.5.1.mDL".into(),
+        self.build_request_multi(NonEmptyVec::new((
+            "org.iso.18013.5.1.mDL".to_string(),
             namespaces,
-            request_info: None,
-        };
+        )))
+    }
 
-        let doc_request = DocRequest {
+    fn build_request_multi(
+        &mut self,
+        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
+    ) -> Result<Vec<u8>> {
+        let mut requests_iter = doc_requests.into_inner().into_iter();
+        let (first_doc_type, first_namespaces) = requests_iter.next().expect("NonEmptyVec");
+        let first = DocRequest {
             reader_auth: None,
-            items_request: Tag24::new(items_request)?,
+            items_request: Tag24::new(ItemsRequest {
+                doc_type: first_doc_type,
+                namespaces: first_namespaces,
+                request_info: None,
+            })?,
         };
+        let mut doc_request_vec = NonEmptyVec::new(first);
+        for (doc_type, namespaces) in requests_iter {
+            doc_request_vec.push(DocRequest {
+                reader_auth: None,
+                items_request: Tag24::new(ItemsRequest {
+                    doc_type,
+                    namespaces,
+                    request_info: None,
+                })?,
+            });
+        }
         let device_request = DeviceRequest {
             version: DeviceRequest::VERSION.to_string(),
-            doc_requests: NonEmptyVec::new(doc_request),
+            doc_requests: doc_request_vec,
             device_request_info: None,
             reader_auth_all: None,
         };
@@ -419,6 +489,106 @@ impl SessionManager {
             &mut self.reader_message_counter,
         )
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
+    }
+
+    async fn build_request_multi_signed<S, Sig>(
+        &mut self,
+        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
+        signer: &S,
+        x5chain: &X5Chain,
+    ) -> Result<Vec<u8>>
+    where
+        S: AsyncSigner<Sig> + SignatureAlgorithm + Sync,
+        Sig: SignatureEncoding + Send + 'static,
+    {
+        let mut requests_iter = doc_requests.into_inner().into_iter();
+        let (first_doc_type, first_namespaces) = requests_iter.next().expect("NonEmptyVec");
+        let first_items_request = Tag24::new(ItemsRequest {
+            doc_type: first_doc_type,
+            namespaces: first_namespaces,
+            request_info: None,
+        })?;
+        let first_reader_auth = self
+            .sign_reader_auth(first_items_request.clone(), signer, x5chain)
+            .await?;
+        let first = DocRequest {
+            reader_auth: Some(first_reader_auth),
+            items_request: first_items_request,
+        };
+        let mut doc_request_vec = NonEmptyVec::new(first);
+        for (doc_type, namespaces) in requests_iter {
+            let items_request = Tag24::new(ItemsRequest {
+                doc_type,
+                namespaces,
+                request_info: None,
+            })?;
+            let reader_auth = self
+                .sign_reader_auth(items_request.clone(), signer, x5chain)
+                .await?;
+            doc_request_vec.push(DocRequest {
+                reader_auth: Some(reader_auth),
+                items_request,
+            });
+        }
+        let device_request = DeviceRequest {
+            version: DeviceRequest::VERSION.to_string(),
+            doc_requests: doc_request_vec,
+            device_request_info: None,
+            reader_auth_all: None,
+        };
+        let device_request_bytes = cbor::to_vec(&device_request)?;
+        session::encrypt_reader_data(
+            &self.sk_reader.into(),
+            &device_request_bytes,
+            &mut self.reader_message_counter,
+        )
+        .map_err(|e| anyhow!("unable to encrypt request: {}", e))
+    }
+
+    /// Build and sign a `ReaderAuthentication` COSE_Sign1 for one `DocRequest`.
+    ///
+    /// The payload is detached (nil in the COSE structure) as required by ISO 18013-5:2021
+    /// clause 9.1.4.4. The x5chain is added to the unprotected header after signing.
+    async fn sign_reader_auth<S, Sig>(
+        &self,
+        items_request: ItemsRequestBytes,
+        signer: &S,
+        x5chain: &X5Chain,
+    ) -> Result<device_request::ReaderAuth>
+    where
+        S: AsyncSigner<Sig> + SignatureAlgorithm + Sync,
+        Sig: SignatureEncoding + Send + 'static,
+    {
+        let reader_authentication = Tag24::new(ReaderAuthentication(
+            "ReaderAuthentication".into(),
+            self.session_transcript.clone(),
+            items_request,
+        ))
+        .context("failed to encode ReaderAuthentication")?;
+
+        let detached_payload = cbor::to_vec(&reader_authentication)
+            .context("failed to serialize ReaderAuthentication")?;
+
+        let protected = coset::HeaderBuilder::new()
+            .algorithm(signer.algorithm())
+            .build();
+        let builder = coset::CoseSign1Builder::new().protected(protected);
+        let prepared = PreparedCoseSign1::new(builder, Some(&detached_payload), None, false)
+            .context("failed to prepare reader auth COSE_Sign1")?;
+
+        let sig: Sig = signer
+            .sign_async(prepared.signature_payload())
+            .await
+            .map_err(|e| anyhow!("failed to sign reader auth: {e}"))?;
+        let mut cose_sign1 = prepared.finalize(sig.to_vec());
+
+        cose_sign1
+            .inner
+            .unprotected
+            .rest
+            .push((Label::Int(X5CHAIN_COSE_HEADER_LABEL), x5chain.into_cbor()));
+
+        Ok(cose_sign1)
     }
 
     fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, Error> {
