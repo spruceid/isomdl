@@ -384,11 +384,17 @@ impl SessionManager {
         Ok((session_manager, ble_ident))
     }
 
-    /// Establish a session with the device.
+    /// Establish a session with the device, requesting data from a single mDL document.
     ///
     /// Internally it generates the ephemeral keys,
     /// derives the shared secret, and derives the session keys
     /// (using **Diffie–Hellman key exchange**).
+    ///
+    /// To request data from multiple document types in one engagement, use
+    /// [`establish_session_multi`][SessionManager::establish_session_multi].
+    ///
+    /// To include reader authentication (required by some wallets, e.g. Google Wallet),
+    /// use [`establish_session_multi_signed`][SessionManager::establish_session_multi_signed].
     pub fn establish_session(
         handover: Handover,
         namespaces: device_request::Namespaces,
