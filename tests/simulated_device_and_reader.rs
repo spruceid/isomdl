@@ -8,6 +8,7 @@ use isomdl::definitions::x509::{
 };
 use isomdl::presentation::authentication::AuthenticationStatus;
 use isomdl::presentation::reader;
+use signature::Signer;
 
 #[test_log::test(tokio::test)]
 pub async fn simulated_device_and_reader_interaction() {
@@ -91,6 +92,60 @@ pub async fn simulated_device_and_reader_with_reader_auth() {
     Reader::reader_handle_device_response(&mut reader_sm, response)
         .await
         .unwrap();
+}
+
+#[test_log::test(tokio::test)]
+pub async fn simulated_device_and_reader_unknown_doc_type() {
+    // The device holds both an mDL and an test (added in Device::initialise_session).
+    let engaged_state = Device::initialise_session().unwrap();
+
+    // Reader requests only the test doc type
+    let namespaces = Namespaces::new(
+        common::NAMESPACE.into(),
+        DataElements::new(common::TEST_ELEMENT.to_string(), false),
+    );
+    let doc_requests = RequestedDocuments::new(common::TEST_DOC_TYPE.to_string(), namespaces);
+
+    let (mut reader_sm, request, _) = reader::SessionManager::establish_session_multi(
+        reader::Handover::QR(engaged_state.qr_handover().unwrap()),
+        doc_requests,
+        TrustAnchorRegistry::default(),
+    )
+    .unwrap();
+
+    let (mut device_sm, validated_request) =
+        Device::handle_request(engaged_state, request, Default::default())
+            .await
+            .unwrap();
+
+    // Device signs the test document with the same device key as the mDL fixture
+    let permitted = [(
+        common::TEST_DOC_TYPE.to_string(),
+        [(
+            common::NAMESPACE.to_string(),
+            vec![common::TEST_ELEMENT.to_string()],
+        )]
+        .into_iter()
+        .collect(),
+    )]
+    .into_iter()
+    .collect();
+    device_sm.prepare_response(&validated_request.items_request, permitted);
+    let key = Device::create_signing_key().unwrap();
+    let (_, payload) = device_sm.get_next_signature_payload().unwrap();
+    let sig: p256::ecdsa::Signature = key.sign(payload);
+    device_sm.submit_next_signature(sig.to_vec()).unwrap();
+    let response = device_sm.retrieve_response().unwrap();
+
+    // Reader parses the test response without panicking. The reader's document lookup
+    // is hardcoded to mDL, so it reports a parsing error rather than finding the document —
+    // this is the expected behaviour and proves no mDL-specific crash path is hit.
+    let outcome = reader_sm.handle_response(&response, &()).await;
+    assert!(
+        outcome.errors.contains_key("parsing_errors"),
+        "expected parsing_errors when reader processes a non-mDL response, got: {:?}",
+        outcome.errors
+    );
 }
 
 #[test_log::test(tokio::test)]

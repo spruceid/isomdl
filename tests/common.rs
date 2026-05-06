@@ -4,12 +4,16 @@ use digest::Mac;
 use hmac::Hmac;
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
+use isomdl::definitions::device_key::cose_key::{CoseKey, EC2Curve, EC2Y};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
 use isomdl::definitions::device_signed::DeviceAuthType;
 use isomdl::definitions::helpers::NonEmptyMap;
 use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
-use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
+use isomdl::definitions::{
+    self, BleOptions, DeviceKeyInfo, DeviceRetrievalMethod, DigestAlgorithm, ValidityInfo,
+};
+use isomdl::issuance::Mdoc;
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
 use isomdl::presentation::{
     authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
@@ -17,11 +21,14 @@ use isomdl::presentation::{
 };
 use sha2::Sha256;
 use signature::Signer;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
 pub const NAMESPACE: &str = "org.iso.18013.5.1";
 pub const AGE_OVER_21_ELEMENT: &str = "age_over_21";
+pub const TEST_DOC_TYPE: &str = "org.example.test";
+pub const TEST_ELEMENT: &str = "test_value";
 
 pub struct Device {}
 
@@ -34,10 +41,66 @@ impl Device {
         Ok(docs)
     }
 
+    /// Issue a minimal test document using the same test issuer and device key as the mDL fixture.
+    pub fn make_test_document() -> Result<Document> {
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+        use p256::pkcs8::DecodePrivateKey;
+        use std::collections::BTreeMap;
+
+        let device_der = base64::decode(include_str!("../test/issuance/device_key.b64").trim())?;
+        let device_sk = p256::SecretKey::from_sec1_der(&device_der)?;
+        let ec = device_sk.public_key().to_encoded_point(false);
+        let device_key_info = DeviceKeyInfo {
+            device_key: CoseKey::EC2 {
+                crv: EC2Curve::P256,
+                x: ec.x().unwrap().to_vec(),
+                y: EC2Y::Value(ec.y().unwrap().to_vec()),
+            },
+            key_authorizations: None,
+            key_info: None,
+        };
+
+        let mut ns_data = BTreeMap::new();
+        ns_data.insert(
+            TEST_ELEMENT.to_string(),
+            ciborium::Value::Text("Test Holder".to_string()),
+        );
+        let mut namespaces = BTreeMap::new();
+        namespaces.insert(NAMESPACE.to_string(), ns_data);
+
+        let now = OffsetDateTime::now_utc();
+        let validity_info = ValidityInfo {
+            signed: now,
+            valid_from: now,
+            valid_until: now + time::Duration::days(365),
+            expected_update: None,
+        };
+
+        let x5chain = isomdl::definitions::x509::X5Chain::builder()
+            .with_pem_certificate(include_bytes!("../test/issuance/issuer-cert.pem"))?
+            .build()?;
+        let issuer_key: p256::ecdsa::SigningKey =
+            p256::SecretKey::from_pkcs8_pem(include_str!("../test/issuance/issuer-key.pem"))?
+                .into();
+
+        let mdoc = Mdoc::issue::<_, p256::ecdsa::Signature>(
+            TEST_DOC_TYPE.to_string(),
+            namespaces,
+            validity_info,
+            DigestAlgorithm::SHA256,
+            device_key_info,
+            x5chain,
+            false,
+            issuer_key,
+        )?;
+        Ok(device::Document::from(mdoc))
+    }
+
     /// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
     pub fn initialise_session() -> Result<SessionManagerEngaged> {
-        // Parse the mDL
-        let docs = Device::parse_mdl()?;
+        // Parse the mDL and add a minimal test document for multi-doc-type tests
+        let mut docs = Device::parse_mdl()?;
+        docs.insert(TEST_DOC_TYPE.to_string(), Device::make_test_document()?);
 
         let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
             peripheral_server_mode: None,
