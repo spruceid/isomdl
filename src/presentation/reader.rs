@@ -203,7 +203,7 @@ impl SessionManager {
     /// the reader can request data from more than one document type in a single engagement.
     pub fn establish_session_multi(
         handover: Handover,
-        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
+        doc_requests: device_request::RequestedDocuments,
         trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let (mut session_manager, ble_ident) = Self::new_session(handover, trust_anchor_registry)?;
@@ -227,7 +227,7 @@ impl SessionManager {
     /// Wallet) refuse to transmit any data.
     pub async fn establish_session_multi_signed<S, Sig>(
         handover: Handover,
-        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
+        doc_requests: device_request::RequestedDocuments,
         trust_anchor_registry: TrustAnchorRegistry,
         signer: &S,
         x5chain: X5Chain,
@@ -327,19 +327,24 @@ impl SessionManager {
             }
         };
 
+        //generate own keys
         let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
         let e_reader_key_private = key_pair.0;
         let e_reader_key_public =
             Tag24::new(key_pair.1).context("failed to encode public cose key")?;
 
+        // Save private key bytes before consuming the key for ECDH
         let e_reader_key_private_bytes: [u8; 32] = e_reader_key_private.to_bytes().into();
 
+        //decode device_engagement
         let device_engagement = device_engagement_bytes.as_ref();
         let e_device_key = &device_engagement.security.1;
 
+        // calculate ble Ident value
         let ble_ident =
             super::calculate_ble_ident(e_device_key).context("failed to calculate BLE Ident")?;
 
+        // derive shared secret
         let shared_secret = get_shared_secret(
             e_device_key.clone().into_inner(),
             &e_reader_key_private.into(),
@@ -355,6 +360,7 @@ impl SessionManager {
         let session_transcript_bytes = Tag24::new(session_transcript.clone())
             .context("failed to encode session transcript")?;
 
+        //derive session keys
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)
             .context("failed to derive reader session key")?
             .into();
@@ -390,7 +396,10 @@ impl SessionManager {
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         Self::establish_session_multi(
             handover,
-            NonEmptyVec::new(("org.iso.18013.5.1.mDL".to_string(), namespaces)),
+            device_request::RequestedDocuments::new(
+                "org.iso.18013.5.1.mDL".to_string(),
+                namespaces,
+            ),
             trust_anchor_registry,
         )
     }
@@ -445,18 +454,20 @@ impl SessionManager {
     }
 
     fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
-        self.build_request_multi(NonEmptyVec::new((
+        self.build_request_multi(device_request::RequestedDocuments::new(
             "org.iso.18013.5.1.mDL".to_string(),
             namespaces,
-        )))
+        ))
     }
 
     fn build_request_multi(
         &mut self,
-        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
+        doc_requests: device_request::RequestedDocuments,
     ) -> Result<Vec<u8>> {
         let mut requests_iter = doc_requests.into_inner().into_iter();
-        let (first_doc_type, first_namespaces) = requests_iter.next().expect("NonEmptyVec");
+        let (first_doc_type, first_namespaces) = requests_iter
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("empty document requests"))?;
         let first = DocRequest {
             reader_auth: None,
             items_request: Tag24::new(ItemsRequest {
@@ -493,7 +504,7 @@ impl SessionManager {
 
     async fn build_request_multi_signed<S, Sig>(
         &mut self,
-        doc_requests: NonEmptyVec<(String, device_request::Namespaces)>,
+        doc_requests: device_request::RequestedDocuments,
         signer: &S,
         x5chain: &X5Chain,
     ) -> Result<Vec<u8>>
@@ -502,7 +513,9 @@ impl SessionManager {
         Sig: SignatureEncoding + Send + 'static,
     {
         let mut requests_iter = doc_requests.into_inner().into_iter();
-        let (first_doc_type, first_namespaces) = requests_iter.next().expect("NonEmptyVec");
+        let (first_doc_type, first_namespaces) = requests_iter
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("empty document requests"))?;
         let first_items_request = Tag24::new(ItemsRequest {
             doc_type: first_doc_type,
             namespaces: first_namespaces,

@@ -164,6 +164,75 @@ impl Device {
     }
 }
 
+/// Build a fresh self-signed reader certificate for testing reader authentication.
+///
+/// The certificate includes all extensions required by ISO 18013-5 reader cert validation
+/// (ExtendedKeyUsage OID 1.0.18013.5.1.6, DigitalSignature KeyUsage, SubjectKeyIdentifier,
+/// AuthorityKeyIdentifier, IssuerAlternativeName, CrlDistributionPoints). Self-signed so
+/// the same cert can serve as both the X5Chain leaf and the ReaderCa trust anchor.
+pub fn build_test_reader_cert(
+    signing_key: &p256::ecdsa::SigningKey,
+) -> Result<x509_cert::Certificate> {
+    use const_oid::ObjectIdentifier;
+    use der::asn1::OctetString;
+    use p256::NistP256;
+    use rand::random;
+    use sha1::{Digest, Sha1};
+    use signature::Signer;
+    use std::time::Duration;
+    use x509_cert::{
+        builder::{Builder, CertificateBuilder},
+        ext::pkix::{
+            crl::dp::DistributionPoint,
+            name::{DistributionPointName, GeneralName},
+            AuthorityKeyIdentifier, CrlDistributionPoints, ExtendedKeyUsage, IssuerAltName,
+            KeyUsage, KeyUsages, SubjectKeyIdentifier,
+        },
+        spki::{SignatureBitStringEncoding, SubjectPublicKeyInfoOwned},
+        time::Validity,
+    };
+
+    let spki = SubjectPublicKeyInfoOwned::from_key(*signing_key.verifying_key())?;
+    let ski_bytes = Sha1::digest(spki.subject_public_key.raw_bytes()).to_vec();
+    let ski_octet = OctetString::new(ski_bytes)?;
+
+    let mut builder = CertificateBuilder::new(
+        x509_cert::builder::Profile::Manual { issuer: None },
+        random::<u64>().into(),
+        Validity::from_now(Duration::from_secs(3600))?,
+        "CN=Test Reader,C=US".parse()?,
+        spki,
+        signing_key,
+    )?;
+
+    builder.add_extension(&SubjectKeyIdentifier(ski_octet.clone()))?;
+    // AKI key_identifier must match the trust anchor's SKI for key_identifier_check to pass.
+    builder.add_extension(&AuthorityKeyIdentifier {
+        key_identifier: Some(ski_octet),
+        ..Default::default()
+    })?;
+    builder.add_extension(&ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap(
+        "1.0.18013.5.1.6",
+    )]))?;
+    builder.add_extension(&KeyUsage(KeyUsages::DigitalSignature.into()))?;
+    builder.add_extension(&IssuerAltName(vec![GeneralName::Rfc822Name(
+        "test@example.com".to_string().try_into()?,
+    )]))?;
+    builder.add_extension(&CrlDistributionPoints(vec![DistributionPoint {
+        distribution_point: Some(DistributionPointName::FullName(vec![
+            GeneralName::UniformResourceIdentifier(
+                "https://example.com/crl".to_string().try_into()?,
+            ),
+        ])),
+        reasons: None,
+        crl_issuer: None,
+    }]))?;
+
+    let tbs = builder.finalize()?;
+    let signature: ecdsa::Signature<NistP256> = signing_key.sign(&tbs);
+    Ok(builder.assemble(signature.to_der().to_bitstring()?)?)
+}
+
 pub struct Reader {}
 
 impl Reader {

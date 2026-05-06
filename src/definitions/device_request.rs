@@ -20,6 +20,7 @@ pub type DocRequestID = u64;
 pub type PurposeHints = NonEmptyMap<PurposeControllerId, PurposeCode>;
 pub type PurposeControllerId = String;
 pub type PurposeCode = i64;
+pub type RequestedDocuments = NonEmptyMap<DocType, Namespaces>;
 
 /// Represents a device request.
 #[derive(Clone, Debug, Serialize, Deserialize)]
