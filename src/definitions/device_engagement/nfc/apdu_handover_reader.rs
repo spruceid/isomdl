@@ -31,6 +31,34 @@ pub enum ReaderApduError {
     NegativeApduResponse(String),
     #[error("NDEF decoding failure: {0}")]
     NdefMessageError(#[from] anyhow::Error),
+    #[error("Holder still had no NDEF message after {0} reads")]
+    ResponsePollLimitExceeded(usize),
+    #[error("Holder returned more data than expected: {got} > {expected}")]
+    UnexpectedDataLength { got: usize, expected: usize },
+}
+
+/// Upper bound on consecutive reads that make no progress (empty NDEF message
+/// or empty payload). TNEP signals "response not ready yet" with an empty NDEF
+/// message and expects the reader to poll; the NFC round trip (≥~10ms) already
+/// exceeds TNEP minimum waiting times so no extra delay is inserted.
+const MAX_NO_PROGRESS_POLLS: usize = 100;
+
+fn bump_no_progress(polls: &mut usize) -> Result<(), ReaderApduError> {
+    *polls += 1;
+    if *polls > MAX_NO_PROGRESS_POLLS {
+        return Err(ReaderApduError::ResponsePollLimitExceeded(
+            MAX_NO_PROGRESS_POLLS,
+        ));
+    }
+    Ok(())
+}
+
+/// Re-read the 2-byte NDEF length after an empty NDEF message.
+fn poll_empty_ndef(polls: &mut usize) -> Result<ReaderApduProgress, ReaderApduError> {
+    bump_no_progress(polls)?;
+    Ok(ReaderApduProgress::InProgress(
+        Apdu::ReadBinary { slice: 0..2 }.to_bytes(),
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +67,8 @@ pub struct ReaderApduHandoverDriver {
     /// Maximum amount of bytes in an APDU command or response. Used to be able to transmit large
     /// amount of data in multiple chunks.
     max_buffer_size: usize,
+    /// Consecutive reads that made no progress; see [MAX_NO_PROGRESS_POLLS].
+    no_progress_polls: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +91,7 @@ impl ReaderApduHandoverDriver {
             // future we might have to make it configurable if we see either the need to use
             // extended APDUs or encounter discrepancies between platforms.
             max_buffer_size: 264,
+            no_progress_polls: 0,
         };
         let apdu = Apdu::SelectAid {
             occurrence: Occurrence::FirstOrOnly,
@@ -134,6 +165,11 @@ impl ReaderApduHandoverDriver {
                     return Err(ReaderApduError::InvalidApduResponse("Expected to receive length indication, but payload doesn't have a payload of 2 bytes".into()));
                 }
                 let ndef_len = u16::from_be_bytes(*ndef_recv.first_chunk::<2>().unwrap()) as usize;
+                // Empty NDEF message: the holder hasn't produced it yet; re-read.
+                if ndef_len == 0 {
+                    return poll_empty_ndef(&mut self.no_progress_polls);
+                }
+                self.no_progress_polls = 0;
                 let chunk_len = if ndef_len <= self.max_buffer_size {
                     ndef_len
                 } else {
@@ -149,10 +185,11 @@ impl ReaderApduHandoverDriver {
                 Ok(ReaderApduProgress::InProgress(apdu.to_bytes()))
             }
             ReaderHandoverState::WaitingForNdefReadResponseData { total_length, data } => {
-                let ndef_recv = rapdu.payload;
-                let data = [data, ndef_recv.as_slice()].concat();
+                let made_progress = !rapdu.payload.is_empty();
+                let data = [data, rapdu.payload.as_slice()].concat();
                 let offset = data.len();
                 if &offset == total_length {
+                    self.no_progress_polls = 0;
                     if detect_tp_service(&data).is_some() {
                         // Negotiated handover: write Ts (Service Select)
                         let ts_ndef = generate_ts_ndef(TNEP_HANDOVER_SERVICE_URI)
@@ -170,7 +207,17 @@ impl ReaderApduHandoverDriver {
                         self.state = ReaderHandoverState::Done;
                         Ok(ReaderApduProgress::Done(Box::new(carrier_info)))
                     }
+                } else if &offset > total_length {
+                    Err(ReaderApduError::UnexpectedDataLength {
+                        got: offset,
+                        expected: *total_length,
+                    })
                 } else {
+                    if made_progress {
+                        self.no_progress_polls = 0;
+                    } else {
+                        bump_no_progress(&mut self.no_progress_polls)?;
+                    }
                     let chunk_len = if total_length - offset <= self.max_buffer_size {
                         total_length - offset
                     } else {
@@ -202,6 +249,11 @@ impl ReaderApduHandoverDriver {
                     ));
                 }
                 let te_len = u16::from_be_bytes([te_len_bytes[0], te_len_bytes[1]]) as usize;
+                // Empty NDEF message: the holder hasn't produced the Te yet; re-read.
+                if te_len == 0 {
+                    return poll_empty_ndef(&mut self.no_progress_polls);
+                }
+                self.no_progress_polls = 0;
                 let chunk_len = te_len.min(self.max_buffer_size);
                 self.state = ReaderHandoverState::WaitingForTeData {
                     total_length: te_len,
@@ -215,9 +267,11 @@ impl ReaderApduHandoverDriver {
                 ))
             }
             ReaderHandoverState::WaitingForTeData { total_length, data } => {
+                let made_progress = !rapdu.payload.is_empty();
                 let data = [data, rapdu.payload.as_slice()].concat();
                 let offset = data.len();
                 if &offset == total_length {
+                    self.no_progress_polls = 0;
                     // Te received; check TNEP status then write Hr
                     parse_te_ndef(&data).map_err(ReaderApduError::NdefMessageError)?;
                     let (hr_ndef, hr_uuid) =
@@ -230,7 +284,17 @@ impl ReaderApduHandoverDriver {
                     self.state =
                         ReaderHandoverState::WaitingForHrWriteResponse { hr_bytes, hr_uuid };
                     Ok(ReaderApduProgress::InProgress(hr_apdu.to_bytes()))
+                } else if &offset > total_length {
+                    Err(ReaderApduError::UnexpectedDataLength {
+                        got: offset,
+                        expected: *total_length,
+                    })
                 } else {
+                    if made_progress {
+                        self.no_progress_polls = 0;
+                    } else {
+                        bump_no_progress(&mut self.no_progress_polls)?;
+                    }
                     let chunk_len = (total_length - offset).min(self.max_buffer_size);
                     self.state = ReaderHandoverState::WaitingForTeData {
                         total_length: *total_length,
@@ -261,6 +325,13 @@ impl ReaderApduHandoverDriver {
                     ));
                 }
                 let hs_len = u16::from_be_bytes([hs_len_bytes[0], hs_len_bytes[1]]) as usize;
+                // Empty NDEF message: the holder is still preparing the Hs
+                // (observed with Apple Wallet, which acks the Hr before its
+                // Handover Select is ready); re-read until it appears.
+                if hs_len == 0 {
+                    return poll_empty_ndef(&mut self.no_progress_polls);
+                }
+                self.no_progress_polls = 0;
                 let chunk_len = hs_len.min(self.max_buffer_size);
                 let hr_bytes = hr_bytes.clone();
                 let hr_uuid = *hr_uuid;
@@ -283,16 +354,28 @@ impl ReaderApduHandoverDriver {
                 hr_bytes,
                 hr_uuid,
             } => {
+                let made_progress = !rapdu.payload.is_empty();
                 let data = [data, rapdu.payload.as_slice()].concat();
                 let offset = data.len();
                 if &offset == total_length {
+                    self.no_progress_polls = 0;
                     let mut carrier_info =
                         ReaderNegotiatedCarrierInfo::parse_hs_ndef_message(&data, *hr_uuid)
                             .map_err(ReaderApduError::NdefMessageError)?;
                     carrier_info.hr_message = Some(ByteStr::from(hr_bytes.clone()));
                     self.state = ReaderHandoverState::Done;
                     Ok(ReaderApduProgress::Done(Box::new(carrier_info)))
+                } else if &offset > total_length {
+                    Err(ReaderApduError::UnexpectedDataLength {
+                        got: offset,
+                        expected: *total_length,
+                    })
                 } else {
+                    if made_progress {
+                        self.no_progress_polls = 0;
+                    } else {
+                        bump_no_progress(&mut self.no_progress_polls)?;
+                    }
                     let chunk_len = (total_length - offset).min(self.max_buffer_size);
                     let hr_bytes = hr_bytes.clone();
                     let hr_uuid = *hr_uuid;
@@ -318,6 +401,156 @@ impl ReaderApduHandoverDriver {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// Drives a negotiated handover through the Hr write ack (transcript from
+    /// the multipaz session), leaving the driver waiting for the Hs length.
+    /// Includes one "Te not ready" poll to cover the Te-length zero path.
+    fn drive_negotiated_to_hr_ack() -> ReaderApduHandoverDriver {
+        let mut driver = ReaderApduHandoverDriver::new().0;
+        driver.process_rapdu(&[0x90, 0x00]).expect("aid select ack");
+        driver.process_rapdu(&[0x90, 0x00]).expect("cc select ack");
+        driver
+            .process_rapdu(&[
+                0x00, 0x0F, 0x20, 0x7F, 0xFF, 0x7F, 0xFF, 0x04, 0x06, 0xE1, 0x04, 0x7F, 0xFF, 0x00,
+                0x00, 0x90, 0x00,
+            ])
+            .expect("cc read");
+        driver
+            .process_rapdu(&[0x90, 0x00])
+            .expect("ndef select ack");
+        driver
+            .process_rapdu(&[0x00, 0x1F, 0x90, 0x00])
+            .expect("ndef length");
+        driver
+            .process_rapdu(&[
+                0xD1, 0x02, 0x1A, 0x54, 0x70, 0x10, 0x13, 0x75, 0x72, 0x6E, 0x3A, 0x6E, 0x66, 0x63,
+                0x3A, 0x73, 0x6E, 0x3A, 0x68, 0x61, 0x6E, 0x64, 0x6F, 0x76, 0x65, 0x72, 0x00, 0x00,
+                0x0F, 0xFF, 0xFF, 0x90, 0x00,
+            ])
+            .expect("tp record");
+        driver.process_rapdu(&[0x90, 0x00]).expect("ts write ack");
+        // Te not ready yet → driver must re-read the length
+        let res = driver
+            .process_rapdu(&[0x00, 0x00, 0x90, 0x00])
+            .expect("te length poll");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x00, 0x02]);
+            }
+            _ => panic!("expected Te length re-read, got {res:?}"),
+        }
+        driver
+            .process_rapdu(&[0x00, 0x06, 0x90, 0x00])
+            .expect("te length");
+        driver
+            .process_rapdu(&[0xD1, 0x02, 0x01, 0x54, 0x65, 0x00, 0x90, 0x00])
+            .expect("te data");
+        driver.process_rapdu(&[0x90, 0x00]).expect("hr write ack");
+        driver
+    }
+
+    /// Apple Wallet acks the Hr while its Handover Select is still being
+    /// prepared, returning an empty NDEF message (length 0). The driver must
+    /// poll the length instead of entering the data state with
+    /// `total_length: 0` (which previously looped until the NFC link died).
+    #[test_log::test]
+    fn negotiated_hs_not_ready_polls_then_succeeds() {
+        let mut driver = drive_negotiated_to_hr_ack();
+        for _ in 0..3 {
+            let res = driver
+                .process_rapdu(&[0x00, 0x00, 0x90, 0x00])
+                .expect("hs length poll");
+            match res {
+                ReaderApduProgress::InProgress(bytes) => {
+                    assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x00, 0x02]);
+                }
+                _ => panic!("expected Hs length re-read, got {res:?}"),
+            }
+        }
+        // Hs ready (186 bytes, multipaz transcript) → read data → Done
+        let res = driver
+            .process_rapdu(&[0x00, 0xBA, 0x90, 0x00])
+            .expect("hs length");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x02, 0xBA]);
+            }
+            _ => panic!("expected READ BINARY for Hs data, got {res:?}"),
+        }
+        let res = driver
+            .process_rapdu(&[
+                0x91, 0x02, 0x0F, 0x48, 0x73, 0x15, 0xD1, 0x02, 0x09, 0x61, 0x63, 0x01, 0x01, 0x30,
+                0x01, 0x04, 0x6D, 0x64, 0x6F, 0x63, 0x1C, 0x1E, 0x58, 0x04, 0x69, 0x73, 0x6F, 0x2E,
+                0x6F, 0x72, 0x67, 0x3A, 0x31, 0x38, 0x30, 0x31, 0x33, 0x3A, 0x64, 0x65, 0x76, 0x69,
+                0x63, 0x65, 0x65, 0x6E, 0x67, 0x61, 0x67, 0x65, 0x6D, 0x65, 0x6E, 0x74, 0x6D, 0x64,
+                0x6F, 0x63, 0xA2, 0x00, 0x63, 0x31, 0x2E, 0x30, 0x01, 0x82, 0x01, 0xD8, 0x18, 0x58,
+                0x4B, 0xA4, 0x01, 0x02, 0x20, 0x01, 0x21, 0x58, 0x20, 0x5E, 0xB2, 0x16, 0xAC, 0x43,
+                0x77, 0xD2, 0x9E, 0xA6, 0x1C, 0xF1, 0x3E, 0x71, 0x24, 0x7A, 0x45, 0xC2, 0xE5, 0x60,
+                0xF0, 0x1E, 0xCC, 0x66, 0x22, 0x1E, 0x2D, 0xB7, 0x1C, 0x02, 0xD9, 0x75, 0x05, 0x22,
+                0x58, 0x20, 0x07, 0x29, 0x3E, 0x94, 0x76, 0x00, 0xB0, 0x34, 0x39, 0x8B, 0xBA, 0xE0,
+                0x12, 0xF3, 0xF9, 0xDF, 0x49, 0x69, 0x2B, 0x73, 0x77, 0xE8, 0x8A, 0xDF, 0x46, 0x53,
+                0x24, 0x78, 0xB2, 0x97, 0xE8, 0x64, 0x5A, 0x20, 0x03, 0x01, 0x61, 0x70, 0x70, 0x6C,
+                0x69, 0x63, 0x61, 0x74, 0x69, 0x6F, 0x6E, 0x2F, 0x76, 0x6E, 0x64, 0x2E, 0x62, 0x6C,
+                0x75, 0x65, 0x74, 0x6F, 0x6F, 0x74, 0x68, 0x2E, 0x6C, 0x65, 0x2E, 0x6F, 0x6F, 0x62,
+                0x30, 0x02, 0x1C, 0x01, 0x90, 0x00,
+            ])
+            .expect("hs data");
+        assert!(matches!(res, ReaderApduProgress::Done(_)));
+    }
+
+    /// A holder that never produces the Hs must yield an error once the poll
+    /// budget is exhausted instead of looping forever.
+    #[test_log::test]
+    fn negotiated_hs_never_ready_errors_out() {
+        let mut driver = drive_negotiated_to_hr_ack();
+        for i in 0..MAX_NO_PROGRESS_POLLS {
+            let res = driver
+                .process_rapdu(&[0x00, 0x00, 0x90, 0x00])
+                .unwrap_or_else(|e| panic!("poll {i} should still be in budget: {e}"));
+            assert!(matches!(res, ReaderApduProgress::InProgress(_)));
+        }
+        let res = driver.process_rapdu(&[0x00, 0x00, 0x90, 0x00]);
+        assert!(matches!(
+            res,
+            Err(ReaderApduError::ResponsePollLimitExceeded(_))
+        ));
+    }
+
+    /// The initial NDEF read can also race the holder's HCE service; length 0
+    /// must poll rather than enter the data state.
+    #[test_log::test]
+    fn initial_ndef_not_ready_polls() {
+        let mut driver = ReaderApduHandoverDriver::new().0;
+        driver.process_rapdu(&[0x90, 0x00]).expect("aid select ack");
+        driver.process_rapdu(&[0x90, 0x00]).expect("cc select ack");
+        driver
+            .process_rapdu(&[
+                0x00, 0x0F, 0x20, 0x7F, 0xFF, 0x7F, 0xFF, 0x04, 0x06, 0xE1, 0x04, 0x7F, 0xFF, 0x00,
+                0x00, 0x90, 0x00,
+            ])
+            .expect("cc read");
+        driver
+            .process_rapdu(&[0x90, 0x00])
+            .expect("ndef select ack");
+        let res = driver
+            .process_rapdu(&[0x00, 0x00, 0x90, 0x00])
+            .expect("ndef length poll");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x00, 0x02]);
+            }
+            _ => panic!("expected NDEF length re-read, got {res:?}"),
+        }
+        let res = driver
+            .process_rapdu(&[0x00, 0xE0, 0x90, 0x00])
+            .expect("ndef length");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x02, 0xE0]);
+            }
+            _ => panic!("expected READ BINARY for NDEF data, got {res:?}"),
+        }
+    }
 
     #[test]
     /// Transcript from a manual test
