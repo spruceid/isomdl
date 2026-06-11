@@ -87,10 +87,10 @@ impl ReaderApduHandoverDriver {
     pub fn new() -> (Self, Vec<u8>) {
         let self_ = Self {
             state: ReaderHandoverState::WaitingForAidResponse,
-            // hardcoding the buffer size to the standard short APDU limit for now, but in the
-            // future we might have to make it configurable if we see either the need to use
-            // extended APDUs or encounter discrepancies between platforms.
-            max_buffer_size: 264,
+            // Short-APDU Le is a single byte, so 255 is the largest chunk that
+            // ReadBinary can request without truncating (264 used to encode as
+            // Le=8). Extended APDUs would allow more if ever needed.
+            max_buffer_size: 255,
             no_progress_polls: 0,
         };
         let apdu = Apdu::SelectAid {
@@ -223,8 +223,10 @@ impl ReaderApduHandoverDriver {
                     } else {
                         self.max_buffer_size
                     };
+                    // `offset` is within the NDEF message; the file itself
+                    // starts with the 2-byte NLEN field.
                     let apdu = Apdu::ReadBinary {
-                        slice: offset..offset + chunk_len,
+                        slice: 2 + offset..2 + offset + chunk_len,
                     };
                     self.state = ReaderHandoverState::WaitingForNdefReadResponseData {
                         total_length: *total_length,
@@ -549,6 +551,44 @@ mod test {
                 assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x02, 0xE0]);
             }
             _ => panic!("expected READ BINARY for NDEF data, got {res:?}"),
+        }
+    }
+
+    /// NDEF messages larger than one APDU chunk must be read at the file
+    /// offset (NLEN field + message offset), and each chunk's Le must fit in
+    /// a short APDU.
+    #[test_log::test]
+    fn static_ndef_multi_chunk_read() {
+        let mut driver = ReaderApduHandoverDriver::new().0;
+        driver.process_rapdu(&[0x90, 0x00]).expect("aid select ack");
+        driver.process_rapdu(&[0x90, 0x00]).expect("cc select ack");
+        driver
+            .process_rapdu(&[
+                0x00, 0x0F, 0x20, 0x7F, 0xFF, 0x7F, 0xFF, 0x04, 0x06, 0xE1, 0x04, 0x7F, 0xFF, 0x00,
+                0x00, 0x90, 0x00,
+            ])
+            .expect("cc read");
+        driver
+            .process_rapdu(&[0x90, 0x00])
+            .expect("ndef select ack");
+        // NLEN = 300 → first chunk: 255 bytes at file offset 2
+        let res = driver
+            .process_rapdu(&[0x01, 0x2C, 0x90, 0x00])
+            .expect("ndef length");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x02, 0xFF]);
+            }
+            _ => panic!("expected READ BINARY for first chunk, got {res:?}"),
+        }
+        // 255 bytes received → second chunk: 45 bytes at file offset 257
+        let chunk = [vec![0xAA; 255], vec![0x90, 0x00]].concat();
+        let res = driver.process_rapdu(&chunk).expect("first chunk");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x01, 0x01, 0x2D]);
+            }
+            _ => panic!("expected READ BINARY for second chunk, got {res:?}"),
         }
     }
 
