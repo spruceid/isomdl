@@ -554,6 +554,128 @@ mod test {
         }
     }
 
+    /// Real Apple Wallet Handover Select NDEF (194 bytes), from a device log.
+    /// DeviceEngagement is version "1.1" (ISO 18013-5 Second Edition) with
+    /// the Capabilities field; the BLE OOB record carries only the LE Role.
+    const APPLE_HS_NDEF: &[u8] = &[
+        0x91, 0x02, 0x0F, 0x48, 0x73, 0x15, 0xD1, 0x02, 0x09, 0x61, 0x63, 0x01, 0x01, 0x30, 0x01,
+        0x04, 0x6D, 0x64, 0x6F, 0x63, 0x1A, 0x20, 0x03, 0x01, 0x61, 0x70, 0x70, 0x6C, 0x69, 0x63,
+        0x61, 0x74, 0x69, 0x6F, 0x6E, 0x2F, 0x76, 0x6E, 0x64, 0x2E, 0x62, 0x6C, 0x75, 0x65, 0x74,
+        0x6F, 0x6F, 0x74, 0x68, 0x2E, 0x6C, 0x65, 0x2E, 0x6F, 0x6F, 0x62, 0x30, 0x02, 0x1C, 0x01,
+        0x5C, 0x1E, 0x60, 0x04, 0x69, 0x73, 0x6F, 0x2E, 0x6F, 0x72, 0x67, 0x3A, 0x31, 0x38, 0x30,
+        0x31, 0x33, 0x3A, 0x64, 0x65, 0x76, 0x69, 0x63, 0x65, 0x65, 0x6E, 0x67, 0x61, 0x67, 0x65,
+        0x6D, 0x65, 0x6E, 0x74, 0x6D, 0x64, 0x6F, 0x63, 0xA4, 0x00, 0x63, 0x31, 0x2E, 0x31, 0x01,
+        0x82, 0x01, 0xD8, 0x18, 0x58, 0x4B, 0xA4, 0x01, 0x02, 0x20, 0x01, 0x21, 0x58, 0x20, 0x19,
+        0xB9, 0xEA, 0x44, 0x60, 0x42, 0x2C, 0x7D, 0x9D, 0x31, 0x4B, 0x77, 0x40, 0x80, 0x69, 0xDF,
+        0x57, 0x5B, 0x36, 0xF3, 0x72, 0x03, 0x07, 0xA6, 0xA0, 0x36, 0xFE, 0xC9, 0xEC, 0x6F, 0x52,
+        0x41, 0x22, 0x58, 0x20, 0x6C, 0x33, 0x4A, 0x64, 0x1D, 0x65, 0xE0, 0x6E, 0xDE, 0xB6, 0xC2,
+        0x17, 0xEC, 0x4B, 0xE4, 0xF5, 0x02, 0x4E, 0x3A, 0x63, 0x3A, 0x06, 0x77, 0x5C, 0x86, 0x73,
+        0xA0, 0x31, 0xCE, 0x9F, 0x44, 0x92, 0x05, 0x80, 0x06, 0xA2, 0x03, 0xF5, 0x04, 0xF5,
+    ];
+
+    /// Drives the real Pixel-reader → Apple-Wallet-holder transcript through
+    /// the Hr write ack, leaving the driver waiting for the Hs length.
+    fn drive_apple_to_hr_ack() -> ReaderApduHandoverDriver {
+        let mut driver = ReaderApduHandoverDriver::new().0;
+        driver.process_rapdu(&[0x90, 0x00]).expect("aid select ack");
+        driver.process_rapdu(&[0x90, 0x00]).expect("cc select ack");
+        driver
+            .process_rapdu(&[
+                0x00, 0x0F, 0x20, 0x04, 0x00, 0x04, 0x00, 0x04, 0x06, 0xE1, 0x04, 0x08, 0x02, 0x00,
+                0x00, 0x90, 0x00,
+            ])
+            .expect("cc read");
+        driver
+            .process_rapdu(&[0x90, 0x00])
+            .expect("ndef select ack");
+        driver
+            .process_rapdu(&[0x00, 0x1F, 0x90, 0x00])
+            .expect("ndef length");
+        driver
+            .process_rapdu(&[
+                0xD1, 0x02, 0x1A, 0x54, 0x70, 0x10, 0x13, 0x75, 0x72, 0x6E, 0x3A, 0x6E, 0x66, 0x63,
+                0x3A, 0x73, 0x6E, 0x3A, 0x68, 0x61, 0x6E, 0x64, 0x6F, 0x76, 0x65, 0x72, 0x00, 0x14,
+                0x0F, 0x08, 0x00, 0x90, 0x00,
+            ])
+            .expect("tp record");
+        driver.process_rapdu(&[0x90, 0x00]).expect("ts write ack");
+        driver
+            .process_rapdu(&[0x00, 0x06, 0x90, 0x00])
+            .expect("te length");
+        driver
+            .process_rapdu(&[0xD1, 0x02, 0x01, 0x54, 0x65, 0x00, 0x90, 0x00])
+            .expect("te data");
+        driver.process_rapdu(&[0x90, 0x00]).expect("hr write ack");
+        driver
+    }
+
+    /// Regression: Apple Wallet negotiated handover returns Hs NDEF length = 0
+    /// right after the Hr write (Handover Select not ready yet — a legal TNEP
+    /// "service waiting" state). The driver must NOT loop forever on this.
+    /// On device, the unfixed driver issued 1100+ reads until the NFC link died.
+    #[test_log::test]
+    fn apple_wallet_hs_length_zero_does_not_loop_forever() {
+        let mut driver = drive_apple_to_hr_ack();
+        // Hs length read returns 0 — Hs not ready yet.
+        let mut progress = driver
+            .process_rapdu(&[0x00, 0x00, 0x90, 0x00])
+            .expect("hs length poll");
+        // Real device then answered every further (out-of-range) ReadBinary
+        // with 8 zero bytes; the driver must reach Done or Err within a
+        // bounded number of steps no matter what comes back.
+        let mut steps = 0;
+        loop {
+            if let ReaderApduProgress::Done(_) = progress {
+                break;
+            }
+            steps += 1;
+            assert!(
+                steps < 64,
+                "driver looped {steps}x on Hs length=0 without resolving — regression"
+            );
+            progress = match driver
+                .process_rapdu(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x90, 0x00])
+            {
+                Ok(p) => p,
+                Err(_) => break, // a bounded Err is acceptable (stop-the-bleed)
+            };
+        }
+    }
+
+    /// Success path from the same device log: the Hs length reads 0 while
+    /// Apple prepares its Handover Select, then the real length appears and
+    /// the Hs (194 bytes, DeviceEngagement v1.1) parses to completion.
+    #[test_log::test]
+    fn apple_wallet_hs_polls_then_done() {
+        let mut driver = drive_apple_to_hr_ack();
+        for _ in 0..3 {
+            let res = driver
+                .process_rapdu(&[0x00, 0x00, 0x90, 0x00])
+                .expect("hs length poll");
+            match res {
+                ReaderApduProgress::InProgress(bytes) => {
+                    assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x00, 0x02]);
+                }
+                _ => panic!("expected Hs length re-read, got {res:?}"),
+            }
+        }
+        let res = driver
+            .process_rapdu(&[0x00, 0xC2, 0x90, 0x00])
+            .expect("hs length");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x02, 0xC2]);
+            }
+            _ => panic!("expected READ BINARY for Hs data, got {res:?}"),
+        }
+        let hs_rapdu = [APPLE_HS_NDEF, &[0x90, 0x00]].concat();
+        let res = driver.process_rapdu(&hs_rapdu).expect("hs data");
+        let ReaderApduProgress::Done(carrier_info) = res else {
+            panic!("expected Done, got {res:?}");
+        };
+        assert_eq!(carrier_info.device_engagement.version, "1.1");
+    }
+
     /// NDEF messages larger than one APDU chunk must be read at the file
     /// offset (NLEN field + message offset), and each chunk's Le must fit in
     /// a short APDU.

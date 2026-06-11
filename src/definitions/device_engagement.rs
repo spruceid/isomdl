@@ -225,13 +225,16 @@ impl TryFrom<ciborium::Value> for DeviceEngagement {
                 .map(|(k, v)| Ok((k.into_integer().map_err(|_| Error::CborError)?.into(), v)))
                 .collect::<Result<BTreeMap<_, _>, Error>>()?;
             let device_engagement_version = map.remove(&0);
-            if let Some(ciborium::Value::Text(v)) = device_engagement_version {
-                if v != "1.0" {
+            let version = if let Some(ciborium::Value::Text(v)) = device_engagement_version {
+                // "1.1" (ISO 18013-5 Second Edition) only adds fields a
+                // first-edition reader may ignore (e.g. Capabilities).
+                if !matches!(v.as_str(), "1.0" | "1.1") {
                     return Err(Error::UnsupportedVersion);
                 }
+                v
             } else {
                 return Err(Error::Malformed);
-            }
+            };
             let device_engagement_security = map.remove(&1).ok_or(Error::Malformed)?;
 
             let security: Security =
@@ -257,7 +260,7 @@ impl TryFrom<ciborium::Value> for DeviceEngagement {
             }
 
             let device_engagement = DeviceEngagement {
-                version: "1.0".into(),
+                version,
                 security,
                 device_retrieval_methods,
                 server_retrieval_methods,
