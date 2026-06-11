@@ -223,8 +223,8 @@ mod test {
             .namespaces
             .clone()
             .expect("namespaces does not exist")
-            .iter()
-            .flat_map(|(_, value)| value.iter())
+            .values()
+            .flat_map(|value| value.iter())
             .all(|item| {
                 item.inner.element_value.is_none()
                     || item.inner.element_value == Some(ciborium::Value::Null)
@@ -242,8 +242,8 @@ mod test {
         let has_data = issuer_signed
             .namespaces
             .expect("namespaces does not exist")
-            .iter()
-            .flat_map(|(_, value)| value.iter())
+            .values()
+            .flat_map(|value| value.iter())
             .any(|item| item.inner.element_value != ciborium::Value::Null);
 
         assert!(has_data)
