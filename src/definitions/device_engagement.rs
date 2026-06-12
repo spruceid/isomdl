@@ -225,11 +225,18 @@ impl TryFrom<ciborium::Value> for DeviceEngagement {
                 .map(|(k, v)| Ok((k.into_integer().map_err(|_| Error::CborError)?.into(), v)))
                 .collect::<Result<BTreeMap<_, _>, Error>>()?;
             let device_engagement_version = map.remove(&0);
-            if let Some(ciborium::Value::Text(v)) = device_engagement_version {
-                if v != "1.0" {
+            let version = if let Some(ciborium::Value::Text(v)) = device_engagement_version {
+                if !matches!(v.as_str(), "1.0" | "1.1") {
                     return Err(Error::UnsupportedVersion);
                 }
+                v
             } else {
+                return Err(Error::Malformed);
+            };
+            // 18013-5: when key 5 or 6 is present the version shall be "1.1",
+            // otherwise it shall be "1.0".
+            let has_second_edition_keys = map.contains_key(&5) || map.contains_key(&6);
+            if (version == "1.1") != has_second_edition_keys {
                 return Err(Error::Malformed);
             }
             let device_engagement_security = map.remove(&1).ok_or(Error::Malformed)?;
@@ -257,7 +264,7 @@ impl TryFrom<ciborium::Value> for DeviceEngagement {
             }
 
             let device_engagement = DeviceEngagement {
-                version: "1.0".into(),
+                version,
                 security,
                 device_retrieval_methods,
                 server_retrieval_methods,
@@ -623,6 +630,56 @@ mod test {
         let roundtripped = crate::cbor::from_slice(&bytes).unwrap();
 
         assert_eq!(device_engagement, roundtripped)
+    }
+
+    /// 18013-5: keys 5/6 require version "1.1"; their absence requires "1.0".
+    #[test]
+    fn version_must_match_second_edition_keys() {
+        let key_pair = create_p256_ephemeral_keys().unwrap();
+        let public_key = Tag24::new(key_pair.1).unwrap();
+        let base = DeviceEngagement {
+            version: "1.0".into(),
+            security: Security(1, public_key),
+            device_retrieval_methods: None,
+            server_retrieval_methods: None,
+            protocol_info: None,
+        };
+
+        fn as_map(de: &DeviceEngagement) -> Vec<(ciborium::Value, ciborium::Value)> {
+            match ciborium::Value::from(de.clone()) {
+                ciborium::Value::Map(m) => m,
+                _ => panic!("expected map"),
+            }
+        }
+
+        // 1.0 without keys 5/6: valid
+        let parsed = DeviceEngagement::try_from(ciborium::Value::Map(as_map(&base)))
+            .expect("1.0 without second-edition keys should parse");
+        assert_eq!(parsed.version, "1.0");
+
+        // 1.0 with key 5: invalid
+        let mut m = as_map(&base);
+        m.push((
+            ciborium::Value::Integer(5.into()),
+            ciborium::Value::Array(vec![]),
+        ));
+        assert!(DeviceEngagement::try_from(ciborium::Value::Map(m)).is_err());
+
+        // 1.1 without keys 5/6: invalid
+        let mut m = as_map(&base);
+        m[0].1 = ciborium::Value::Text("1.1".into());
+        assert!(DeviceEngagement::try_from(ciborium::Value::Map(m)).is_err());
+
+        // 1.1 with key 6: valid
+        let mut m = as_map(&base);
+        m[0].1 = ciborium::Value::Text("1.1".into());
+        m.push((
+            ciborium::Value::Integer(6.into()),
+            ciborium::Value::Map(vec![]),
+        ));
+        let parsed = DeviceEngagement::try_from(ciborium::Value::Map(m))
+            .expect("1.1 with second-edition keys should parse");
+        assert_eq!(parsed.version, "1.1");
     }
 
     #[test]

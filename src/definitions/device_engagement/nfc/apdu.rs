@@ -244,7 +244,10 @@ impl<'a> Apdu<'a> {
                         if file_id_raw.len() != 2 {
                             apdu_fail!(ResponseCode::IncorrectLength);
                         }
-                        let file_id = u16::from_be_bytes([file_id_raw[0], file_id_raw[1]]).into();
+                        let file_id = KnownOrRaw::from_raw(u16::from_be_bytes([
+                            file_id_raw[0],
+                            file_id_raw[1],
+                        ]));
                         Apdu::SelectFile {
                             occurrence,
                             control_info,

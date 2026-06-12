@@ -17,8 +17,14 @@ impl<TU: Clone, TK: IntoRaw<TU>> IntoRaw<TU> for KnownOrRaw<TU, TK> {
     }
 }
 
-impl<TU: Clone, TK: IntoRaw<TU> + TryFrom<TU>> From<TU> for KnownOrRaw<TU, TK> {
-    fn from(raw: TU) -> Self {
+impl<TU: Clone, TK: IntoRaw<TU> + TryFrom<TU>> KnownOrRaw<TU, TK> {
+    /// Classify a raw value as [KnownOrRaw::Known] when it maps to a `TK`,
+    /// keeping it [KnownOrRaw::Unknown] otherwise.
+    ///
+    /// Inherent rather than a blanket `From<TU>` impl: a fully generic
+    /// `From` collides with foreign `impl From<X> for <X as Trait>::Type`
+    /// impls under coherence (`time` 0.3.48 introduced one).
+    pub fn from_raw(raw: TU) -> Self {
         match TK::try_from(raw.clone()) {
             Ok(known) => KnownOrRaw::Known(known),
             Err(_) => KnownOrRaw::Unknown(raw),
