@@ -43,7 +43,7 @@ impl<'a> AdPacket<'a> {
             cursor += len;
 
             Some(Self {
-                kind: ad_type.into(),
+                kind: KnownOrRaw::from_raw(ad_type),
                 data: ad_data,
             })
         })
