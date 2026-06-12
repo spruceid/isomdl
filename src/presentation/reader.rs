@@ -212,8 +212,7 @@ impl SessionManager {
             holder_peripheral_server_modes,
         ) = match handover {
             Handover::NFC(carrier_info) => {
-                let device_engagement_bytes = Tag24::new(carrier_info.device_engagement)
-                    .context("Failed to build tag24 device engagement")?;
+                let device_engagement_bytes = carrier_info.device_engagement;
                 let le_role = Some(carrier_info.holder_le_role);
                 let uuid = carrier_info.uuid;
                 let central_client_modes: Vec<_> = device_engagement_bytes
