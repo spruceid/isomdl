@@ -118,7 +118,7 @@ impl ReaderApduHandoverDriver {
     }
 
     /// Override how many consecutive empty reads are tolerated before the
-    /// handover fails (default [MAX_NO_PROGRESS_POLLS]).
+    /// handover fails (default `MAX_NO_PROGRESS_POLLS`, 100).
     pub fn set_max_no_progress_polls(&mut self, max: usize) {
         self.max_no_progress_polls = max;
     }
