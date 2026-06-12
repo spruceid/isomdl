@@ -306,6 +306,12 @@ impl SessionManager {
         let session_transcript_bytes = Tag24::new(session_transcript.clone())
             .context("failed to encode session transcript")?;
 
+        tracing::debug!(
+            "reader SessionTranscript ({} bytes): {:?}",
+            session_transcript_bytes.inner_bytes.len(),
+            session_transcript_bytes.inner_bytes.as_slice()
+        );
+
         //derive session keys
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)
             .context("failed to derive reader session key")?
@@ -422,6 +428,12 @@ impl SessionManager {
 
     fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, Error> {
         let session_data: SessionData = cbor::from_slice(response)?;
+        tracing::debug!(
+            "decrypt_response: {} response bytes, data_present={}, status={:?}",
+            response.len(),
+            session_data.data.is_some(),
+            session_data.status.as_ref()
+        );
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
             Some(r) => r,
@@ -432,6 +444,11 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
+        tracing::debug!(
+            "decrypt_response: decrypted OK, {} plaintext bytes (from {} encrypted)",
+            decrypted_response.len(),
+            encrypted_response.as_ref().len()
+        );
         let device_response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
         Ok(device_response)
     }
