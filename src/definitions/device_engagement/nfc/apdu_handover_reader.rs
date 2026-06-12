@@ -43,19 +43,17 @@ pub enum ReaderApduError {
 /// exceeds TNEP minimum waiting times so no extra delay is inserted.
 const MAX_NO_PROGRESS_POLLS: usize = 100;
 
-fn bump_no_progress(polls: &mut usize) -> Result<(), ReaderApduError> {
+fn bump_no_progress(polls: &mut usize, max: usize) -> Result<(), ReaderApduError> {
     *polls += 1;
-    if *polls > MAX_NO_PROGRESS_POLLS {
-        return Err(ReaderApduError::ResponsePollLimitExceeded(
-            MAX_NO_PROGRESS_POLLS,
-        ));
+    if *polls > max {
+        return Err(ReaderApduError::ResponsePollLimitExceeded(max));
     }
     Ok(())
 }
 
 /// Re-read the 2-byte NDEF length after an empty NDEF message.
-fn poll_empty_ndef(polls: &mut usize) -> Result<ReaderApduProgress, ReaderApduError> {
-    bump_no_progress(polls)?;
+fn poll_empty_ndef(polls: &mut usize, max: usize) -> Result<ReaderApduProgress, ReaderApduError> {
+    bump_no_progress(polls, max)?;
     Ok(ReaderApduProgress::InProgress(
         Apdu::ReadBinary { slice: 0..2 }.to_bytes(),
     ))
@@ -67,8 +65,9 @@ pub struct ReaderApduHandoverDriver {
     /// Maximum amount of bytes in an APDU command or response. Used to be able to transmit large
     /// amount of data in multiple chunks.
     max_buffer_size: usize,
-    /// Consecutive reads that made no progress; see [MAX_NO_PROGRESS_POLLS].
+    /// Consecutive reads that made no progress; see [Self::set_max_no_progress_polls].
     no_progress_polls: usize,
+    max_no_progress_polls: usize,
     /// TNEP minimum waiting time, from the holder's Tp record once parsed.
     t_wait_ms: u32,
     /// See [Self::recommended_delay_ms].
@@ -96,6 +95,7 @@ impl ReaderApduHandoverDriver {
             // Le=8). Extended APDUs would allow more if ever needed.
             max_buffer_size: 255,
             no_progress_polls: 0,
+            max_no_progress_polls: MAX_NO_PROGRESS_POLLS,
             // Conservative default until the holder's Tp record provides WT;
             // also used on the static-handover path, which has no Tp.
             t_wait_ms: 5,
@@ -115,6 +115,12 @@ impl ReaderApduHandoverDriver {
     /// budget bounds polling) but poll the holder harder than TNEP intends.
     pub fn recommended_delay_ms(&self) -> u32 {
         self.pending_delay_ms
+    }
+
+    /// Override how many consecutive empty reads are tolerated before the
+    /// handover fails (default [MAX_NO_PROGRESS_POLLS]).
+    pub fn set_max_no_progress_polls(&mut self, max: usize) {
+        self.max_no_progress_polls = max;
     }
 
     pub fn process_rapdu(&mut self, rapdu: &[u8]) -> Result<ReaderApduProgress, ReaderApduError> {
@@ -164,6 +170,11 @@ impl ReaderApduHandoverDriver {
                         FileId::NdefFile as u16,
                     ));
                 }
+                // Honor the holder's advertised maximum R-APDU size (MLe,
+                // CC bytes 3-4), capped at the short-APDU Le limit and
+                // floored at the T4T minimum.
+                let mle = u16::from_be_bytes([ndef_recv[3], ndef_recv[4]]) as usize;
+                self.max_buffer_size = mle.clamp(15, 255);
                 let apdu = Apdu::SelectFile {
                     occurrence: Occurrence::FirstOrOnly,
                     control_info: ControlInfo::NoResponse,
@@ -185,7 +196,10 @@ impl ReaderApduHandoverDriver {
                 // Empty NDEF message: the holder hasn't produced it yet; re-read.
                 if ndef_len == 0 {
                     self.pending_delay_ms = self.t_wait_ms;
-                    return poll_empty_ndef(&mut self.no_progress_polls);
+                    return poll_empty_ndef(
+                        &mut self.no_progress_polls,
+                        self.max_no_progress_polls,
+                    );
                 }
                 self.no_progress_polls = 0;
                 let chunk_len = if ndef_len <= self.max_buffer_size {
@@ -209,6 +223,10 @@ impl ReaderApduHandoverDriver {
                 if &offset == total_length {
                     self.no_progress_polls = 0;
                     if let Some(tp) = detect_tp_service(&data) {
+                        debug!(
+                            "TNEP service {:?} advertised; t_wait = {} ms",
+                            tp.service_name, tp.t_wait_ms
+                        );
                         self.t_wait_ms = tp.t_wait_ms;
                         // Negotiated handover: write Ts (Service Select)
                         let ts_ndef = generate_ts_ndef(TNEP_HANDOVER_SERVICE_URI)
@@ -236,7 +254,7 @@ impl ReaderApduHandoverDriver {
                         self.no_progress_polls = 0;
                     } else {
                         self.pending_delay_ms = self.t_wait_ms;
-                        bump_no_progress(&mut self.no_progress_polls)?;
+                        bump_no_progress(&mut self.no_progress_polls, self.max_no_progress_polls)?;
                     }
                     let chunk_len = if total_length - offset <= self.max_buffer_size {
                         total_length - offset
@@ -276,7 +294,10 @@ impl ReaderApduHandoverDriver {
                 // Empty NDEF message: the holder hasn't produced the Te yet; re-read.
                 if te_len == 0 {
                     self.pending_delay_ms = self.t_wait_ms;
-                    return poll_empty_ndef(&mut self.no_progress_polls);
+                    return poll_empty_ndef(
+                        &mut self.no_progress_polls,
+                        self.max_no_progress_polls,
+                    );
                 }
                 self.no_progress_polls = 0;
                 let chunk_len = te_len.min(self.max_buffer_size);
@@ -319,7 +340,7 @@ impl ReaderApduHandoverDriver {
                         self.no_progress_polls = 0;
                     } else {
                         self.pending_delay_ms = self.t_wait_ms;
-                        bump_no_progress(&mut self.no_progress_polls)?;
+                        bump_no_progress(&mut self.no_progress_polls, self.max_no_progress_polls)?;
                     }
                     let chunk_len = (total_length - offset).min(self.max_buffer_size);
                     self.state = ReaderHandoverState::WaitingForTeData {
@@ -358,7 +379,10 @@ impl ReaderApduHandoverDriver {
                 // Handover Select is ready); re-read until it appears.
                 if hs_len == 0 {
                     self.pending_delay_ms = self.t_wait_ms;
-                    return poll_empty_ndef(&mut self.no_progress_polls);
+                    return poll_empty_ndef(
+                        &mut self.no_progress_polls,
+                        self.max_no_progress_polls,
+                    );
                 }
                 self.no_progress_polls = 0;
                 let chunk_len = hs_len.min(self.max_buffer_size);
@@ -404,7 +428,7 @@ impl ReaderApduHandoverDriver {
                         self.no_progress_polls = 0;
                     } else {
                         self.pending_delay_ms = self.t_wait_ms;
-                        bump_no_progress(&mut self.no_progress_polls)?;
+                        bump_no_progress(&mut self.no_progress_polls, self.max_no_progress_polls)?;
                     }
                     let chunk_len = (total_length - offset).min(self.max_buffer_size);
                     let hr_bytes = hr_bytes.clone();
@@ -707,6 +731,53 @@ mod test {
             panic!("expected Done, got {res:?}");
         };
         assert_eq!(carrier_info.device_engagement.version, "1.1");
+    }
+
+    /// A holder advertising a small MLe in its CC file must be read in
+    /// correspondingly small chunks.
+    #[test_log::test]
+    fn small_mle_limits_chunk_size() {
+        let mut driver = ReaderApduHandoverDriver::new().0;
+        driver.process_rapdu(&[0x90, 0x00]).expect("aid select ack");
+        driver.process_rapdu(&[0x90, 0x00]).expect("cc select ack");
+        // CC with MLe = 32 (bytes 3-4)
+        driver
+            .process_rapdu(&[
+                0x00, 0x0F, 0x20, 0x00, 0x20, 0x7F, 0xFF, 0x04, 0x06, 0xE1, 0x04, 0x7F, 0xFF, 0x00,
+                0x00, 0x90, 0x00,
+            ])
+            .expect("cc read");
+        driver
+            .process_rapdu(&[0x90, 0x00])
+            .expect("ndef select ack");
+        // NLEN = 100 → first chunk capped at MLe: 32 bytes at file offset 2
+        let res = driver
+            .process_rapdu(&[0x00, 0x64, 0x90, 0x00])
+            .expect("ndef length");
+        match res {
+            ReaderApduProgress::InProgress(bytes) => {
+                assert_eq!(bytes, [0x00, 0xB0, 0x00, 0x02, 0x20]);
+            }
+            _ => panic!("expected READ BINARY capped to MLe, got {res:?}"),
+        }
+    }
+
+    /// The poll budget must be overridable by the caller.
+    #[test_log::test]
+    fn poll_budget_is_configurable() {
+        let mut driver = drive_apple_to_hr_ack();
+        driver.set_max_no_progress_polls(2);
+        for _ in 0..2 {
+            let res = driver
+                .process_rapdu(&[0x00, 0x00, 0x90, 0x00])
+                .expect("within budget");
+            assert!(matches!(res, ReaderApduProgress::InProgress(_)));
+        }
+        let res = driver.process_rapdu(&[0x00, 0x00, 0x90, 0x00]);
+        assert!(matches!(
+            res,
+            Err(ReaderApduError::ResponsePollLimitExceeded(2))
+        ));
     }
 
     /// NDEF messages larger than one APDU chunk must be read at the file

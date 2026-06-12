@@ -67,7 +67,7 @@ pub(super) struct TpServiceParams {
 /// TNEP §4.1.6: T_wait = 2^(WT/4 − 1) ms. Integer approximation, clamped to
 /// [1, 1000] ms so a hostile WT can't stall the reader for ~28 s.
 pub(super) fn tnep_t_wait_ms(wt: u8) -> u32 {
-    (((1u64 << (wt as u64 / 4)) + 1) / 2).clamp(1, 1000) as u32
+    (1u64 << (wt as u64 / 4)).div_ceil(2).clamp(1, 1000) as u32
 }
 
 /// Returns the TNEP service parameters if the NDEF data contains a Well-Known
