@@ -54,14 +54,32 @@ pub enum ReaderHandoverState {
     Done,
 }
 
-/// Returns the TNEP service URI if the NDEF data contains a Well-Known "Tp" (Service Parameter) record.
-pub(super) fn detect_tp_service(data: &[u8]) -> Option<String> {
+/// Default TNEP minimum waiting time when the Tp record omits the WT field.
+pub(super) const DEFAULT_T_WAIT_MS: u32 = 8;
+
+/// TNEP service parameters from a "Tp" (Service Parameter) record.
+pub(super) struct TpServiceParams {
+    pub service_name: String,
+    /// Minimum waiting time before (re-)reading the service's response.
+    pub t_wait_ms: u32,
+}
+
+/// TNEP §4.1.6: T_wait = 2^(WT/4 − 1) ms. Integer approximation, clamped to
+/// [1, 1000] ms so a hostile WT can't stall the reader for ~28 s.
+pub(super) fn tnep_t_wait_ms(wt: u8) -> u32 {
+    (((1u64 << (wt as u64 / 4)) + 1) / 2).clamp(1, 1000) as u32
+}
+
+/// Returns the TNEP service parameters if the NDEF data contains a Well-Known
+/// "Tp" (Service Parameter) record.
+pub(super) fn detect_tp_service(data: &[u8]) -> Option<TpServiceParams> {
     let message = ndef_rs::NdefMessage::decode(data).ok()?;
     let record = message
         .records()
         .iter()
         .find(|r| r.record_type() == b"Tp" && r.tnf() == TNF::WellKnown)?;
-    // Tp payload: [tnep_version (1)][service_name_length (1)][service_name]...
+    // Tp payload: [tnep_version (1)][service_name_length (1)][service_name]
+    //             [comm_mode (1)][WT (1)][N_WAIT (1)][max_msg_size (2)]
     let payload = record.payload();
     if payload.len() < 2 {
         return None;
@@ -70,7 +88,15 @@ pub(super) fn detect_tp_service(data: &[u8]) -> Option<String> {
     if payload.len() < 2 + name_len {
         return None;
     }
-    String::from_utf8(payload[2..2 + name_len].to_vec()).ok()
+    let service_name = String::from_utf8(payload[2..2 + name_len].to_vec()).ok()?;
+    let t_wait_ms = payload
+        .get(2 + name_len + 1)
+        .map(|wt| tnep_t_wait_ms(*wt))
+        .unwrap_or(DEFAULT_T_WAIT_MS);
+    Some(TpServiceParams {
+        service_name,
+        t_wait_ms,
+    })
 }
 
 /// Builds the TNEP Service Select (Ts) NDEF message for the given service URI.
@@ -444,8 +470,18 @@ mod test {
             0x3A, 0x73, 0x6E, 0x3A, 0x68, 0x61, 0x6E, 0x64, 0x6F, 0x76, 0x65, 0x72, 0x00, 0x00,
             0x0F, 0xFF, 0xFF,
         ];
-        let service = detect_tp_service(tp_rapdu);
-        assert_eq!(service.as_deref(), Some(TNEP_HANDOVER_SERVICE_URI));
+        let service = detect_tp_service(tp_rapdu).expect("should detect Tp service");
+        assert_eq!(service.service_name, TNEP_HANDOVER_SERVICE_URI);
+        // multipaz advertises WT=0
+        assert_eq!(service.t_wait_ms, 1);
+    }
+
+    #[test]
+    fn tnep_t_wait_conversion() {
+        assert_eq!(tnep_t_wait_ms(0x00), 1); // 0.5 ms rounded up
+        assert_eq!(tnep_t_wait_ms(0x10), 8); // Google Wallet
+        assert_eq!(tnep_t_wait_ms(0x14), 16); // Apple Wallet
+        assert_eq!(tnep_t_wait_ms(63), 1000); // clamped
     }
 
     #[test]
