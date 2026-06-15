@@ -730,7 +730,43 @@ mod test {
         let ReaderApduProgress::Done(carrier_info) = res else {
             panic!("expected Done, got {res:?}");
         };
-        assert_eq!(carrier_info.device_engagement.version, "1.1");
+        assert_eq!(carrier_info.device_engagement.as_ref().version, "1.1");
+    }
+
+    /// Regression for the Apple Wallet "could not decrypt the response" failure: the
+    /// SessionTranscript's `DeviceEngagementBytes` must reuse the holder's *exact*
+    /// `deviceengagement` record bytes. Apple's DeviceEngagement is a four-key map (ISO 18013-5
+    /// Second Edition keys 5 and 6 alongside 0 and 1); re-serializing the parsed struct dropped
+    /// keys 5/6, so the reader hashed a different SessionTranscript than the holder and derived a
+    /// mismatched AES-GCM session key.
+    #[test_log::test]
+    fn apple_hs_preserves_raw_device_engagement_bytes() {
+        // The `deviceengagement` external record payload sits at the tail of APPLE_HS_NDEF.
+        let raw_de: &[u8] = &APPLE_HS_NDEF[98..];
+        assert_eq!(raw_de.len(), 96);
+        assert_eq!(raw_de[0], 0xA4, "holder DE is a 4-key map {{0,1,5,6}}");
+        // Keys 5 (`05 80`) and 6 (`06 A2 03 F5 04 F5`) close out the map.
+        assert_eq!(
+            raw_de[88..],
+            [0x05, 0x80, 0x06, 0xA2, 0x03, 0xF5, 0x04, 0xF5]
+        );
+
+        let carrier_info =
+            ReaderNegotiatedCarrierInfo::parse_hs_ndef_message(APPLE_HS_NDEF, uuid::Uuid::nil())
+                .expect("parse Apple Hs");
+
+        // The Tag24 fed into the SessionTranscript carries the raw bytes verbatim.
+        assert_eq!(
+            carrier_info.device_engagement.inner_bytes.as_slice(),
+            raw_de,
+            "DeviceEngagementBytes must match the holder's raw DE encoding"
+        );
+
+        // Guard the root cause: re-encoding the parsed struct silently drops keys 5/6,
+        // collapsing the map to two keys — which is what broke decryption.
+        let reencoded = crate::cbor::to_vec(carrier_info.device_engagement.as_ref()).unwrap();
+        assert_eq!(reencoded[0], 0xA2, "re-encoded DE collapses to a 2-key map");
+        assert_ne!(reencoded.as_slice(), raw_de);
     }
 
     /// A holder advertising a small MLe in its CC file must be read in

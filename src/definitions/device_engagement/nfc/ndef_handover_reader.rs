@@ -7,16 +7,13 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 use uuid::Uuid;
 
-use crate::{
-    cbor,
-    definitions::{
-        device_engagement::nfc::{
-            ble::ad_packet::KnownType,
-            ndef_handover::{LeRole, RawPayload, RecordType},
-        },
-        helpers::ByteStr,
-        DeviceEngagement,
+use crate::definitions::{
+    device_engagement::nfc::{
+        ble::ad_packet::KnownType,
+        ndef_handover::{LeRole, RawPayload, RecordType},
     },
+    helpers::{ByteStr, Tag24},
+    DeviceEngagement,
 };
 
 #[derive(Debug, Clone)]
@@ -255,7 +252,21 @@ pub(super) fn parse_te_ndef(data: &[u8]) -> Result<()> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReaderNegotiatedCarrierInfo {
-    pub device_engagement: DeviceEngagement,
+    /// Held as [`Tag24`] built from the *raw* `deviceengagement` NDEF record bytes — not by
+    /// re-encoding a parsed [`DeviceEngagement`] — so the SessionTranscript reuses the holder's
+    /// exact CBOR encoding, which is what the holder hashes when deriving the session keys.
+    ///
+    /// Re-encoding cannot be made byte-identical to the holder in general, so modeling the
+    /// missing fields on [`DeviceEngagement`] would not be a complete fix:
+    /// - The DeviceEngagement CDDL has open extension points (`* uint => RFU`, `* nint => Ext`)
+    ///   that no struct can enumerate. ISO 18013-5 Second Edition keys 5/6 (sent by Apple Wallet)
+    ///   are merely the case seen here; the next holder that includes an Ext key would re-break
+    ///   decryption.
+    /// - CBOR is not canonical by default (map-key ordering, integer width, definite vs.
+    ///   indefinite length), so a conformant holder may legitimately encode differently than this
+    ///   crate's `From<DeviceEngagement>` impl, and re-encoding would normalize it into a
+    ///   divergent byte string.
+    pub device_engagement: Tag24<DeviceEngagement>,
     pub uuid: Uuid,
     pub holder_le_role: LeRole,
     /// Handover Select Message
@@ -323,8 +334,9 @@ impl ReaderNegotiatedCarrierInfo {
             .find(|r| r.record_type() == b"application/vnd.bluetooth.le.oob")
             .ok_or_else(|| anyhow!("Missing BLE OOB carrier capability NDEF record"))?;
 
-        let device_engagement = cbor::from_slice(device_engagement_record.payload())
-            .context("Could not parse device engagement CBOR bytes")?;
+        let device_engagement =
+            Tag24::<DeviceEngagement>::from_bytes(device_engagement_record.payload().to_vec())
+                .context("Could not parse device engagement CBOR bytes")?;
 
         let (holder_le_role, uuid, ble_device_address) =
             parse_cc_record(cc_record).context("failed to parse cc record")?;
