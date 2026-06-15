@@ -252,10 +252,20 @@ pub(super) fn parse_te_ndef(data: &[u8]) -> Result<()> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReaderNegotiatedCarrierInfo {
-    /// Held as [`Tag24`] built from the *raw* `deviceengagement` NDEF record bytes so the
-    /// SessionTranscript reuses the holder's exact CBOR encoding. Re-serializing a parsed
-    /// [`DeviceEngagement`] would drop ISO 18013-5 Second Edition keys 5/6 (which the struct has
-    /// no fields for), diverging from what the holder hashes and breaking session-key derivation.
+    /// Held as [`Tag24`] built from the *raw* `deviceengagement` NDEF record bytes — not by
+    /// re-encoding a parsed [`DeviceEngagement`] — so the SessionTranscript reuses the holder's
+    /// exact CBOR encoding, which is what the holder hashes when deriving the session keys.
+    ///
+    /// Re-encoding cannot be made byte-identical to the holder in general, so modeling the
+    /// missing fields on [`DeviceEngagement`] would not be a complete fix:
+    /// - The DeviceEngagement CDDL has open extension points (`* uint => RFU`, `* nint => Ext`)
+    ///   that no struct can enumerate. ISO 18013-5 Second Edition keys 5/6 (sent by Apple Wallet)
+    ///   are merely the case seen here; the next holder that includes an Ext key would re-break
+    ///   decryption.
+    /// - CBOR is not canonical by default (map-key ordering, integer width, definite vs.
+    ///   indefinite length), so a conformant holder may legitimately encode differently than this
+    ///   crate's `From<DeviceEngagement>` impl, and re-encoding would normalize it into a
+    ///   divergent byte string.
     pub device_engagement: Tag24<DeviceEngagement>,
     pub uuid: Uuid,
     pub holder_le_role: LeRole,
