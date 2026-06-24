@@ -67,6 +67,20 @@ pub struct SessionManager {
     holder_le_role: Option<LeRole>,
     holder_central_client_modes: Vec<CentralClientMode>,
     holder_peripheral_server_modes: Vec<PeripheralServerMode>,
+    /// The doctype this reader requested and expects in the response.
+    ///
+    /// Defaults to the mDL doctype. The `#[serde(default)]` ensures that
+    /// `SessionManager` values serialized before this field existed continue to
+    /// deserialize correctly.
+    #[serde(default = "default_doc_type")]
+    requested_doc_type: String,
+}
+
+/// The mDL doctype, used as the default when no doctype is specified.
+pub const MDL_DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
+
+fn default_doc_type() -> String {
+    MDL_DOC_TYPE.to_string()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -194,13 +208,36 @@ pub enum Handover {
 }
 
 impl SessionManager {
-    /// Establish a session with the device.
+    /// Establish a session with the device, requesting the mDL doctype
+    /// (`org.iso.18013.5.1.mDL`).
     ///
     /// Internally it generates the ephemeral keys,
     /// derives the shared secret, and derives the session keys
     /// (using **Diffie–Hellman key exchange**).
+    ///
+    /// To request a different doctype, use
+    /// [`SessionManager::establish_session_with_doc_type`].
     pub fn establish_session(
         handover: Handover,
+        namespaces: device_request::Namespaces,
+        trust_anchor_registry: TrustAnchorRegistry,
+    ) -> Result<(Self, Vec<u8>, [u8; 16])> {
+        Self::establish_session_with_doc_type(
+            handover,
+            MDL_DOC_TYPE.to_string(),
+            namespaces,
+            trust_anchor_registry,
+        )
+    }
+
+    /// Establish a session with the device, requesting an arbitrary `doc_type`.
+    ///
+    /// Internally it generates the ephemeral keys,
+    /// derives the shared secret, and derives the session keys
+    /// (using **Diffie–Hellman key exchange**).
+    pub fn establish_session_with_doc_type(
+        handover: Handover,
+        doc_type: String,
         namespaces: device_request::Namespaces,
         trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
@@ -331,6 +368,7 @@ impl SessionManager {
             holder_le_role,
             holder_central_client_modes,
             holder_peripheral_server_modes,
+            requested_doc_type: doc_type,
         };
 
         let request = session_manager
@@ -402,7 +440,7 @@ impl SessionManager {
         //     ));
         // }
         let items_request = ItemsRequest {
-            doc_type: "org.iso.18013.5.1.mDL".into(),
+            doc_type: self.requested_doc_type.clone(),
             namespaces,
             request_info: None,
         };
@@ -482,7 +520,7 @@ impl SessionManager {
             .map(|docs| docs.iter().map(|d| d.doc_type.clone()).collect())
             .unwrap_or_default();
 
-        match parse(&device_response) {
+        match parse_with_doc_type(&device_response, &self.requested_doc_type) {
             Ok((document, x5chain, namespaces)) => {
                 validate_response(
                     self.session_transcript.clone(),
@@ -507,10 +545,23 @@ impl SessionManager {
     }
 }
 
+/// Parse and extract the mDL document (`org.iso.18013.5.1.mDL`) from a device
+/// response.
+///
+/// To parse a different doctype, use [`parse_with_doc_type`].
 pub fn parse(
     device_response: &DeviceResponse,
 ) -> Result<(&Document, X5Chain, BTreeMap<String, Value>), Error> {
-    let document = get_document(device_response)?;
+    parse_with_doc_type(device_response, MDL_DOC_TYPE)
+}
+
+/// Parse and extract the document matching `expected_doc_type` from a device
+/// response, along with its x5chain and all namespaces present.
+pub fn parse_with_doc_type<'a>(
+    device_response: &'a DeviceResponse,
+    expected_doc_type: &str,
+) -> Result<(&'a Document, X5Chain, BTreeMap<String, Value>), Error> {
+    let document = get_document(device_response, expected_doc_type)?;
     let header = document.issuer_signed.issuer_auth.unprotected.clone();
     let x5chain = header
         .rest
@@ -520,7 +571,7 @@ pub fn parse(
         .map(X5Chain::from_cbor)
         .ok_or(Error::X5ChainMissing)?
         .map_err(Error::X5ChainParsing)?;
-    let parsed_response = parse_namespaces(device_response)?;
+    let parsed_response = parse_namespaces_with_doc_type(device_response, expected_doc_type)?;
     Ok((document, x5chain, parsed_response))
 }
 
@@ -561,13 +612,16 @@ fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     }
 }
 
-fn get_document(device_response: &DeviceResponse) -> Result<&Document, Error> {
+fn get_document<'a>(
+    device_response: &'a DeviceResponse,
+    expected_doc_type: &str,
+) -> Result<&'a Document, Error> {
     device_response
         .documents
         .as_ref()
         .ok_or(ReaderError::DeviceTransmissionError)?
         .iter()
-        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .find(|doc| doc.doc_type == expected_doc_type)
         .ok_or(ReaderError::DocumentTypeError)
 }
 
@@ -593,19 +647,34 @@ fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Err
     Ok(true)
 }
 
-// TODO: Support other namespaces.
+/// Parse all namespaces from the mDL document (`org.iso.18013.5.1.mDL`) in a
+/// device response.
+///
+/// To parse a different doctype, use [`parse_namespaces_with_doc_type`].
 pub fn parse_namespaces(
     device_response: &DeviceResponse,
 ) -> Result<BTreeMap<String, serde_json::Value>, Error> {
-    let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
-    let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
+    parse_namespaces_with_doc_type(device_response, MDL_DOC_TYPE)
+}
+
+/// Parse every namespace present in the document matching `expected_doc_type`.
+///
+/// This walks all namespaces and all data elements in the document rather than
+/// only extracting the mDL `org.iso.18013.5.1` (+ `org.iso.18013.5.1.aamva`)
+/// namespaces, so it works for arbitrary doctypes (e.g. `org.spruceid.income.1`).
+/// For an mDL response the output shape is unchanged.
+pub fn parse_namespaces_with_doc_type(
+    device_response: &DeviceResponse,
+    expected_doc_type: &str,
+) -> Result<BTreeMap<String, serde_json::Value>, Error> {
     let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
-    let mut namespaces = device_response
+
+    let namespaces = device_response
         .documents
         .as_ref()
         .ok_or(Error::DeviceTransmissionError)?
         .iter()
-        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
+        .find(|doc| doc.doc_type == expected_doc_type)
         .ok_or(Error::DocumentTypeError)?
         .issuer_signed
         .namespaces
@@ -614,41 +683,16 @@ pub fn parse_namespaces(
         .clone()
         .into_inner();
 
-    namespaces
-        .remove("org.iso.18013.5.1")
-        .ok_or(Error::IncorrectNamespace)?
-        .into_inner()
-        .into_iter()
-        .map(|item| item.into_inner())
-        .for_each(|item| {
-            let value = parse_response(item.element_value.clone());
-            if let Ok(val) = value {
-                core_namespace.insert(item.element_identifier, val);
+    for (namespace, items) in namespaces {
+        let mut ns_map = BTreeMap::<String, serde_json::Value>::new();
+        for item in items.into_inner().into_iter().map(|i| i.into_inner()) {
+            if let Ok(val) = parse_response(item.element_value.clone()) {
+                ns_map.insert(item.element_identifier, val);
             }
-        });
-
-    parsed_response.insert(
-        "org.iso.18013.5.1".to_string(),
-        serde_json::to_value(core_namespace)?,
-    );
-
-    if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
-        aamva_response
-            .into_inner()
-            .into_iter()
-            .map(|item| item.into_inner())
-            .for_each(|item| {
-                let value = parse_response(item.element_value.clone());
-                if let Ok(val) = value {
-                    aamva_namespace.insert(item.element_identifier, val);
-                }
-            });
-
-        parsed_response.insert(
-            "org.iso.18013.5.1.aamva".to_string(),
-            serde_json::to_value(aamva_namespace)?,
-        );
+        }
+        parsed_response.insert(namespace, serde_json::to_value(ns_map)?);
     }
+
     Ok(parsed_response)
 }
 
