@@ -33,6 +33,7 @@
 //!   and `SHA-512`.
 use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::collections::BTreeMap;
 
 /// DigestId is a unsigned integer between `0` and `(2^31 - 1)` inclusive.
@@ -78,6 +79,21 @@ pub enum DigestAlgorithm {
 impl DigestId {
     pub fn new(i: i32) -> DigestId {
         DigestId(if i.is_negative() { -i } else { i })
+    }
+}
+
+impl DigestAlgorithm {
+    /// Compute the digest of `data` using this algorithm.
+    ///
+    /// Both issuance (when building [Mso::value_digests]) and reader-side
+    /// verification (when checking disclosed items against those digests) go
+    /// through this single function, so the two sides cannot drift apart.
+    pub fn digest(&self, data: &[u8]) -> Vec<u8> {
+        match self {
+            DigestAlgorithm::SHA256 => Sha256::digest(data).to_vec(),
+            DigestAlgorithm::SHA384 => Sha384::digest(data).to_vec(),
+            DigestAlgorithm::SHA512 => Sha512::digest(data).to_vec(),
+        }
     }
 }
 

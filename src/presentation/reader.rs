@@ -137,6 +137,9 @@ pub enum Error {
     IssuerAuthentication(String),
     #[error("Unable to parse issuer public key")]
     IssuerPublicKey(anyhow::Error),
+    /// A disclosed data element does not match the digest committed to in the MSO.
+    #[error("issuer-signed value digest verification failed: {0}")]
+    IssuerDigestMismatch(String),
 }
 
 impl From<CborError> for Error {
