@@ -21,9 +21,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::{authentication::ResponseAuthenticationOutcome, reader_utils::validate_response};
+use super::{
+    authentication::ResponseAuthenticationOutcome, reader_utils::validate_response_with_options,
+};
 
 use crate::definitions::x509::revocation::RevocationFetcher;
+pub use crate::definitions::x509::validation::ValidationOptions;
 
 use crate::{
     cbor::{self, CborError},
@@ -140,6 +143,12 @@ pub enum Error {
     /// A disclosed data element does not match the digest committed to in the MSO.
     #[error("issuer-signed value digest verification failed: {0}")]
     IssuerDigestMismatch(String),
+    /// The MSO's `validUntil` is in the past relative to the validation time.
+    #[error("MSO is expired")]
+    MsoExpired,
+    /// The MSO's `validFrom` is in the future relative to the validation time.
+    #[error("MSO is not yet valid")]
+    MsoNotYetValid,
 }
 
 impl From<CborError> for Error {
@@ -458,6 +467,10 @@ impl SessionManager {
 
     /// Handle a device response, validating it and checking certificate revocation.
     ///
+    /// Validity checks (certificate windows and the MSO `validityInfo` window) are
+    /// performed against the current time. Use [`Self::handle_response_with_options`]
+    /// to pin the validation time.
+    ///
     /// # Arguments
     /// * `response` - The encrypted device response
     /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
@@ -465,6 +478,24 @@ impl SessionManager {
         &mut self,
         response: &[u8],
         revocation_fetcher: &R,
+    ) -> ResponseAuthenticationOutcome {
+        self.handle_response_with_options(
+            response,
+            revocation_fetcher,
+            &ValidationOptions::default(),
+        )
+        .await
+    }
+
+    /// Like [`Self::handle_response`], but with explicit [`ValidationOptions`].
+    ///
+    /// The `options` control the validation time used both for certificate chain
+    /// validity checks and for the MSO `validityInfo` window check.
+    pub async fn handle_response_with_options<R: RevocationFetcher>(
+        &mut self,
+        response: &[u8],
+        revocation_fetcher: &R,
+        options: &ValidationOptions,
     ) -> ResponseAuthenticationOutcome {
         let mut validated_response = ResponseAuthenticationOutcome::default();
 
@@ -487,7 +518,7 @@ impl SessionManager {
 
         match parse(&device_response) {
             Ok((document, x5chain, namespaces)) => {
-                validate_response(
+                validate_response_with_options(
                     self.session_transcript.clone(),
                     self.trust_anchor_registry.clone(),
                     x5chain,
@@ -496,6 +527,7 @@ impl SessionManager {
                     doc_types,
                     revocation_fetcher,
                     self.e_reader_key_private,
+                    options,
                 )
                 .await
             }
