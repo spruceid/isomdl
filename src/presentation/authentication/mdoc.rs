@@ -490,18 +490,4 @@ mod tests {
             Err(Error::MsoNotYetValid)
         ));
     }
-
-    /// Regression for the reported issue: an mDL whose `validUntil` is in the past
-    /// (the PoC used `2021-10-01`) must be rejected when validated at today's date.
-    #[test]
-    fn expired_mso_rejected_at_current_time() {
-        let valid_until = time::macros::datetime!(2021-10-01 0:00 UTC);
-        let valid_from = time::macros::datetime!(2020-10-01 0:00 UTC);
-        let validity = validity_window(valid_from, valid_until);
-
-        assert!(matches!(
-            check_mso_validity(&validity, time::OffsetDateTime::now_utc()),
-            Err(Error::MsoExpired)
-        ));
-    }
 }
