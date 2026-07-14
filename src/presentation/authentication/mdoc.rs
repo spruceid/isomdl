@@ -21,7 +21,13 @@ use sha2::Sha256;
 use ssi_jwk::Params;
 use ssi_jwk::JWK as SsiJwk;
 
-pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> Result<(), Error> {
+/// Verify issuer data authentication and return the signature-verified [`Mso`].
+///
+/// This checks the COSE_Sign1 signature over the MSO and (when data elements are
+/// disclosed) binds those elements to the digests committed to in the MSO. It does
+/// **not** check the MSO's `validity_info` window — callers should feed the returned
+/// MSO to [`check_mso_validity`] against their validation time.
+pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> Result<Mso, Error> {
     let curve = SupportedCurve::from_certificate(x5chain.end_entity_certificate())
         .ok_or_else(|| Error::IssuerPublicKey(anyhow::anyhow!("unsupported curve")))?;
 
@@ -57,23 +63,48 @@ pub fn issuer_authentication(x5chain: X5Chain, issuer_signed: &IssuerSigned) -> 
         .into_result()
         .map_err(Error::IssuerAuthentication)?;
 
-    // The signature over the MSO is valid. Per ISO/IEC 18013-5 §9.1.2.5, issuer
-    // data authentication also requires binding the disclosed data element values
-    // to the digests committed to in the MSO: recompute the digest of every
-    // returned `IssuerSignedItem` and check it against `ValueDigests`. Without this
-    // a holder could alter element values while reusing the genuine issuer signature.
+    // The signature over the MSO is valid, so parse it (a detached payload can't be
+    // authenticated and is an error).
+    let mso_bytes = issuer_signed
+        .issuer_auth
+        .payload
+        .as_ref()
+        .ok_or(Error::DetachedIssuerAuth)?;
+    let mso = cbor::from_slice::<Tag24<Mso>>(mso_bytes)
+        .map_err(|_| Error::MSOParsing)?
+        .into_inner();
+
+    // Per ISO/IEC 18013-5 §9.1.2.5, issuer data authentication also requires binding
+    // the disclosed data element values to the digests committed to in the MSO:
+    // recompute the digest of every returned `IssuerSignedItem` and check it against
+    // `ValueDigests`. Without this a holder could alter element values while reusing
+    // the genuine issuer signature.
     if let Some(namespaces) = &issuer_signed.namespaces {
-        let mso_bytes = issuer_signed
-            .issuer_auth
-            .payload
-            .as_ref()
-            .ok_or(Error::DetachedIssuerAuth)?;
-        let mso = cbor::from_slice::<Tag24<Mso>>(mso_bytes)
-            .map_err(|_| Error::MSOParsing)?
-            .into_inner();
         verify_value_digests(&mso, namespaces)?;
     }
 
+    Ok(mso)
+}
+
+/// Check the MSO's validity window (ISO/IEC 18013-5 §9.1.2.4).
+///
+/// Returns [`Error::MsoNotYetValid`] if `at` is before `valid_from` and
+/// [`Error::MsoExpired`] if `at` is after `valid_until`. The `signed` timestamp and
+/// `expected_update` are not window bounds and are intentionally not checked here.
+///
+/// This should only be trusted for a signature-verified MSO (i.e. the value returned
+/// by [`issuer_authentication`]); the `validity_info` of an unverified MSO is
+/// attacker-controlled.
+pub fn check_mso_validity(
+    validity: &crate::definitions::ValidityInfo,
+    at: time::OffsetDateTime,
+) -> Result<(), Error> {
+    if validity.valid_from > at {
+        return Err(Error::MsoNotYetValid);
+    }
+    if validity.valid_until < at {
+        return Err(Error::MsoExpired);
+    }
     Ok(())
 }
 
@@ -420,5 +451,43 @@ mod tests {
             matches!(result, Err(Error::IssuerAuthentication(_))),
             "expected the MSO signature check to reject the forged MSO, got: {result:?}"
         );
+    }
+
+    fn validity_window(
+        from: time::OffsetDateTime,
+        until: time::OffsetDateTime,
+    ) -> crate::definitions::ValidityInfo {
+        crate::definitions::ValidityInfo {
+            signed: from,
+            valid_from: from,
+            valid_until: until,
+            expected_update: None,
+        }
+    }
+
+    /// A credential is accepted only while the validation time is within
+    /// `[valid_from, valid_until]` (ISO/IEC 18013-5 §9.1.2.4).
+    #[test]
+    fn mso_validity_window_is_enforced() {
+        let now = time::OffsetDateTime::now_utc();
+        let day = time::Duration::days(1);
+        let validity = validity_window(now - day, now + day);
+
+        // Inside the window.
+        assert!(check_mso_validity(&validity, now).is_ok());
+        assert!(check_mso_validity(&validity, now - day).is_ok());
+        assert!(check_mso_validity(&validity, now + day).is_ok());
+
+        // After `valid_until`.
+        assert!(matches!(
+            check_mso_validity(&validity, now + 2 * day),
+            Err(Error::MsoExpired)
+        ));
+
+        // Before `valid_from`.
+        assert!(matches!(
+            check_mso_validity(&validity, now - 2 * day),
+            Err(Error::MsoNotYetValid)
+        ));
     }
 }
