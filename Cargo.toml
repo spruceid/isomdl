@@ -40,7 +40,7 @@ async-signature = "0.3.0"
 base64 = "0.13"
 pem-rfc7468 = "0.7.0"
 x509-cert = { version = "0.2.4", features = ["pem", "builder"] }
-ssi-jwk = "0.2.1"
+ssi-jwk = { version = "0.4.0", default-features = false, features = ["secp256r1"] }
 isomdl-macros = { version = "0.1.0", path = "macros" }
 clap = { version = "4", features = ["derive"], optional = true }
 clap-stdin = { version = "0.2.1", optional = true }
