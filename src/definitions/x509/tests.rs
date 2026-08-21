@@ -173,6 +173,70 @@ where
     builder
 }
 
+/// A document signer certificate shaped like an ETSI EN 319 411-1 NCP one, as the EU age
+/// verification profile requires, rather than like an ISO/IEC 18013-5 Annex B one.
+///
+/// The differences are the point: no `IssuerAlternativeName`, no CRL distribution point,
+/// and a certificate policy OID instead of an mdoc `extendedKeyUsage`. None of those is an
+/// OID *value* an [`MdocProfile`](crate::definitions::x509::validation::MdocProfile) could
+/// be pointed at — they are checks that do or do not apply.
+///
+/// `0.4.0.2042.1.1` is ETSI's NCP policy identifier.
+pub(crate) fn prepare_etsi_style_signer_certificate<'s, S>(
+    signer_key: &'s S,
+    root_key: &'s S,
+    issuer: Name,
+    validity: Validity,
+    policy: ObjectIdentifier,
+) -> CertificateBuilder<'s, S>
+where
+    S: KeypairRef + DynSignatureAlgorithmIdentifier,
+    S::VerifyingKey: EncodePublicKey,
+{
+    let spki = SubjectPublicKeyInfoOwned::from_key(signer_key.verifying_key()).unwrap();
+    let ski_digest = Sha1::digest(spki.subject_public_key.raw_bytes());
+    let ski_digest_octet = OctetString::new(ski_digest.to_vec()).unwrap();
+
+    let apki = SubjectPublicKeyInfoOwned::from_key(root_key.verifying_key()).unwrap();
+    let aki_digest = Sha1::digest(apki.subject_public_key.raw_bytes());
+    let aki_digest_octet = OctetString::new(aki_digest.to_vec()).unwrap();
+
+    let mut builder = CertificateBuilder::new(
+        x509_cert::builder::Profile::Manual {
+            issuer: Some(issuer),
+        },
+        random::<u64>().into(),
+        validity,
+        "CN=subject,C=US".parse().unwrap(),
+        spki,
+        root_key,
+    )
+    .unwrap();
+
+    builder
+        .add_extension(&SubjectKeyIdentifier(ski_digest_octet))
+        .unwrap();
+    builder
+        .add_extension(&AuthorityKeyIdentifier {
+            key_identifier: Some(aki_digest_octet),
+            ..Default::default()
+        })
+        .unwrap();
+    builder
+        .add_extension(&KeyUsage(KeyUsages::DigitalSignature.into()))
+        .unwrap();
+    builder
+        .add_extension(&x509_cert::ext::pkix::CertificatePolicies(vec![
+            x509_cert::ext::pkix::certpolicy::PolicyInformation {
+                policy_qualifiers: None,
+                policy_identifier: policy,
+            },
+        ]))
+        .unwrap();
+
+    builder
+}
+
 fn setup() -> (Certificate, Certificate) {
     let (root, signer, _, _) = setup_with_crl_url("http://example.com/crl".to_string());
     (root, signer)
@@ -265,6 +329,63 @@ impl TestPki {
         }
     }
 
+    /// A PKI whose document signer follows ETSI EN 319 411-1 NCP rather than
+    /// ISO/IEC 18013-5 Annex B — the shape the EU age verification profile requires.
+    ///
+    /// See [`prepare_etsi_style_signer_certificate`]. The root is still an Annex B IACA,
+    /// which isolates the leaf's profile as the only thing under test.
+    pub fn etsi_av() -> Self {
+        Self::etsi_av_with_policy(validation::NCP_POLICY_OID)
+    }
+
+    /// [`etsi_av`](Self::etsi_av) asserting a certificate policy of your choosing, for
+    /// tests that need a signer whose policy is present but wrong.
+    pub fn etsi_av_with_policy(policy: ObjectIdentifier) -> Self {
+        let root_key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+        let leaf_key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+        let issuer: Name = "CN=issuer,C=US".parse().unwrap();
+        let validity = default_validity();
+
+        let mut prepared_root = prepare_root_certificate(
+            &root_key,
+            issuer.clone(),
+            Self::CRL_URL.to_string(),
+            validity,
+        );
+        let signature: ecdsa::Signature<NistP256> =
+            root_key.sign(&prepared_root.finalize().unwrap());
+        let root: Certificate = prepared_root
+            .assemble(signature.to_der().to_bitstring().unwrap())
+            .unwrap();
+
+        let mut prepared_leaf = prepare_etsi_style_signer_certificate(
+            &leaf_key,
+            &root_key,
+            issuer.clone(),
+            validity,
+            policy,
+        );
+        let signature: ecdsa::Signature<NistP256> =
+            root_key.sign(&prepared_leaf.finalize().unwrap());
+        let leaf: Certificate = prepared_leaf
+            .assemble(signature.to_der().to_bitstring().unwrap())
+            .unwrap();
+
+        assert!(validation::signature::issuer_signed_subject(&leaf, &root));
+
+        Self {
+            root,
+            leaf,
+            root_key,
+            leaf_key,
+            issuer,
+        }
+    }
+
+    /// The distribution point named by every certificate this PKI mints.
+    ///
+    /// The IACA profile makes a CRL distribution point mandatory, so there is no
+    /// "no CRL" configuration to fall back on — [`TestPki::fetcher`] serves this URL.
     pub const CRL_URL: &'static str = "http://example.com/crl";
     /// The subject both [`prepare_root_certificate`] and [`prepare_signer_certificate`]
     /// use, so a chain matches on `countryName` unless a test asks for otherwise.
@@ -441,9 +562,10 @@ pub(crate) fn setup_with_crl_url(
 mod iaca {
     use der::EncodePem;
 
+    use super::{default_validity, ObjectIdentifier, TestPki};
     use crate::definitions::x509::{
         trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
-        validation::ValidationRuleset,
+        validation::{validate, EuAgeVerificationProfile},
         X5Chain,
     };
 
@@ -472,9 +594,210 @@ mod iaca {
             .build()
             .unwrap();
         // Use () to skip CRL checking in tests
-        let outcome = ValidationRuleset::Mdl
-            .validate(&x5chain, &trust_anchor_registry, &())
-            .await;
+        let outcome = validate(
+            &crate::definitions::x509::validation::MdocProfile::MDL.issuer,
+            &x5chain,
+            &trust_anchor_registry,
+            &(),
+        )
+        .await;
         assert!(outcome.success(), "{outcome:?}");
+    }
+
+    /// The EU age verification PKI, as a worked example of [`CertificateProfile`].
+    ///
+    /// `eu.europa.ec.av.1` defines no mdoc key-purpose OIDs at all. Its architecture wants a
+    /// document signer "compliant with ETSI EN 319 411-1 NCP policy", trusted through an
+    /// EC-managed ETSI TS 119 612 Trusted List rather than an IACA root, and ETSI PKIs put
+    /// intermediate CAs between signer and root. None of that is an OID value, so no
+    /// [`MdocProfile`] constant can express it — which is the case the trait exists for.
+    ///
+    /// This is what a consumer writes for a credential we do not ship a profile for.
+    ///
+    /// [`CertificateProfile`]: crate::definitions::x509::validation::CertificateProfile
+    #[test_log::test(tokio::test)]
+    async fn a_custom_profile_can_express_eu_age_verification() {
+        let etsi = TestPki::etsi_av();
+        let outcome = validate(
+            &EuAgeVerificationProfile,
+            &etsi.x5chain(),
+            &etsi.registry(TrustPurpose::Iaca),
+            &(),
+        )
+        .await;
+        assert!(outcome.success(), "{outcome:?}");
+
+        // The policy check has teeth, and tells its two failure modes apart. An mDL signer
+        // carries no certificate policies at all...
+        let mdl = TestPki::generate(
+            TestPki::CRL_URL.to_string(),
+            default_validity(),
+            crate::definitions::x509::validation::MdocProfile::MDL
+                .issuer
+                .document_signer_eku,
+        );
+        let outcome = validate(
+            &EuAgeVerificationProfile,
+            &mdl.x5chain(),
+            &mdl.registry(TrustPurpose::Iaca),
+            &(),
+        )
+        .await;
+        assert!(
+            outcome
+                .errors
+                .iter()
+                .any(|e| e.contains("certificatepolicies: required extension not found")),
+            "{outcome:?}"
+        );
+
+        // ...whereas a signer asserting some *other* policy is a different diagnosis.
+        let wrong_policy =
+            TestPki::etsi_av_with_policy(ObjectIdentifier::new_unwrap("0.4.0.2042.1.2"));
+        let outcome = validate(
+            &EuAgeVerificationProfile,
+            &wrong_policy.x5chain(),
+            &wrong_policy.registry(TrustPurpose::Iaca),
+            &(),
+        )
+        .await;
+        assert!(
+            outcome
+                .errors
+                .iter()
+                .any(|e| e.contains("does not assert the ETSI NCP policy")),
+            "{outcome:?}"
+        );
+    }
+
+    /// The shipped profiles must keep rejecting an ETSI-shaped signer.
+    ///
+    /// Age verification is supported by writing a profile, not by loosening the mdoc ones:
+    /// none of these should ever accept a certificate carrying no mdoc key purpose.
+    #[test_log::test(tokio::test)]
+    async fn the_shipped_profiles_reject_an_etsi_signer() {
+        use crate::definitions::x509::validation::MdocProfile;
+
+        let pki = TestPki::etsi_av();
+        let registry = pki.registry(TrustPurpose::Iaca);
+
+        for (name, profile) in [
+            ("MDL", MdocProfile::MDL),
+            ("AAMVA_MDL", MdocProfile::AAMVA_MDL),
+            ("ISO_23220", MdocProfile::ISO_23220),
+            ("EUDI_PID", MdocProfile::EUDI_PID),
+        ] {
+            let outcome = validate(&profile.issuer, &pki.x5chain(), &registry, &()).await;
+            let joined = outcome.errors.join("; ").to_lowercase();
+            assert!(
+                joined.contains("extendedkeyusage: required extension not found"),
+                "{name} should reject a signer with no mdoc key purpose, got {joined}"
+            );
+        }
+    }
+
+    /// ISO/IEC TS 23220-4 B.2.5 mandates no extensions beyond the key purposes, and the
+    /// Annex C photo ID profile puts revocation out of scope. Requiring
+    /// `cRLDistributionPoints` and `issuerAlternativeName` — as Annex B does — would reject
+    /// a conformant photo ID.
+    #[test_log::test(tokio::test)]
+    async fn iso_23220_accepts_a_signer_without_crl_or_issuer_alt_name() {
+        use crate::definitions::x509::validation::MdocProfile;
+
+        let pki = TestPki::etsi_av();
+        let registry = pki.registry(TrustPurpose::Iaca);
+
+        let joined = validate(
+            &MdocProfile::ISO_23220.issuer,
+            &pki.x5chain(),
+            &registry,
+            &(),
+        )
+        .await
+        .errors
+        .join("; ")
+        .to_lowercase();
+
+        for absent in ["crldistributionpoints", "issueralternativename"] {
+            assert!(
+                !joined.contains(absent),
+                "ISO_23220 should not require {absent}, got {joined}"
+            );
+        }
+        // Whereas Annex B does require both.
+        let joined = validate(&MdocProfile::MDL.issuer, &pki.x5chain(), &registry, &())
+            .await
+            .errors
+            .join("; ")
+            .to_lowercase();
+        for required in ["crldistributionpoints", "issueralternativename"] {
+            assert!(
+                joined.contains(&format!("{required}: required extension not found")),
+                "MDL should require {required}, got {joined}"
+            );
+        }
+    }
+
+    /// ISO/IEC 18013-5 Annex B requires the document signer and the IACA root to carry the
+    /// same `countryName`. Unlike `stateOrProvinceName` this is not configurable — no
+    /// profile may switch it off — so it is checked for every issuer profile.
+    #[test_log::test(tokio::test)]
+    async fn a_document_signer_must_share_its_root_country() {
+        use crate::definitions::x509::validation::MdocProfile;
+
+        let pki = TestPki::generate_with_signer_subject(
+            TestPki::CRL_URL.to_string(),
+            default_validity(),
+            MdocProfile::MDL.issuer.document_signer_eku,
+            "CN=subject,C=DE",
+        );
+
+        let outcome = validate(
+            &MdocProfile::MDL.issuer,
+            &pki.x5chain(),
+            &pki.registry(TrustPurpose::Iaca),
+            &(),
+        )
+        .await;
+
+        // `c` is the short name `countryName` is registered under.
+        assert!(
+            outcome
+                .errors
+                .iter()
+                .any(|e| e.contains("subject 'c' does not match: DE != US")),
+            "a DE signer under a US root should be rejected, got {outcome:?}"
+        );
+    }
+
+    /// AAMVA requires the document signer and root to agree on `stateOrProvinceName`
+    /// even when neither carries it; ISO/IEC 18013-5 only compares when one does.
+    ///
+    /// The test certificates carry no `stateOrProvinceName`, so the two rules disagree
+    /// about them — which is what makes this able to tell them apart at all.
+    #[test_log::test(tokio::test)]
+    async fn aamva_requires_a_state_or_province_iso_does_not() {
+        use crate::definitions::x509::validation::MdocProfile;
+
+        let pki = TestPki::issuer();
+        let registry = pki.registry(TrustPurpose::Iaca);
+
+        let iso = validate(&MdocProfile::MDL.issuer, &pki.x5chain(), &registry, &()).await;
+        assert!(iso.success(), "{iso:?}");
+
+        let aamva = validate(
+            &MdocProfile::AAMVA_MDL.issuer,
+            &pki.x5chain(),
+            &registry,
+            &(),
+        )
+        .await;
+        assert!(
+            aamva
+                .errors
+                .iter()
+                .any(|e| e.to_string().contains("stateOrProvinceName")),
+            "{aamva:?}"
+        );
     }
 }

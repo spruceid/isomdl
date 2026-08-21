@@ -761,9 +761,13 @@ impl SessionManager {
 
         outcome.common_name = Some(x5chain.end_entity_common_name().to_string());
 
-        let x5chain_validation_outcome = x509::validation::ValidationRuleset::MdlReaderOneStep
-            .validate(&x5chain, &self.trusted_verifiers, revocation_fetcher)
-            .await;
+        let x5chain_validation_outcome = x509::validation::validate(
+            &x509::validation::MdocProfile::MDL.reader,
+            &x5chain,
+            &self.trusted_verifiers,
+            revocation_fetcher,
+        )
+        .await;
 
         outcome.errors.extend(x5chain_validation_outcome.errors);
         outcome.revocation_errors = x5chain_validation_outcome.revocation_errors;
