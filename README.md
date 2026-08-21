@@ -132,12 +132,39 @@ stateDiagram
 You can see the full example in [simulated_device_and_reader](tests/simulated_device_and_reader.rs) and a version that
 uses `State` pattern, `Arc` and `Mutex` [simulated_device_and_reader](tests/simulated_device_and_reader_state.rs).
 
+
+### Requesting and validating credentials
+
+A reader asks for one or more credentials, each with its own doc type, and every document in
+the response is validated on its own — they are cryptographically independent, and
+ISO/IEC 18013-5 permits several, including two of the same doc type.
+
+```rust
+let (mut reader, request, _ble_ident) = reader::SessionManager::establish_session(
+    reader::Handover::QR(qr),
+    NonEmptyVec::new(ItemsRequest::mdl(namespaces)),
+    trust_anchors,
+)?;
+
+let outcome = reader
+    .handle_response(&response, &AnyDocType(MdocProfile::MDL), &fetcher)
+    .await;
+```
+
+`ResponseValidationOutcome` splits the response four ways: `documents` passed every check,
+`failed` were evaluated and did not, `rejected` were never asked for and so never validated,
+and `errors` says why the response as a whole is not wholly good. Check `warnings` as well —
+a warning is a check that could not be *completed*, so `DocumentWarning::Revocation` means
+revocation status is unknown, not clear. See the rustdoc on those types for the full
+contract, and [end_to_end.rs](src/presentation/tests/end_to_end.rs) for worked exchanges.
+
 #### Credentials other than the mDL
 
 Annex B's certificate *structure* applies to any mdoc, but its OIDs are mDL-specific — the
 DIS of the second edition says Annex B does not apply when reading other mdoc based
 documents. `MdocProfile` supplies the right ones; `MDL`, `AAMVA_MDL`, `ISO_23220` and
-`EUDI_PID` ship.
+`EUDI_PID` ship. `AnyDocType` applies one profile to everything, a
+`BTreeMap<String, MdocProfile>` selects per doc type and refuses what it does not cover.
 
 A credential whose PKI differs by more than its OIDs needs a `CertificateProfile`
 implementation instead — a chain with intermediate CAs, certificates carrying no mdoc key
@@ -146,5 +173,6 @@ as one such: EU age verification wants an ETSI EN 319 411-1 NCP signer trusted t
 Trusted List, and revokes out of band, so a clean outcome from it does **not** mean "not
 revoked".
 
-Worked examples: [a_custom_profile_can_express_eu_age_verification and the profile
-tests](src/definitions/x509/tests.rs).
+Worked examples of both:
+[an_eudi_pid_presents_end_to_end and a_custom_profile_validates_through_the_reader_api](src/presentation/tests/end_to_end.rs),
+and [a_custom_profile_can_express_eu_age_verification](src/definitions/x509/tests.rs).

@@ -43,6 +43,8 @@ pub mod authentication;
 pub mod device;
 pub mod reader;
 pub mod reader_utils;
+#[cfg(test)]
+pub(crate) mod test_utils;
 
 use anyhow::Result;
 use base64::{decode, encode};
@@ -123,3 +125,7 @@ fn calculate_ble_ident(e_device_key: &Tag24<CoseKey>) -> Result<[u8; 16]> {
 
     Ok(ble_ident)
 }
+
+#[cfg(test)]
+#[path = "tests/end_to_end.rs"]
+mod test;

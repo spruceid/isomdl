@@ -1,14 +1,16 @@
+use isomdl::definitions::x509::validation::{AnyDocType, MdocProfile};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
-use isomdl::definitions::device_request::{DataElements, Namespaces};
+use isomdl::definitions::device_request::{DataElements, ItemsRequest, Namespaces};
+use isomdl::definitions::helpers::NonEmptyVec;
 use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Documents, RequestedItems};
-use isomdl::presentation::{device, reader};
+use isomdl::presentation::{authentication::DocumentError, device, reader};
 use signature::Signer;
 use uuid::Uuid;
 
@@ -105,7 +107,7 @@ fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u
 
     let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
         reader::Handover::QR(qr),
-        requested_elements,
+        NonEmptyVec::new(ItemsRequest::mdl(requested_elements)),
         trust_anchor_registry,
     )
     .context("failed to establish reader session")?;
@@ -126,19 +128,26 @@ async fn handle_request(
         state
             .0
             .clone()
-            .process_session_establishment(session_establishment, Default::default(), &())
+            .process_session_establishment(
+                session_establishment,
+                Default::default(),
+                &AnyDocType(MdocProfile::MDL),
+                &(),
+            )
             .await
             .context("could not process process session establishment")?
     };
     let session_manager = Arc::new(SessionManager {
         inner: Mutex::new(session_manager),
-        items_request: validated_response.items_request.clone(),
+        items_request: validated_response.requested_items(),
         key,
     });
     // Propagate any errors back to the reader
     if let Ok(Some(response)) = get_errors(session_manager.clone()) {
         // Use () to skip CRL checks in tests
-        let validated_response = reader_session_manager.handle_response(&response, &()).await;
+        let validated_response = reader_session_manager
+            .handle_response(&response, &AnyDocType(MdocProfile::MDL), &())
+            .await;
         println!("Reader: {validated_response:?}");
         return Ok(None);
     };
@@ -199,7 +208,28 @@ async fn reader_handle_device_response(
     response: Vec<u8>,
 ) -> Result<()> {
     // Use () to skip CRL checks in tests
-    let validated_response = reader_sm.handle_response(&response, &()).await;
-    println!("Validated Response: {validated_response:?}");
+    let validated = reader_sm
+        .handle_response(&response, &AnyDocType(MdocProfile::MDL), &())
+        .await;
+    println!("Validated Response: {validated:?}");
+
+    // Same expectations as `tests/common.rs` — see the comment there for why the
+    // committed fixture cannot be authenticated. This test previously asserted nothing
+    // at all, so the data round-trip below was untested.
+    assert_eq!(validated.failed.len(), 1, "{validated:?}");
+    let document = &validated.failed[0];
+
+    assert!(
+        document
+            .errors
+            .contains(&DocumentError::NoTrustAnchorsConfigured),
+        "{:?}",
+        document.errors
+    );
+    assert_eq!(document.claimed_doc_type, DOC_TYPE);
+    assert_eq!(
+        document.namespaces[NAMESPACE][AGE_OVER_21_ELEMENT],
+        serde_json::json!(true)
+    );
     Ok(())
 }

@@ -39,8 +39,12 @@ use crate::{
             SessionTranscript,
         },
         x509::{
-            self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry,
-            x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
+            self,
+            revocation::RevocationFetcher,
+            trust_anchor::TrustAnchorRegistry,
+            validation::{CertificateProfile, ProfileSelector},
+            x5chain::X5CHAIN_COSE_HEADER_LABEL,
+            X5Chain,
         },
         CoseKey, DeviceEngagement, DeviceResponse, IssuerSignedItem, Mso, SessionEstablishment,
     },
@@ -58,7 +62,7 @@ use std::num::ParseIntError;
 use uuid::Uuid;
 
 use super::{
-    authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
+    authentication::{DocRequestAuthenticationOutcome, RequestAuthenticationOutcome},
     reader::ReaderAuthentication,
 };
 
@@ -172,11 +176,35 @@ pub enum Error {
     ValidationError,
     #[error("Could not serialize to cbor: {0}")]
     CborError(coset::CoseError),
+    /// A `DeviceRequest` could not be read. Kept apart from the generic CBOR errors
+    /// because the two halves map to different `Status` codes on the wire.
+    #[error("could not parse the device request: {0}")]
+    ParseRequest(#[from] ParseRequestError),
 }
 
 impl From<x509_cert::der::Error> for Error {
     fn from(_value: x509_cert::der::Error) -> Self {
         Error::CertificateError
+    }
+}
+
+/// Why a `DeviceRequest` could not be read. The two cases produce different [`Status`]
+/// codes, so they cannot be collapsed.
+#[derive(Debug, thiserror::Error)]
+pub enum ParseRequestError {
+    #[error("the request bytes are not valid CBOR: {0}")]
+    Decoding(String),
+    #[error("the request is valid CBOR but not a valid DeviceRequest: {0}")]
+    Validation(String),
+}
+
+impl ParseRequestError {
+    /// The status code to report back to the reader.
+    pub fn status(&self) -> Status {
+        match self {
+            Self::Decoding(_) => Status::CborDecodingError,
+            Self::Validation(_) => Status::CborValidationError,
+        }
     }
 }
 
@@ -380,10 +408,11 @@ impl SessionManagerEngaged {
     /// * `session_establishment` - The session establishment data from the reader
     /// * `trusted_verifiers` - Registry of trusted reader CA certificates
     /// * `revocation_fetcher` - HTTP client for CRL verification. Use `&()` to skip CRL checks.
-    pub async fn process_session_establishment<R: RevocationFetcher>(
+    pub async fn process_session_establishment<P: ProfileSelector, R: RevocationFetcher>(
         self,
         session_establishment: SessionEstablishment,
         trusted_verifiers: TrustAnchorRegistry,
+        profiles: &P,
         revocation_fetcher: &R,
     ) -> anyhow::Result<(SessionManager, RequestAuthenticationOutcome)> {
         let e_reader_key = session_establishment.e_reader_key;
@@ -419,6 +448,7 @@ impl SessionManagerEngaged {
                     data: Some(session_establishment.data),
                     status: None,
                 },
+                profiles,
                 revocation_fetcher,
             )
             .await;
@@ -449,38 +479,25 @@ impl SessionManager {
         Ok(key.into())
     }
 
-    fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, PreparedDeviceResponse> {
+    fn parse_request(&self, request: &[u8]) -> Result<DeviceRequest, ParseRequestError> {
         let request: ciborium::Value = cbor::from_slice(request).map_err(|error| {
             tracing::error!("unable to decode DeviceRequest bytes as cbor: {}", error);
-            PreparedDeviceResponse::empty(Status::CborDecodingError)
+            ParseRequestError::Decoding(error.to_string())
         })?;
 
         cbor::from_value(request).map_err(|error| {
             tracing::error!("unable to validate DeviceRequest cbor: {}", error);
-            PreparedDeviceResponse::empty(Status::CborValidationError)
+            ParseRequestError::Validation(error.to_string())
         })
     }
 
-    async fn validate_request<R: RevocationFetcher>(
+    async fn validate_request<P: ProfileSelector, R: RevocationFetcher>(
         &self,
         request: DeviceRequest,
+        profiles: &P,
         revocation_fetcher: &R,
     ) -> RequestAuthenticationOutcome {
-        let items_request: Vec<ItemsRequest> = request
-            .doc_requests
-            .clone()
-            .into_inner()
-            .into_iter()
-            .map(|DocRequest { items_request, .. }| items_request.into_inner())
-            .collect();
-
-        let mut validated_request = RequestAuthenticationOutcome {
-            items_request,
-            common_name: None,
-            reader_authentication: AuthenticationStatus::Unchecked,
-            errors: BTreeMap::new(),
-            warnings: BTreeMap::new(),
-        };
+        let mut validated_request = RequestAuthenticationOutcome::default();
 
         if request.version != DeviceRequest::VERSION {
             tracing::error!(
@@ -489,33 +506,120 @@ impl SessionManager {
                 DeviceRequest::VERSION
             );
             validated_request.errors.insert(
-                "parsing_errors".to_string(),
+                "version_errors".to_string(),
                 json!(vec!["unsupported DeviceRequest version".to_string()]),
             );
         }
-        if let Some(doc_request) = request.doc_requests.first() {
-            let outcome = self
-                .reader_authentication(doc_request.clone(), revocation_fetcher)
-                .await;
-            if outcome.errors.is_empty() {
-                validated_request.reader_authentication = AuthenticationStatus::Valid;
-            } else {
-                validated_request.reader_authentication = AuthenticationStatus::Invalid;
-                tracing::error!("Reader authentication errors: {:#?}", outcome.errors);
-            }
 
-            // Add revocation errors as warnings (non-fatal)
-            if !outcome.revocation_errors.is_empty() {
-                validated_request.warnings.insert(
-                    "revocation_errors".to_string(),
-                    json!(outcome.revocation_errors),
-                );
-            }
+        // A reader may authenticate the request as a whole instead of per doc request.
+        // That signature is not verified here, so say so rather than reporting every doc
+        // request as unauthenticated.
+        if request.reader_auth_all.is_some() {
+            validated_request.warnings.insert(
+                "reader_auth_all".to_string(),
+                json!(vec![
+                    "readerAuthAll is present but cannot be verified; every doc_request is \
+                     reported as unauthenticated"
+                        .to_string()
+                ]),
+            );
+        }
 
-            validated_request.common_name = outcome.common_name;
+        // Each doc request carries its own `readerAuth`, so all of them are checked.
+        for doc_request in request.doc_requests.iter() {
+            validated_request.doc_requests.push(
+                self.validate_doc_request(
+                    doc_request,
+                    request.reader_auth_all.is_some(),
+                    profiles,
+                    revocation_fetcher,
+                )
+                .await,
+            );
         }
 
         validated_request
+    }
+
+    async fn validate_doc_request<P: ProfileSelector, R: RevocationFetcher>(
+        &self,
+        doc_request: &DocRequest,
+        reader_auth_all: bool,
+        profiles: &P,
+        revocation_fetcher: &R,
+    ) -> DocRequestAuthenticationOutcome {
+        let mut validated = DocRequestAuthenticationOutcome {
+            items_request: doc_request.items_request.clone().into_inner(),
+            reader_auth_present: doc_request.reader_auth.is_some(),
+            common_name: None,
+            errors: BTreeMap::new(),
+            warnings: BTreeMap::new(),
+        };
+
+        // Reader auth is optional in 18013-5, so whether its absence is a failure is the
+        // holder's policy. Registering reader roots is how that policy is expressed; a
+        // holder with none cannot check anyway, so it gets a warning.
+        if !validated.reader_auth_present {
+            // `readerAuthAll` means the reader did authenticate, just not per doc request.
+            // We cannot verify it, so a holder that requires reader auth still has to
+            // refuse — but saying the request carries none would misdescribe why.
+            let message = if reader_auth_all {
+                "the request authenticates with readerAuthAll, which this library cannot verify"
+            } else {
+                "the request does not contain reader auth"
+            };
+            if self.trusted_verifiers.anchors.is_empty() {
+                validated
+                    .warnings
+                    .insert("reader_authentication".to_string(), json!(vec![message]));
+            } else {
+                validated.errors.insert(
+                    "reader_authentication_errors".to_string(),
+                    json!(vec![message]),
+                );
+            }
+            return validated;
+        }
+
+        // The reader's certificate profile follows the credential it is asking for, so
+        // each doc request is checked under its own.
+        let Some(profile) = profiles.reader_profile_for(&validated.items_request.doc_type) else {
+            // Its own key: a profile the operator never configured is a deployment
+            // error, not a reader that failed to authenticate.
+            validated.errors.insert(
+                "profile_errors".to_string(),
+                json!(vec![format!(
+                    "no certificate profile is configured for doc type {}",
+                    validated.items_request.doc_type
+                )]),
+            );
+            return validated;
+        };
+
+        let outcome = self
+            .reader_authentication(doc_request.clone(), profile, revocation_fetcher)
+            .await;
+
+        validated.common_name = outcome.common_name;
+
+        if !outcome.errors.is_empty() {
+            tracing::error!("Reader authentication errors: {:#?}", outcome.errors);
+            validated.errors.insert(
+                "reader_authentication_errors".to_string(),
+                json!(outcome.errors),
+            );
+        }
+
+        // Not being able to *check* revocation is an infrastructure problem; an actually
+        // revoked certificate arrives in `outcome.errors` above.
+        if !outcome.revocation_errors.is_empty() {
+            validated.warnings.insert(
+                "revocation_errors".to_string(),
+                json!(outcome.revocation_errors),
+            );
+        }
+
+        validated
     }
 
     /// When the device is ready to respond, it prepares the response specifying the permitted items.
@@ -533,22 +637,30 @@ impl SessionManager {
     /// let signature = sign(&payload);
     /// session_manager.submit_next_signature(signature);
     /// ```
+    /// Prepare the response and advance the session to [State::Signing].
+    ///
+    /// Note that [`DeviceSession::prepare_response`] shares this name and takes `&self`,
+    /// so with that trait in scope `self.prepare_response(..)` resolves to *it* rather
+    /// than here — see its documentation.
     pub fn prepare_response(&mut self, requests: &RequestedItems, permitted: PermittedItems) {
         let prepared_response = DeviceSession::prepare_response(self, requests, permitted);
         self.state = State::Signing(prepared_response);
     }
 
-    async fn handle_decoded_request<R: RevocationFetcher>(
+    async fn handle_decoded_request<P: ProfileSelector, R: RevocationFetcher>(
         &mut self,
         request: SessionData,
+        profiles: &P,
         revocation_fetcher: &R,
     ) -> RequestAuthenticationOutcome {
         let mut validated_request = RequestAuthenticationOutcome::default();
         let data = match request.data {
             Some(d) => d,
             None => {
+                // The reader closed the session rather than sending a malformed request;
+                // that is a session event, not a parsing failure.
                 validated_request.errors.insert(
-                    "parsing_errors".to_string(),
+                    "session_errors".to_string(),
                     json!(vec![
                         "no mdoc requests received, assume session can be terminated".to_string()
                     ]),
@@ -575,12 +687,18 @@ impl SessionManager {
         let request = match self.parse_request(&decrypted_request) {
             Ok(r) => r,
             Err(e) => {
-                self.state = State::Signing(e);
-                return RequestAuthenticationOutcome::default();
+                // The state still advances to `Signing`, so the holder can send the
+                // reader a signed error response, and the failure is also reported here.
+                self.state = State::Signing(PreparedDeviceResponse::empty(e.status()));
+                validated_request
+                    .errors
+                    .insert("parsing_errors".to_string(), json!(vec![e.to_string()]));
+                return validated_request;
             }
         };
 
-        self.validate_request(request, revocation_fetcher).await
+        self.validate_request(request, profiles, revocation_fetcher)
+            .await
     }
 
     /// Handle a request from the reader.
@@ -594,9 +712,10 @@ impl SessionManager {
     /// # Arguments
     /// * `request` - The raw CBOR-encoded request bytes
     /// * `revocation_fetcher` - HTTP client for CRL verification. Use `&()` to skip CRL checks.
-    pub async fn handle_request<R: RevocationFetcher>(
+    pub async fn handle_request<P: ProfileSelector, R: RevocationFetcher>(
         &mut self,
         request: &[u8],
+        profiles: &P,
         revocation_fetcher: &R,
     ) -> RequestAuthenticationOutcome {
         let mut validated_request = RequestAuthenticationOutcome::default();
@@ -609,7 +728,7 @@ impl SessionManager {
                 return validated_request;
             }
         };
-        self.handle_decoded_request(session_data, revocation_fetcher)
+        self.handle_decoded_request(session_data, profiles, revocation_fetcher)
             .await
     }
 
@@ -652,30 +771,7 @@ impl SessionManager {
                 State::Signing(mut p) => {
                     p.submit_next_signature(signature);
                     if p.is_complete() {
-                        let response = p.finalize_response();
-                        let bytes = cbor::to_vec(&response)?;
-                        let response2: DeviceResponse = cbor::from_slice(&bytes).unwrap();
-                        let bytes2 = cbor::to_vec(&response2)?;
-                        assert_eq!(bytes, bytes2);
-                        let mut status: Option<session::Status> = None;
-                        let response_bytes = cbor::to_vec(&response)?;
-                        let encrypted_response = session::encrypt_device_data(
-                            &self.sk_device.into(),
-                            &response_bytes,
-                            &mut self.device_message_counter,
-                        )
-                        .unwrap_or_else(|_e| {
-                            //tracing::warn!("unable to encrypt response: {}", e);
-                            status = Some(session::Status::SessionEncryptionError);
-                            Default::default()
-                        });
-                        let data = if status.is_some() {
-                            None
-                        } else {
-                            Some(encrypted_response.into())
-                        };
-                        let session_data = SessionData { status, data };
-                        let encoded_response = crate::cbor::to_vec(&session_data)?;
+                        let encoded_response = self.finalize_and_encrypt(p)?;
                         self.state = State::ReadyToRespond(encoded_response);
                     } else {
                         self.state = State::Signing(p)
@@ -685,6 +781,37 @@ impl SessionManager {
             }
         }
         Ok(())
+    }
+
+    /// Finalize, encode and session-encrypt a fully signed response.
+    ///
+    /// Extracted verbatim from `submit_next_signature` so that `retrieve_response` can
+    /// finalize a prepared response that needs no signatures.
+    fn finalize_and_encrypt(&mut self, p: PreparedDeviceResponse) -> anyhow::Result<Vec<u8>> {
+        let response = p.finalize_response();
+        let bytes = cbor::to_vec(&response)?;
+        let response2: DeviceResponse = cbor::from_slice(&bytes).unwrap();
+        let bytes2 = cbor::to_vec(&response2)?;
+        assert_eq!(bytes, bytes2);
+        let mut status: Option<session::Status> = None;
+        let response_bytes = cbor::to_vec(&response)?;
+        let encrypted_response = session::encrypt_device_data(
+            &self.sk_device.into(),
+            &response_bytes,
+            &mut self.device_message_counter,
+        )
+        .unwrap_or_else(|_e| {
+            //tracing::warn!("unable to encrypt response: {}", e);
+            status = Some(session::Status::SessionEncryptionError);
+            Default::default()
+        });
+        let data = if status.is_some() {
+            None
+        } else {
+            Some(encrypted_response.into())
+        };
+        let session_data = SessionData { status, data };
+        Ok(crate::cbor::to_vec(&session_data)?)
     }
 
     /// Identifies if the response is ready.
@@ -700,17 +827,34 @@ impl SessionManager {
     /// In that case, it will return the response
     /// and change the internal state to [State::AwaitingRequest]
     /// where it can accept new a request from the reader.
+    ///
+    /// It also returns [Some] for a *signature-free* response — an undecodable request, or
+    /// a [`prepare_response`](Self::prepare_response) the holder permitted nothing from.
+    /// Neither reaches [State::ReadyToRespond], and both are responses the reader is
+    /// entitled to receive. Driving
+    /// [`get_next_signature_payload`](Self::get_next_signature_payload) to `None` and then
+    /// calling this method is correct for every path.
     pub fn retrieve_response(&mut self) -> Option<Vec<u8>> {
-        if self.response_ready() {
-            // Replace state with AwaitingRequest.
-            let state = std::mem::take(&mut self.state);
-            match state {
-                State::ReadyToRespond(r) => Some(r),
-                // Unreachable as the state variant has already been checked.
-                _ => unreachable!(),
+        // Taking the state leaves `AwaitingRequest` behind, which is what we want once
+        // the response has been handed out; any other state is put back untouched.
+        match std::mem::take(&mut self.state) {
+            State::ReadyToRespond(r) => Some(r),
+            // A prepared response with nothing left to sign. `submit_next_signature` is
+            // the only other path that finalizes, so without this the reader would wait
+            // forever instead of receiving the error the spec says to send.
+            State::Signing(prepared) if prepared.is_complete() => {
+                match self.finalize_and_encrypt(prepared) {
+                    Ok(encoded) => Some(encoded),
+                    Err(e) => {
+                        tracing::error!("unable to finalize the response: {e}");
+                        None
+                    }
+                }
             }
-        } else {
-            None
+            other => {
+                self.state = other;
+                None
+            }
         }
     }
 
@@ -719,12 +863,20 @@ impl SessionManager {
     /// This validates the reader's certificate chain and checks for revocation
     /// if a CRL fetcher is configured.
     ///
+    /// # Absent `readerAuth`
+    ///
+    /// Reader authentication is optional in ISO/IEC 18013-5, but this function has no way
+    /// to return "nothing to authenticate" and reports the absence as an error. A direct
+    /// caller must treat that as unauthenticated rather than as a failure; the crate's own
+    /// request validation checks for the field first and never calls this without it.
+    ///
     /// # Arguments
     /// * `doc_request` - The document request containing reader authentication
     /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip CRL checks.
-    pub async fn reader_authentication<R: RevocationFetcher>(
+    pub async fn reader_authentication<P: CertificateProfile, R: RevocationFetcher>(
         &self,
         doc_request: DocRequest,
+        profile: P,
         revocation_fetcher: &R,
     ) -> ReaderAuthOutcome {
         let mut outcome = ReaderAuthOutcome::default();
@@ -762,7 +914,7 @@ impl SessionManager {
         outcome.common_name = Some(x5chain.end_entity_common_name().to_string());
 
         let x5chain_validation_outcome = x509::validation::validate(
-            &x509::validation::MdocProfile::MDL.reader,
+            &profile,
             &x5chain,
             &self.trusted_verifiers,
             revocation_fetcher,
@@ -946,6 +1098,18 @@ pub trait DeviceSession {
     fn device_auth_type(&self) -> DeviceAuthType;
 
     /// Prepare the response based on the requested items and permitted ones.
+    ///
+    /// # Shadowing hazard
+    ///
+    /// This takes `&self`, while [`SessionManager::prepare_response`] — the one that
+    /// advances the session — takes `&mut self`. Method resolution tries `&T` before
+    /// `&mut T`, so on a [`SessionManager`] with this trait in scope,
+    /// `manager.prepare_response(..)` binds *here*, and the returned value is the only
+    /// evidence anything happened. The `#[must_use]` makes discarding it a compile
+    /// error; if you meant the session, spell it
+    /// `SessionManager::prepare_response(&mut manager, ..)`.
+    #[must_use = "this returns a prepared response without advancing the session; \
+                  for a `SessionManager`, call `SessionManager::prepare_response` instead"]
     fn prepare_response(
         &self,
         requests: &RequestedItems,
@@ -1306,123 +1470,5 @@ impl TryFrom<String> for AgeOver {
 }
 
 #[cfg(test)]
-mod test {
-    use crate::definitions::helpers::ByteStr;
-
-    use super::*;
-    use crate::definitions::mso::DigestId;
-    use serde_json::json;
-
-    #[test]
-    fn filter_permitted() {
-        let requested = serde_json::from_value(json!([
-            {
-                "docType": "doc_type_1",
-                "nameSpaces": {
-                    "namespace_1": {
-                        "element_1": false,
-                        "element_2": false,
-                    },
-                    "namespace_2": {
-                        "element_1": false,
-                    }
-                }
-            },
-            {
-                "docType": "doc_type_2",
-                "nameSpaces": {
-                    "namespace_1": {
-                        "element_1": false,
-                    }
-                }
-            }
-        ]))
-        .unwrap();
-        let permitted = serde_json::from_value(json!({
-            "doc_type_1": {
-                "namespace_1": [
-                    "element_1",
-                    "element_3"
-                ],
-                "namespace_3": [
-                    "element_1",
-                ]
-            },
-            "doc_type_3": {
-                "namespace_1": [
-                    "element_1",
-                ],
-            }
-        }))
-        .unwrap();
-        let expected: PermittedItems = serde_json::from_value(json!({
-            "doc_type_1": {
-                "namespace_1": [
-                    "element_1",
-                ],
-            }
-        }))
-        .unwrap();
-
-        let filtered = super::filter_permitted(&requested, permitted);
-
-        assert_eq!(expected, filtered);
-    }
-
-    #[test]
-    fn test_parse_age_from_element_identifier() {
-        let element_identifier = "age_over_88".to_string();
-        let age = parse_age_from_element_identifier(element_identifier).unwrap();
-        assert_eq!(age, 88)
-    }
-
-    #[test]
-    fn test_age_attestation_response() {
-        let requested_element_identifier = "age_over_23".to_string();
-        let element_identifier1 = "age_over_18".to_string();
-        let element_identifier2 = "age_over_22".to_string();
-        let element_identifier3 = "age_over_21".to_string();
-
-        let random = vec![1, 2, 3, 4, 5];
-        let issuer_signed_item1 = IssuerSignedItem {
-            digest_id: DigestId::new(1),
-            random: ByteStr::from(random.clone()),
-            element_identifier: element_identifier1.clone(),
-            element_value: ciborium::Value::Bool(true),
-        };
-
-        let issuer_signed_item2 = IssuerSignedItem {
-            digest_id: DigestId::new(2),
-            random: ByteStr::from(random.clone()),
-            element_identifier: element_identifier2.clone(),
-            element_value: ciborium::Value::Bool(false),
-        };
-
-        let issuer_signed_item3 = IssuerSignedItem {
-            digest_id: DigestId::new(3),
-            random: ByteStr::from(random),
-            element_identifier: element_identifier3.clone(),
-            element_value: ciborium::Value::Bool(false),
-        };
-
-        let issuer_item1 = Tag24::new(issuer_signed_item1).unwrap();
-        let issuer_item2 = Tag24::new(issuer_signed_item2).unwrap();
-        let issuer_item3 = Tag24::new(issuer_signed_item3).unwrap();
-        let mut issuer_items = NonEmptyMap::new(element_identifier1, issuer_item1);
-        issuer_items.insert(element_identifier2, issuer_item2.clone());
-        issuer_items.insert(element_identifier3, issuer_item3);
-
-        let result = nearest_age_attestation(requested_element_identifier, issuer_items)
-            .expect("failed to process age attestation request");
-
-        assert_eq!(result.unwrap().inner_bytes, issuer_item2.inner_bytes);
-    }
-
-    #[test]
-    fn test_str_to_u8() {
-        let wib = "8";
-        let x = wib.as_bytes();
-
-        println!("{x:?}");
-    }
-}
+#[path = "tests/device.rs"]
+mod test;
