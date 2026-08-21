@@ -1,105 +1,33 @@
 use std::fmt;
 
+/// A validation error tagged with the certificate it was found on.
+///
+/// The tag is a plain label rather than an enum because certificate profiles name their own
+/// certificates: see [`CertificateProfile::end_entity_name`].
+///
+/// [`CertificateProfile::end_entity_name`]: super::CertificateProfile::end_entity_name
 #[derive(Debug, Clone, Copy)]
 pub struct ErrorWithContext<E> {
-    context: ErrorContext,
+    context: &'static str,
     error: E,
 }
 
 impl<E: fmt::Display> ErrorWithContext<E> {
+    pub fn labelled(context: &'static str, error: E) -> String {
+        Self { context, error }.to_string()
+    }
+
     pub fn comparison(error: E) -> String {
-        Self {
-            context: ErrorContext::Comparison,
-            error,
-        }
-        .to_string()
-    }
-
-    pub fn ds(error: E) -> String {
-        Self {
-            context: ErrorContext::DocumentSigner,
-            error,
-        }
-        .to_string()
-    }
-
-    pub fn iaca(error: E) -> String {
-        Self {
-            context: ErrorContext::Iaca,
-            error,
-        }
-        .to_string()
-    }
-
-    pub fn reader(error: E) -> String {
-        Self {
-            context: ErrorContext::Reader,
-            error,
-        }
-        .to_string()
-    }
-
-    pub fn reader_ca(error: E) -> String {
-        Self {
-            context: ErrorContext::ReaderCa,
-            error,
-        }
-        .to_string()
-    }
-
-    pub fn vical_signer(error: E) -> String {
-        Self {
-            context: ErrorContext::VicalSigner,
-            error,
-        }
-        .to_string()
-    }
-
-    pub fn vical_authority(error: E) -> String {
-        Self {
-            context: ErrorContext::VicalAuthority,
-            error,
-        }
-        .to_string()
+        Self::labelled("Comparison", error)
     }
 
     pub fn chain(error: E) -> String {
-        Self {
-            context: ErrorContext::Chain,
-            error,
-        }
-        .to_string()
+        Self::labelled("Certificate chain", error)
     }
 }
 
 impl<E: fmt::Display> fmt::Display for ErrorWithContext<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} error: {}",
-            match self.context {
-                ErrorContext::Comparison => "Comparison",
-                ErrorContext::DocumentSigner => "DS certificate",
-                ErrorContext::Iaca => "IACA certificate",
-                ErrorContext::Reader => "Reader certificate",
-                ErrorContext::ReaderCa => "Reader CA certificate",
-                ErrorContext::VicalSigner => "VICAL signer certificate",
-                ErrorContext::VicalAuthority => "VICAL authority certificate",
-                ErrorContext::Chain => "Certificate chain",
-            },
-            self.error,
-        )
+        write!(f, "{} error: {}", self.context, self.error)
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ErrorContext {
-    Comparison,
-    DocumentSigner,
-    Iaca,
-    Reader,
-    ReaderCa,
-    VicalSigner,
-    VicalAuthority,
-    Chain,
 }

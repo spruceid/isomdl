@@ -1,7 +1,7 @@
 use der::DecodePem;
 use isomdl::definitions::x509::{
     trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
-    validation::ValidationRuleset,
+    validation::MdocProfile,
     X5Chain,
 };
 use x509_cert::Certificate;
@@ -27,11 +27,16 @@ pub async fn validate(
     let x5chain = X5Chain::builder().with_pem_certificate(signer)?.build()?;
 
     // Use () to skip CRL checks in CLI tool for now
-    let outcome = match rules {
-        RuleSet::Iaca => ValidationRuleset::Mdl,
-        RuleSet::Aamva => ValidationRuleset::AamvaMdl,
-    }
-    .validate(&x5chain, &trust_anchor_registry, &())
+    let profile = match rules {
+        RuleSet::Iaca => MdocProfile::MDL.issuer,
+        RuleSet::Aamva => MdocProfile::AAMVA_MDL.issuer,
+    };
+    let outcome = isomdl::definitions::x509::validation::validate(
+        &profile,
+        &x5chain,
+        &trust_anchor_registry,
+        &(),
+    )
     .await;
 
     Ok(outcome.errors)

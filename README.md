@@ -132,3 +132,19 @@ stateDiagram
 You can see the full example in [simulated_device_and_reader](tests/simulated_device_and_reader.rs) and a version that
 uses `State` pattern, `Arc` and `Mutex` [simulated_device_and_reader](tests/simulated_device_and_reader_state.rs).
 
+#### Credentials other than the mDL
+
+Annex B's certificate *structure* applies to any mdoc, but its OIDs are mDL-specific — the
+DIS of the second edition says Annex B does not apply when reading other mdoc based
+documents. `MdocProfile` supplies the right ones; `MDL`, `AAMVA_MDL`, `ISO_23220` and
+`EUDI_PID` ship.
+
+A credential whose PKI differs by more than its OIDs needs a `CertificateProfile`
+implementation instead — a chain with intermediate CAs, certificates carrying no mdoc key
+purpose, revocation published somewhere other than a CRL. `EuAgeVerificationProfile` ships
+as one such: EU age verification wants an ETSI EN 319 411-1 NCP signer trusted through a
+Trusted List, and revokes out of band, so a clean outcome from it does **not** mean "not
+revoked".
+
+Worked examples: [a_custom_profile_can_express_eu_age_verification and the profile
+tests](src/definitions/x509/tests.rs).
