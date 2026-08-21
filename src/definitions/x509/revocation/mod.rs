@@ -47,8 +47,9 @@ use x509_cert::{
 use super::validation::ValidationOptions;
 
 // CRL extension OIDs allowed by ISO 18013-5 Table B.10.
-const OID_AUTHORITY_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.35");
-const OID_CRL_NUMBER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.20");
+pub(crate) const OID_AUTHORITY_KEY_IDENTIFIER: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("2.5.29.35");
+pub(crate) const OID_CRL_NUMBER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.20");
 
 /// CRL extensions allowed by the ISO 18013-5 CRL profile (Table B.10).
 /// The profile states "Further extensions shall not be present."
