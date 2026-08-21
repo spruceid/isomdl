@@ -68,6 +68,22 @@ pub struct ItemsRequest {
     pub request_info: Option<BTreeMap<String, ciborium::Value>>,
 }
 
+impl ItemsRequest {
+    /// A request for an mDL — the common case, in one line.
+    pub fn mdl(namespaces: Namespaces) -> Self {
+        Self::new(crate::definitions::MDL_DOC_TYPE, namespaces)
+    }
+
+    /// A request for any doc type.
+    pub fn new(doc_type: impl Into<DocType>, namespaces: Namespaces) -> Self {
+        Self {
+            doc_type: doc_type.into(),
+            namespaces,
+            request_info: None,
+        }
+    }
+}
+
 /// Represents a use case.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

@@ -13,16 +13,18 @@
 //!
 //! You can view examples in `tests` directory in `simulated_device_and_reader.rs`, for a basic example and
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+
+use crate::definitions::x509::validation::ProfileSelector;
 
 use anyhow::{anyhow, Context, Result};
-use coset::Label;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::{
-    authentication::ResponseAuthenticationOutcome, reader_utils::validate_response_with_options,
+    authentication::{ResponseError, ResponseValidationOutcome},
+    reader_utils::{validate_response, ReaderValidationConfig},
 };
 
 use crate::definitions::x509::revocation::RevocationFetcher;
@@ -40,16 +42,15 @@ use crate::{
             self, DeviceRequest, DeviceRequestInfoBytes, DocRequest, ItemsRequest,
             ItemsRequestBytesAll,
         },
-        device_response::Document,
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
         session::{
             self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret,
             SessionEstablishment,
         },
-        x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain},
+        x509::trust_anchor::TrustAnchorRegistry,
         DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
     },
-    presentation::reader::{device_request::ItemsRequestBytes, Error as ReaderError},
+    presentation::reader::device_request::ItemsRequestBytes,
 };
 
 /// The main state of the reader.
@@ -70,6 +71,18 @@ pub struct SessionManager {
     holder_le_role: Option<LeRole>,
     holder_central_client_modes: Vec<CentralClientMode>,
     holder_peripheral_server_modes: Vec<PeripheralServerMode>,
+    /// Every doc type this session has ever asked for.
+    ///
+    /// Maintained by [`SessionManager::build_request`] and never settable from outside:
+    /// a caller-supplied value could silently widen what the reader accepts.
+    ///
+    /// `#[serde(default)]` is **mandatory**. Consumers persist this struct across
+    /// deploys — without it, every session in flight when the new version ships would
+    /// fail to deserialize. A session restored from such state has `None` here, which
+    /// disables the filter and raises
+    /// [`ResponseWarning::RequestedDocTypesUnknown`](super::authentication::ResponseWarning::RequestedDocTypesUnknown).
+    #[serde(default)]
+    requested_doc_types: Option<BTreeSet<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -98,24 +111,6 @@ pub enum Error {
     /// The QR code had the wrong prefix or the contained data could not be decoded.
     #[error("the qr code had the wrong prefix or the contained data could not be decoded: {0}")]
     InvalidQrCode(anyhow::Error),
-    /// Device did not transmit any data.
-    #[error("Device did not transmit any data.")]
-    DeviceTransmissionError,
-    /// Device did not transmit an mDL.
-    #[error("Device did not transmit an mDL.")]
-    DocumentTypeError,
-    /// The device did not transmit any mDL data.
-    #[error("the device did not transmit any mDL data.")]
-    NoMdlDataTransmission,
-    /// Device did not transmit any data in the `org.iso.18013.5.1` namespace.
-    #[error("device did not transmit any data in the org.iso.18013.5.1 namespace.")]
-    IncorrectNamespace,
-    /// The Device responded with an error.
-    #[error("device responded with an error.")]
-    HolderError,
-    /// Could not decrypt the response.
-    #[error("could not decrypt the response.")]
-    DecryptionError,
     /// Unexpected CBOR type for offered value.
     #[error("Unexpected CBOR type for offered value")]
     CborDecodingError,
@@ -125,17 +120,10 @@ pub enum Error {
     /// Unexpected data type for data element.
     #[error("Unexpected data type for data element: {0}.")]
     ParsingError(String),
-    /// Request for data is invalid.
-    #[error("Request for data is invalid.")]
-    InvalidRequest,
     #[error("Failed mdoc authentication: {0}")]
     MdocAuth(String),
     #[error("Currently unsupported format")]
     Unsupported,
-    #[error("No x5chain found for issuer authentication")]
-    X5ChainMissing,
-    #[error("Failed to parse x5chain: {0}")]
-    X5ChainParsing(anyhow::Error),
     #[error("issuer authentication failed: {0}")]
     IssuerAuthentication(String),
     #[error("Unable to parse issuer public key")]
@@ -211,9 +199,12 @@ impl SessionManager {
     /// Internally it generates the ephemeral keys,
     /// derives the shared secret, and derives the session keys
     /// (using **Diffie–Hellman key exchange**).
+    ///
+    /// `items_requests` names one or more credentials to ask for, each with its own doc
+    /// type and namespaces. Use [`ItemsRequest::mdl`] for the common single-mDL case.
     pub fn establish_session(
         handover: Handover,
-        namespaces: device_request::Namespaces,
+        items_requests: NonEmptyVec<ItemsRequest>,
         trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
         let (
@@ -343,10 +334,11 @@ impl SessionManager {
             holder_le_role,
             holder_central_client_modes,
             holder_peripheral_server_modes,
+            requested_doc_types: Some(BTreeSet::new()),
         };
 
         let request = session_manager
-            .build_request(namespaces)
+            .build_request(items_requests)
             .context("failed to build device request")?;
         let session = SessionEstablishment {
             data: request.into(),
@@ -397,9 +389,13 @@ impl SessionManager {
         }
     }
 
-    /// Creates a new request with specified elements to request.
-    pub fn new_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
-        let request = self.build_request(namespaces)?;
+    /// Creates a new request for the given credentials.
+    ///
+    /// Callable more than once in a session. Every doc type asked for, in this call or
+    /// an earlier one, stays in the set the response is filtered against — the holder
+    /// may legitimately answer an earlier request.
+    pub fn new_request(&mut self, items_requests: NonEmptyVec<ItemsRequest>) -> Result<Vec<u8>> {
+        let request = self.build_request(items_requests)?;
         let session = SessionData {
             data: Some(request.into()),
             status: None,
@@ -407,25 +403,39 @@ impl SessionManager {
         cbor::to_vec(&session).map_err(Into::into)
     }
 
-    fn build_request(&mut self, namespaces: device_request::Namespaces) -> Result<Vec<u8>> {
-        // if !validate_request(namespaces.clone()).is_ok() {
-        //     return Err(anyhow::Error::msg(
-        //         "At least one of the namespaces contain an invalid combination of fields to request",
-        //     ));
-        // }
-        let items_request = ItemsRequest {
-            doc_type: "org.iso.18013.5.1.mDL".into(),
-            namespaces,
-            request_info: None,
-        };
+    /// The doc types this session has asked for.
+    ///
+    /// `None` only for a session deserialized from state written before this field
+    /// existed; see the note on the field itself.
+    pub fn requested_doc_types(&self) -> Option<&BTreeSet<String>> {
+        self.requested_doc_types.as_ref()
+    }
 
-        let doc_request = DocRequest {
-            reader_auth: None,
-            items_request: Tag24::new(items_request)?,
-        };
+    fn build_request(&mut self, items_requests: NonEmptyVec<ItemsRequest>) -> Result<Vec<u8>> {
+        // Union rather than replace: a holder answering an earlier request is not
+        // sending an unsolicited credential.
+        let asked = self.requested_doc_types.get_or_insert_with(BTreeSet::new);
+        for items_request in items_requests.iter() {
+            asked.insert(items_request.doc_type.clone());
+        }
+
+        let doc_requests = items_requests
+            .into_inner()
+            .into_iter()
+            .map(|items_request| {
+                Ok(DocRequest {
+                    reader_auth: None,
+                    items_request: Tag24::new(items_request)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+            .try_into()
+            // `items_requests` was non-empty, so this cannot fail.
+            .map_err(|e| anyhow!("could not build doc requests: {e}"))?;
+
         let device_request = DeviceRequest {
             version: DeviceRequest::VERSION.to_string(),
-            doc_requests: NonEmptyVec::new(doc_request),
+            doc_requests,
             device_request_info: None,
             reader_auth_all: None,
         };
@@ -438,8 +448,11 @@ impl SessionManager {
         .map_err(|e| anyhow!("unable to encrypt request: {}", e))
     }
 
-    fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, Error> {
-        let session_data: SessionData = cbor::from_slice(response)?;
+    fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, ResponseError> {
+        let session_data: SessionData =
+            cbor::from_slice(response).map_err(|e| ResponseError::CborDecoding {
+                detail: format!("could not decode the session data: {e}"),
+            })?;
         tracing::debug!(
             "decrypt_response: {} response bytes, data_present={}, status={:?}",
             response.len(),
@@ -447,7 +460,19 @@ impl SessionManager {
             session_data.status.as_ref()
         );
         let encrypted_response = match session_data.data {
-            None => return Err(Error::HolderError),
+            // The holder ended the session rather than answering. There is no response
+            // to validate, and the session status is the only thing it told us.
+            None => {
+                return Err(ResponseError::Other {
+                    code: "holder_error".to_string(),
+                    detail: match session_data.status {
+                        Some(status) => format!(
+                            "the holder returned session status {status:?} instead of a response"
+                        ),
+                        None => "the holder returned neither data nor a session status".to_string(),
+                    },
+                })
+            }
             Some(r) => r,
         };
         let decrypted_response = session::decrypt_device_data(
@@ -455,14 +480,17 @@ impl SessionManager {
             encrypted_response.as_ref(),
             &mut self.device_message_counter,
         )
-        .map_err(|_e| Error::DecryptionError)?;
+        .map_err(|_e| ResponseError::Decryption {
+            detail: "session decryption failed".to_string(),
+        })?;
         tracing::debug!(
             "decrypt_response: decrypted OK, {} plaintext bytes (from {} encrypted)",
             decrypted_response.len(),
             encrypted_response.as_ref().len()
         );
-        let device_response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
-        Ok(device_response)
+        cbor::from_slice(&decrypted_response).map_err(|e| ResponseError::CborDecoding {
+            detail: format!("could not decode the device response: {e}"),
+        })
     }
 
     /// Handle a device response, validating it and checking certificate revocation.
@@ -474,13 +502,15 @@ impl SessionManager {
     /// # Arguments
     /// * `response` - The encrypted device response
     /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
-    pub async fn handle_response<R: RevocationFetcher>(
+    pub async fn handle_response<P: ProfileSelector, R: RevocationFetcher>(
         &mut self,
         response: &[u8],
+        profiles: &P,
         revocation_fetcher: &R,
-    ) -> ResponseAuthenticationOutcome {
+    ) -> ResponseValidationOutcome {
         self.handle_response_with_options(
             response,
+            profiles,
             revocation_fetcher,
             &ValidationOptions::default(),
         )
@@ -491,75 +521,51 @@ impl SessionManager {
     ///
     /// The `options` control the validation time used both for certificate chain
     /// validity checks and for the MSO `validityInfo` window check.
-    pub async fn handle_response_with_options<R: RevocationFetcher>(
+    pub async fn handle_response_with_options<P: ProfileSelector, R: RevocationFetcher>(
         &mut self,
         response: &[u8],
+        profiles: &P,
         revocation_fetcher: &R,
         options: &ValidationOptions,
-    ) -> ResponseAuthenticationOutcome {
-        let mut validated_response = ResponseAuthenticationOutcome::default();
-
+    ) -> ResponseValidationOutcome {
         let device_response = match self.decrypt_response(response) {
             Ok(device_response) => device_response,
             Err(e) => {
-                validated_response
-                    .errors
-                    .insert("decryption_errors".to_string(), json!(vec![format!("{e}")]));
-                return validated_response;
+                return ResponseValidationOutcome {
+                    documents: Vec::new(),
+                    failed: Vec::new(),
+                    rejected: Vec::new(),
+                    errors: vec![e],
+                    status: None,
+                    document_errors: Vec::new(),
+                    warnings: Vec::new(),
+                };
             }
         };
 
-        // Extract doc_types from the decrypted device response
-        let doc_types: Vec<String> = device_response
-            .documents
-            .as_ref()
-            .map(|docs| docs.iter().map(|d| d.doc_type.clone()).collect())
-            .unwrap_or_default();
+        let config = ReaderValidationConfig {
+            trust_anchors: &self.trust_anchor_registry,
+            requested_doc_types: self.requested_doc_types.as_ref(),
+            options,
+            profiles,
+        };
 
-        match parse(&device_response) {
-            Ok((document, x5chain, namespaces)) => {
-                validate_response_with_options(
-                    self.session_transcript.clone(),
-                    self.trust_anchor_registry.clone(),
-                    x5chain,
-                    document.clone(),
-                    namespaces,
-                    doc_types,
-                    revocation_fetcher,
-                    self.e_reader_key_private,
-                    options,
-                )
-                .await
-            }
-            Err(e) => {
-                validated_response.doc_types = doc_types;
-                validated_response
-                    .errors
-                    .insert("parsing_errors".to_string(), json!(vec![format!("{e}")]));
-                validated_response
-            }
-        }
+        validate_response(
+            &device_response,
+            &self.session_transcript,
+            &config,
+            revocation_fetcher,
+            &self.e_reader_key_private,
+        )
+        .await
     }
 }
 
-pub fn parse(
-    device_response: &DeviceResponse,
-) -> Result<(&Document, X5Chain, BTreeMap<String, Value>), Error> {
-    let document = get_document(device_response)?;
-    let header = document.issuer_signed.issuer_auth.unprotected.clone();
-    let x5chain = header
-        .rest
-        .iter()
-        .find(|(label, _)| label == &Label::Int(X5CHAIN_COSE_HEADER_LABEL))
-        .map(|(_, value)| value.to_owned())
-        .map(X5Chain::from_cbor)
-        .ok_or(Error::X5ChainMissing)?
-        .map_err(Error::X5ChainParsing)?;
-    let parsed_response = parse_namespaces(device_response)?;
-    Ok((document, x5chain, parsed_response))
-}
-
-fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
+/// Convert a CBOR data element value into JSON.
+///
+/// Refuses only what has no JSON representation (floats, non-text map keys), and
+/// reports that refusal rather than dropping the value.
+pub(crate) fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     match value {
         ciborium::Value::Text(s) => Ok(Value::String(s)),
         ciborium::Value::Tag(_t, v) => match *v {
@@ -596,123 +602,6 @@ fn parse_response(value: ciborium::Value) -> Result<Value, Error> {
     }
 }
 
-fn get_document(device_response: &DeviceResponse) -> Result<&Document, Error> {
-    device_response
-        .documents
-        .as_ref()
-        .ok_or(ReaderError::DeviceTransmissionError)?
-        .iter()
-        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-        .ok_or(ReaderError::DocumentTypeError)
-}
-
-fn _validate_request(namespaces: device_request::Namespaces) -> Result<bool, Error> {
-    // TODO: Check country name of certificate matches mdl
-
-    // Check if request follows ISO18013-5 restrictions
-    // A valid mdoc request can contain a maximum of 2 age_over_NN fields
-    let age_over_nn_requested: Vec<(String, bool)> = namespaces
-        .get("org.iso.18013.5.1")
-        .map(|k| k.clone().into_inner())
-        //To Do: get rid of unwrap
-        .unwrap()
-        .into_iter()
-        .filter(|x| x.0.contains("age_over"))
-        .collect();
-
-    if age_over_nn_requested.len() > 2 {
-        //To Do: Decide what should happen when more than two age_over_nn are requested
-        return Err(Error::InvalidRequest);
-    }
-
-    Ok(true)
-}
-
-// TODO: Support other namespaces.
-pub fn parse_namespaces(
-    device_response: &DeviceResponse,
-) -> Result<BTreeMap<String, serde_json::Value>, Error> {
-    let mut core_namespace = BTreeMap::<String, serde_json::Value>::new();
-    let mut aamva_namespace = BTreeMap::<String, serde_json::Value>::new();
-    let mut parsed_response = BTreeMap::<String, serde_json::Value>::new();
-    let mut namespaces = device_response
-        .documents
-        .as_ref()
-        .ok_or(Error::DeviceTransmissionError)?
-        .iter()
-        .find(|doc| doc.doc_type == "org.iso.18013.5.1.mDL")
-        .ok_or(Error::DocumentTypeError)?
-        .issuer_signed
-        .namespaces
-        .as_ref()
-        .ok_or(Error::NoMdlDataTransmission)?
-        .clone()
-        .into_inner();
-
-    namespaces
-        .remove("org.iso.18013.5.1")
-        .ok_or(Error::IncorrectNamespace)?
-        .into_inner()
-        .into_iter()
-        .map(|item| item.into_inner())
-        .for_each(|item| {
-            let value = parse_response(item.element_value.clone());
-            if let Ok(val) = value {
-                core_namespace.insert(item.element_identifier, val);
-            }
-        });
-
-    parsed_response.insert(
-        "org.iso.18013.5.1".to_string(),
-        serde_json::to_value(core_namespace)?,
-    );
-
-    if let Some(aamva_response) = namespaces.remove("org.iso.18013.5.1.aamva") {
-        aamva_response
-            .into_inner()
-            .into_iter()
-            .map(|item| item.into_inner())
-            .for_each(|item| {
-                let value = parse_response(item.element_value.clone());
-                if let Ok(val) = value {
-                    aamva_namespace.insert(item.element_identifier, val);
-                }
-            });
-
-        parsed_response.insert(
-            "org.iso.18013.5.1.aamva".to_string(),
-            serde_json::to_value(aamva_namespace)?,
-        );
-    }
-    Ok(parsed_response)
-}
-
 #[cfg(test)]
-pub mod test {
-    use super::*;
-
-    #[test]
-    fn nested_response_values() {
-        let domestic_driving_privileges = crate::cbor::from_slice(&hex::decode("81A276646F6D65737469635F76656869636C655F636C617373A46A69737375655F64617465D903EC6A323032342D30322D31346B6578706972795F64617465D903EC6A323032382D30332D3131781B646F6D65737469635F76656869636C655F636C6173735F636F64656243207822646F6D65737469635F76656869636C655F636C6173735F6465736372697074696F6E76436C6173732043204E4F4E2D434F4D4D45524349414C781D646F6D65737469635F76656869636C655F7265737472696374696F6E7381A27821646F6D65737469635F76656869636C655F7265737472696374696F6E5F636F64656230317828646F6D65737469635F76656869636C655F7265737472696374696F6E5F6465736372697074696F6E78284D555354205745415220434F5252454354495645204C454E534553205748454E2044524956494E47").unwrap()).unwrap();
-        let json = parse_response(domestic_driving_privileges).unwrap();
-        let expected = serde_json::json!(
-          [
-            {
-              "domestic_vehicle_class": {
-                "issue_date": "2024-02-14",
-                "expiry_date": "2028-03-11",
-                "domestic_vehicle_class_code": "C ",
-                "domestic_vehicle_class_description": "Class C NON-COMMERCIAL"
-              },
-              "domestic_vehicle_restrictions": [
-                {
-                  "domestic_vehicle_restriction_code": "01",
-                  "domestic_vehicle_restriction_description": "MUST WEAR CORRECTIVE LENSES WHEN DRIVING"
-                }
-              ]
-            }
-          ]
-        );
-        assert_eq!(json, expected)
-    }
-}
+#[path = "tests/reader.rs"]
+pub mod test;

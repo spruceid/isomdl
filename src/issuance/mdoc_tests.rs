@@ -115,10 +115,7 @@ fn issue_minimal_mdoc() -> anyhow::Result<()> {
 /// The point of [`issue_test_mdoc`]: the chain it embeds is one a test can trust.
 #[tokio::test]
 async fn issued_test_mdoc_chain_validates() -> anyhow::Result<()> {
-    use crate::definitions::x509::{
-        test::TestPki,
-        validation::{validate, MdocProfile},
-    };
+    use crate::definitions::x509::{test::TestPki, validation::validate};
 
     let pki = TestPki::issuer();
     let mdoc = issue_test_mdoc(&pki, MDL_DOC_TYPE, valid_for_a_year())?;
@@ -141,7 +138,7 @@ async fn issued_test_mdoc_chain_validates() -> anyhow::Result<()> {
     )?;
 
     let outcome = validate(
-        &MdocProfile::MDL.issuer,
+        &crate::definitions::x509::validation::MdocProfile::MDL.issuer,
         &x5chain,
         &pki.iaca_registry(),
         &pki.fetcher(),
