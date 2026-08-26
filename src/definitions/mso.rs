@@ -70,7 +70,7 @@ pub struct Mso {
     /// `BitstringStatusListEntry`), used by verifiers to check whether the
     /// mdoc has been revoked. Absent from the encoded MSO when `None`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub status: Option<Value>,
+    pub status_list: Option<Value>,
 }
 
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]
