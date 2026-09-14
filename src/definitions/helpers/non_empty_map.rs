@@ -29,6 +29,10 @@ impl<K: Ord + Eq + Clone, V: Clone> NonEmptyMap<K, V> {
     pub fn into_inner(self) -> BTreeMap<K, V> {
         self.0
     }
+
+    pub fn iter_mut(&mut self) -> std::collections::btree_map::IterMut<'_, K, V> {
+        self.0.iter_mut()
+    }
 }
 
 impl<K: Ord + Eq + Clone, V: Clone> TryFrom<BTreeMap<K, V>> for NonEmptyMap<K, V> {

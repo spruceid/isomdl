@@ -25,17 +25,25 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
       - name: Build
         run: cargo build --all-targets
 
       - name: Run tests
         run: |
           cargo test
+          cargo test --all-features
           cd macros
           cargo test
 
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets --all-features --no-deps
 
       - name: Fmt
         run: cargo fmt --all -- --check
@@ -45,3 +53,9 @@ jobs:
           cargo doc --all-features --no-deps
           cd macros
           cargo doc --all-features --no-deps
+
+      - name: Unused dependencies
+        run: cargo machete
+
+      - name: Check dependencies licences are compatible
+        run: cargo deny check licenses

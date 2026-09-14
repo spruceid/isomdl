@@ -15,29 +15,35 @@
 //! `simulated_device_and_reader_state.rs` which uses `State` pattern, `Arc` and `Mutex`.
 use std::collections::BTreeMap;
 
-use anyhow::Context;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use coset::Label;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
-use super::authentication::ResponseAuthenticationOutcome;
-use super::reader_utils::validate_response;
+use super::{
+    authentication::ResponseAuthenticationOutcome, reader_utils::validate_response_with_options,
+};
 
-use crate::definitions::device_engagement::{CentralClientMode, PeripheralServerMode};
-use crate::definitions::device_request::{DeviceRequestInfoBytes, ItemsRequestBytesAll};
+use crate::definitions::x509::revocation::RevocationFetcher;
+pub use crate::definitions::x509::validation::ValidationOptions;
+
 use crate::{
     cbor::{self, CborError},
     definitions::{
-        device_engagement::DeviceRetrievalMethod,
+        device_engagement::{
+            nfc::{LeRole, ReaderNegotiatedCarrierInfo},
+            BleMode, CentralClientMode, PeripheralServerMode,
+        },
         device_key::cose_key::Error as CoseError,
-        device_request::{self, DeviceRequest, DocRequest, ItemsRequest},
+        device_request::{
+            self, DeviceRequest, DeviceRequestInfoBytes, DocRequest, ItemsRequest,
+            ItemsRequestBytesAll,
+        },
         device_response::Document,
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
         session::{
-            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret, Handover,
+            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret,
             SessionEstablishment,
         },
         x509::{trust_anchor::TrustAnchorRegistry, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain},
@@ -59,7 +65,11 @@ pub struct SessionManager {
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
+    e_reader_key_private: [u8; 32],
     trust_anchor_registry: TrustAnchorRegistry,
+    holder_le_role: Option<LeRole>,
+    holder_central_client_modes: Vec<CentralClientMode>,
+    holder_peripheral_server_modes: Vec<PeripheralServerMode>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -130,6 +140,15 @@ pub enum Error {
     IssuerAuthentication(String),
     #[error("Unable to parse issuer public key")]
     IssuerPublicKey(anyhow::Error),
+    /// A disclosed data element does not match the digest committed to in the MSO.
+    #[error("issuer-signed value digest verification failed: {0}")]
+    IssuerDigestMismatch(String),
+    /// The MSO's `validUntil` is in the past relative to the validation time.
+    #[error("MSO is expired")]
+    MsoExpired,
+    /// The MSO's `validFrom` is in the future relative to the validation time.
+    #[error("MSO is not yet valid")]
+    MsoNotYetValid,
 }
 
 impl From<CborError> for Error {
@@ -180,6 +199,12 @@ impl From<asn1_rs::Error> for Error {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Handover {
+    QR(String),
+    NFC(Box<ReaderNegotiatedCarrierInfo>),
+}
+
 impl SessionManager {
     /// Establish a session with the device.
     ///
@@ -187,18 +212,87 @@ impl SessionManager {
     /// derives the shared secret, and derives the session keys
     /// (using **Diffie–Hellman key exchange**).
     pub fn establish_session(
-        qr_code: String,
+        handover: Handover,
         namespaces: device_request::Namespaces,
         trust_anchor_registry: TrustAnchorRegistry,
     ) -> Result<(Self, Vec<u8>, [u8; 16])> {
-        let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
-            .context("failed to construct QR code")?;
+        let (
+            device_engagement_bytes,
+            session_transcript_handover,
+            holder_le_role,
+            holder_central_client_modes,
+            holder_peripheral_server_modes,
+        ) = match handover {
+            Handover::NFC(carrier_info) => {
+                let device_engagement_bytes = carrier_info.device_engagement;
+                let le_role = Some(carrier_info.holder_le_role);
+                let uuid = carrier_info.uuid;
+                let central_client_modes: Vec<_> = device_engagement_bytes
+                    .as_ref()
+                    .ble_central_client_options()
+                    .cloned()
+                    .collect();
+                let peripheral_server_modes: Vec<_> = device_engagement_bytes
+                    .as_ref()
+                    .ble_peripheral_server_options()
+                    .cloned()
+                    .collect();
+                let central_client_modes = if central_client_modes.is_empty() {
+                    vec![CentralClientMode { uuid }]
+                } else {
+                    central_client_modes
+                };
+                let peripheral_server_modes = if peripheral_server_modes.is_empty() {
+                    vec![PeripheralServerMode {
+                        uuid,
+                        ble_device_address: carrier_info.ble_device_address,
+                    }]
+                } else {
+                    peripheral_server_modes
+                };
+                (
+                    device_engagement_bytes,
+                    crate::definitions::session::Handover::NFC(
+                        carrier_info.hs_message,
+                        carrier_info.hr_message,
+                    ),
+                    le_role,
+                    central_client_modes,
+                    peripheral_server_modes,
+                )
+            }
+            Handover::QR(qr_code) => {
+                let device_engagement_bytes = Tag24::<DeviceEngagement>::from_qr_code_uri(&qr_code)
+                    .context("failed to construct QR code")?;
+                let le_role = None;
+                let central_client_modes = device_engagement_bytes
+                    .as_ref()
+                    .ble_central_client_options()
+                    .cloned()
+                    .collect();
+                let peripheral_server_modes = device_engagement_bytes
+                    .as_ref()
+                    .ble_peripheral_server_options()
+                    .cloned()
+                    .collect();
+                (
+                    device_engagement_bytes,
+                    crate::definitions::session::Handover::QR,
+                    le_role,
+                    central_client_modes,
+                    peripheral_server_modes,
+                )
+            }
+        };
 
         //generate own keys
         let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
         let e_reader_key_private = key_pair.0;
         let e_reader_key_public =
             Tag24::new(key_pair.1).context("failed to encode public cose key")?;
+
+        // Save private key bytes before consuming the key for ECDH
+        let e_reader_key_private_bytes: [u8; 32] = e_reader_key_private.to_bytes().into();
 
         //decode device_engagement
         let device_engagement = device_engagement_bytes.as_ref();
@@ -218,11 +312,17 @@ impl SessionManager {
         let session_transcript = SessionTranscript180135(
             device_engagement_bytes,
             e_reader_key_public.clone(),
-            Handover::QR,
+            session_transcript_handover,
         );
 
         let session_transcript_bytes = Tag24::new(session_transcript.clone())
             .context("failed to encode session transcript")?;
+
+        tracing::debug!(
+            "reader SessionTranscript ({} bytes): {:?}",
+            session_transcript_bytes.inner_bytes.len(),
+            session_transcript_bytes.inner_bytes.as_slice()
+        );
 
         //derive session keys
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)
@@ -238,7 +338,11 @@ impl SessionManager {
             device_message_counter: 0,
             sk_reader,
             reader_message_counter: 0,
+            e_reader_key_private: e_reader_key_private_bytes,
             trust_anchor_registry,
+            holder_le_role,
+            holder_central_client_modes,
+            holder_peripheral_server_modes,
         };
 
         let request = session_manager
@@ -256,22 +360,7 @@ impl SessionManager {
 
     #[deprecated(since = "0.2.1", note = "use ble_central_client_options instead")]
     pub fn first_central_client_uuid(&self) -> Option<&Uuid> {
-        self.session_transcript
-            .0
-            .as_ref()
-            .device_retrieval_methods
-            .as_ref()
-            .and_then(|ms| {
-                ms.as_ref()
-                    .iter()
-                    .filter_map(|m| match m {
-                        DeviceRetrievalMethod::BLE(opt) => {
-                            opt.central_client_mode.as_ref().map(|cc| &cc.uuid)
-                        }
-                        _ => None,
-                    })
-                    .next()
-            })
+        self.ble_central_client_options().next().map(|cc| &cc.uuid)
     }
 
     /// Retrieve the connection details for BLE central client mode offered by the mdoc, if any.
@@ -279,16 +368,7 @@ impl SessionManager {
     /// The protocol allows for more than one central client mode to be offered, so a consumer
     /// of this API can use the first one that works.
     pub fn ble_central_client_options(&self) -> impl Iterator<Item = &CentralClientMode> {
-        self.session_transcript
-            .0
-            .as_ref()
-            .device_retrieval_methods
-            .iter()
-            .flat_map(|ms| ms.as_ref().iter())
-            .filter_map(|m| match m {
-                DeviceRetrievalMethod::BLE(opt) => opt.central_client_mode.as_ref(),
-                _ => None,
-            })
+        self.holder_central_client_modes.iter()
     }
 
     /// Retrieve the connection details for BLE peripheral server mode offered by the mdoc, if any.
@@ -296,16 +376,25 @@ impl SessionManager {
     /// The protocol allows for more than one peripheral server mode to be offered, so a consumer
     /// of this API can use the first one that works.
     pub fn ble_peripheral_server_options(&self) -> impl Iterator<Item = &PeripheralServerMode> {
-        self.session_transcript
-            .0
-            .as_ref()
-            .device_retrieval_methods
-            .iter()
-            .flat_map(|ms| ms.as_ref().iter())
-            .filter_map(|m| match m {
-                DeviceRetrievalMethod::BLE(opt) => opt.peripheral_server_mode.as_ref(),
-                _ => None,
-            })
+        self.holder_peripheral_server_modes.iter()
+    }
+
+    /// Retrieve the mdoc's preferred connection details.
+    pub fn preferred_ble_mode(&self) -> Option<BleMode> {
+        let first_central = self
+            .holder_central_client_modes
+            .first()
+            .map(|m| BleMode::CentralClient(m.clone()));
+        let first_peripheral = self
+            .holder_peripheral_server_modes
+            .first()
+            .map(|m| BleMode::PeripheralServer(m.clone()));
+        match self.holder_le_role {
+            None | Some(LeRole::CentralPreferred) => first_central.or(first_peripheral),
+            Some(LeRole::CentralOnly) => first_central,
+            Some(LeRole::PeripheralOnly) => first_peripheral,
+            Some(LeRole::PeripheralPreferred) => first_peripheral.or(first_central),
+        }
     }
 
     /// Creates a new request with specified elements to request.
@@ -351,6 +440,12 @@ impl SessionManager {
 
     fn decrypt_response(&mut self, response: &[u8]) -> Result<DeviceResponse, Error> {
         let session_data: SessionData = cbor::from_slice(response)?;
+        tracing::debug!(
+            "decrypt_response: {} response bytes, data_present={}, status={:?}",
+            response.len(),
+            session_data.data.is_some(),
+            session_data.status.as_ref()
+        );
         let encrypted_response = match session_data.data {
             None => return Err(Error::HolderError),
             Some(r) => r,
@@ -361,11 +456,47 @@ impl SessionManager {
             &mut self.device_message_counter,
         )
         .map_err(|_e| Error::DecryptionError)?;
+        tracing::debug!(
+            "decrypt_response: decrypted OK, {} plaintext bytes (from {} encrypted)",
+            decrypted_response.len(),
+            encrypted_response.as_ref().len()
+        );
         let device_response: DeviceResponse = cbor::from_slice(&decrypted_response)?;
         Ok(device_response)
     }
 
-    pub fn handle_response(&mut self, response: &[u8]) -> ResponseAuthenticationOutcome {
+    /// Handle a device response, validating it and checking certificate revocation.
+    ///
+    /// Validity checks (certificate windows and the MSO `validityInfo` window) are
+    /// performed against the current time. Use [`Self::handle_response_with_options`]
+    /// to pin the validation time.
+    ///
+    /// # Arguments
+    /// * `response` - The encrypted device response
+    /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
+    pub async fn handle_response<R: RevocationFetcher>(
+        &mut self,
+        response: &[u8],
+        revocation_fetcher: &R,
+    ) -> ResponseAuthenticationOutcome {
+        self.handle_response_with_options(
+            response,
+            revocation_fetcher,
+            &ValidationOptions::default(),
+        )
+        .await
+    }
+
+    /// Like [`Self::handle_response`], but with explicit [`ValidationOptions`].
+    ///
+    /// The `options` control the validation time used both for certificate chain
+    /// validity checks and for the MSO `validityInfo` window check.
+    pub async fn handle_response_with_options<R: RevocationFetcher>(
+        &mut self,
+        response: &[u8],
+        revocation_fetcher: &R,
+        options: &ValidationOptions,
+    ) -> ResponseAuthenticationOutcome {
         let mut validated_response = ResponseAuthenticationOutcome::default();
 
         let device_response = match self.decrypt_response(response) {
@@ -378,15 +509,30 @@ impl SessionManager {
             }
         };
 
+        // Extract doc_types from the decrypted device response
+        let doc_types: Vec<String> = device_response
+            .documents
+            .as_ref()
+            .map(|docs| docs.iter().map(|d| d.doc_type.clone()).collect())
+            .unwrap_or_default();
+
         match parse(&device_response) {
-            Ok((document, x5chain, namespaces)) => validate_response(
-                self.session_transcript.clone(),
-                self.trust_anchor_registry.clone(),
-                x5chain,
-                document.clone(),
-                namespaces,
-            ),
+            Ok((document, x5chain, namespaces)) => {
+                validate_response_with_options(
+                    self.session_transcript.clone(),
+                    self.trust_anchor_registry.clone(),
+                    x5chain,
+                    document.clone(),
+                    namespaces,
+                    doc_types,
+                    revocation_fetcher,
+                    self.e_reader_key_private,
+                    options,
+                )
+                .await
+            }
             Err(e) => {
+                validated_response.doc_types = doc_types;
                 validated_response
                     .errors
                     .insert("parsing_errors".to_string(), json!(vec![format!("{e}")]));

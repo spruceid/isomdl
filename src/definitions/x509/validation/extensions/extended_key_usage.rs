@@ -68,6 +68,11 @@ pub const fn mdoc_reader_extended_key_usage_oid() -> ObjectIdentifier {
     ObjectIdentifier::new_unwrap("1.0.18013.5.1.6")
 }
 
+pub const fn vical_signer_extended_key_usage_oid() -> ObjectIdentifier {
+    // Unwrap safety: unit tested.
+    ObjectIdentifier::new_unwrap("1.0.18013.5.1.8")
+}
+
 #[cfg(test)]
 #[rstest::rstest]
 #[case::ok(ExtendedKeyUsage(vec![ObjectIdentifier::new_unwrap("1.1.1")]), true)]
@@ -92,4 +97,10 @@ fn test_document_signer_extended_key_usage_oid() {
 #[test]
 fn test_mdoc_reader_extended_key_usage_oid() {
     mdoc_reader_extended_key_usage_oid();
+}
+
+#[cfg(test)]
+#[test]
+fn test_vical_signer_extended_key_usage_oid() {
+    vical_signer_extended_key_usage_oid();
 }

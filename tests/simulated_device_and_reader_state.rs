@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, Namespaces};
+use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Documents, RequestedItems};
@@ -32,8 +33,8 @@ struct SessionManager {
 
 struct SessionManagerEngaged(device::SessionManagerEngaged);
 
-#[test]
-pub fn simulated_device_and_reader_interaction() -> Result<()> {
+#[test_log::test(tokio::test)]
+pub async fn simulated_device_and_reader_interaction() -> Result<()> {
     let key: Arc<p256::ecdsa::SigningKey> =
         Arc::new(p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))?.into());
 
@@ -52,7 +53,8 @@ pub fn simulated_device_and_reader_interaction() -> Result<()> {
         &mut reader_session_manager,
         request,
         key.clone(),
-    )?;
+    )
+    .await?;
     if request_data.is_none() {
         anyhow::bail!("there were errors processing request");
     }
@@ -62,7 +64,7 @@ pub fn simulated_device_and_reader_interaction() -> Result<()> {
     let response = create_response(request_data.session_manager.clone())?;
 
     // Reader Processing mDL data
-    reader_handle_device_response(&mut reader_session_manager, response)?;
+    reader_handle_device_response(&mut reader_session_manager, response).await?;
 
     Ok(())
 }
@@ -82,12 +84,14 @@ fn initialise_session(docs: Documents, uuid: Uuid) -> Result<SessionData> {
     let session = device::SessionManagerInit::initialise(docs, Some(drms), None)
         .context("failed to initialize device")?;
 
-    let (engaged_state, qr_code_uri) = session
-        .qr_engagement()
+    let engaged_state = session
+        .engage(Handover::QR)
         .context("could not generate qr engagement")?;
     Ok(SessionData {
+        qr_code_uri: engaged_state
+            .qr_handover()
+            .context("could not generate qr engagement")?,
         state: Arc::new(SessionManagerEngaged(engaged_state)),
-        qr_code_uri,
     })
 }
 
@@ -99,14 +103,17 @@ fn establish_reader_session(qr: String) -> Result<(reader::SessionManager, Vec<u
     );
     let trust_anchor_registry = TrustAnchorRegistry::default();
 
-    let (reader_sm, session_request, _ble_ident) =
-        reader::SessionManager::establish_session(qr, requested_elements, trust_anchor_registry)
-            .context("failed to establish reader session")?;
+    let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
+        reader::Handover::QR(qr),
+        requested_elements,
+        trust_anchor_registry,
+    )
+    .context("failed to establish reader session")?;
     Ok((reader_sm, session_request))
 }
 
 /// The Device handles the request from the reader and creates the `RequestData` context.
-fn handle_request(
+async fn handle_request(
     state: Arc<SessionManagerEngaged>,
     reader_session_manager: &mut reader::SessionManager,
     request: Vec<u8>,
@@ -115,10 +122,12 @@ fn handle_request(
     let (session_manager, validated_response) = {
         let session_establishment: definitions::SessionEstablishment =
             cbor::from_slice(&request).context("could not deserialize request")?;
+        // Use () to skip CRL checks in tests
         state
             .0
             .clone()
-            .process_session_establishment(session_establishment, Default::default())
+            .process_session_establishment(session_establishment, Default::default(), &())
+            .await
             .context("could not process process session establishment")?
     };
     let session_manager = Arc::new(SessionManager {
@@ -128,7 +137,8 @@ fn handle_request(
     });
     // Propagate any errors back to the reader
     if let Ok(Some(response)) = get_errors(session_manager.clone()) {
-        let validated_response = reader_session_manager.handle_response(&response);
+        // Use () to skip CRL checks in tests
+        let validated_response = reader_session_manager.handle_response(&response, &()).await;
         println!("Reader: {validated_response:?}");
         return Ok(None);
     };
@@ -184,11 +194,12 @@ fn sign_pending_and_retrieve_response(
 }
 
 /// Reader Processing mDL data.
-fn reader_handle_device_response(
+async fn reader_handle_device_response(
     reader_sm: &mut reader::SessionManager,
     response: Vec<u8>,
 ) -> Result<()> {
-    let validated_response = reader_sm.handle_response(&response);
+    // Use () to skip CRL checks in tests
+    let validated_response = reader_sm.handle_response(&response, &()).await;
     println!("Validated Response: {validated_response:?}");
     Ok(())
 }

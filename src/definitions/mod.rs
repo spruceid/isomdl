@@ -1,4 +1,5 @@
 //! This module contains the definitions for all components involved in the lib.
+pub mod app_attestation;
 pub mod device_engagement;
 pub mod device_key;
 pub mod device_request;
@@ -6,6 +7,8 @@ pub mod device_response;
 pub mod device_signed;
 pub mod helpers;
 pub mod issuer_signed;
+pub mod issuer_signed_dehydrated;
+pub mod mcd;
 pub mod mso;
 pub mod namespaces;
 pub mod session;

@@ -1,15 +1,21 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, Context, Result};
+use digest::Mac;
+use hmac::Hmac;
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
 use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
+use isomdl::definitions::device_signed::DeviceAuthType;
 use isomdl::definitions::helpers::NonEmptyMap;
+use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
 use isomdl::presentation::{
-    authentication::RequestAuthenticationOutcome, device, reader, Stringify,
+    authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
+    device, reader, Stringify,
 };
+use sha2::Sha256;
 use signature::Signer;
 use uuid::Uuid;
 
@@ -29,7 +35,7 @@ impl Device {
     }
 
     /// Creates a QR code containing `DeviceEngagement` data, which includes its public key.
-    pub fn initialise_session() -> Result<(SessionManagerEngaged, String)> {
+    pub fn initialise_session() -> Result<SessionManagerEngaged> {
         // Parse the mDL
         let docs = Device::parse_mdl()?;
 
@@ -44,7 +50,7 @@ impl Device {
             .context("failed to initialize device")?;
 
         session
-            .qr_engagement()
+            .engage(Handover::QR)
             .context("could not generate qr engagement")
     }
 
@@ -57,14 +63,17 @@ impl Device {
 
         let trust_anchors = TrustAnchorRegistry::default();
 
-        let (reader_sm, session_request, _ble_ident) =
-            reader::SessionManager::establish_session(qr, requested_elements, trust_anchors)
-                .context("failed to establish reader session")?;
+        let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
+            reader::Handover::QR(qr),
+            requested_elements,
+            trust_anchors,
+        )
+        .context("failed to establish reader session")?;
         Ok((reader_sm, session_request))
     }
 
     /// The Device handles the request from the reader and advances the state.
-    pub fn handle_request(
+    pub async fn handle_request(
         state: SessionManagerEngaged,
         request: Vec<u8>,
         trusted_verifiers: TrustAnchorRegistry,
@@ -72,8 +81,10 @@ impl Device {
         let (session_manager, validated_request) = {
             let session_establishment: definitions::SessionEstablishment =
                 cbor::from_slice(&request).context("could not deserialize request")?;
+            // Use () to skip CRL checks in tests
             state
-                .process_session_establishment(session_establishment, trusted_verifiers)
+                .process_session_establishment(session_establishment, trusted_verifiers, &())
+                .await
                 .context("could not process process session establishment")?
         };
         if session_manager.get_next_signature_payload().is_some() {
@@ -107,8 +118,49 @@ impl Device {
             .ok_or(anyhow!("cannot prepare response"))
     }
 
+    /// Prepare response with required elements using COSE_Mac0 device authentication.
+    ///
+    /// Uses the static mdoc authentication key (SDeviceKey) for EMacKey derivation per
+    /// ISO 18013-5 §9.1.3.5.
+    pub fn create_response_mac0(
+        mut session_manager: device::SessionManager,
+        requested_items: &RequestedItems,
+        signing_key: &p256::ecdsa::SigningKey,
+    ) -> Result<Vec<u8>> {
+        let static_scalar: p256::NonZeroScalar = p256::SecretKey::from(signing_key.clone()).into();
+        let e_mac_key = session_manager
+            .e_mac_key_from_static_key(&static_scalar)
+            .context("failed to derive EMacKey")?;
+        let permitted_items = [(
+            DOC_TYPE.to_string(),
+            [(NAMESPACE.to_string(), vec![AGE_OVER_21_ELEMENT.to_string()])]
+                .into_iter()
+                .collect(),
+        )]
+        .into_iter()
+        .collect();
+        session_manager.set_device_auth_type(DeviceAuthType::Mac0);
+        session_manager.prepare_response(requested_items, permitted_items);
+        while let Some((_, payload)) = session_manager
+            .get_next_signature_payload()
+            .map(|(id, p)| (id, p.to_vec()))
+        {
+            let mut mac =
+                Hmac::<Sha256>::new_from_slice(&e_mac_key).context("failed to create HMAC")?;
+            mac.update(&payload);
+            session_manager
+                .submit_next_signature(mac.finalize().into_bytes().to_vec())
+                .context("failed to submit MAC0 tag")?;
+        }
+        session_manager
+            .retrieve_response()
+            .ok_or(anyhow!("cannot retrieve response"))
+    }
+
+    /// Load the device signing key that matches the public key embedded in the test mDL's MSO.
     pub fn create_signing_key() -> Result<p256::ecdsa::SigningKey> {
-        Ok(p256::SecretKey::from_sec1_pem(include_str!("data/sec1.pem"))?.into())
+        let der = base64::decode(include_str!("../test/issuance/device_key.b64").trim())?;
+        Ok(p256::SecretKey::from_sec1_der(&der)?.into())
     }
 }
 
@@ -116,12 +168,17 @@ pub struct Reader {}
 
 impl Reader {
     /// Reader Processing mDL data.
-    pub fn reader_handle_device_response(
+    pub async fn reader_handle_device_response(
         reader_sm: &mut reader::SessionManager,
         response: Vec<u8>,
     ) -> Result<()> {
-        let validated = reader_sm.handle_response(&response);
+        // Use () to skip CRL checks in tests
+        let validated = reader_sm.handle_response(&response, &()).await;
         println!("Validated Response: {validated:?}");
+        // These tests verify the device-reader protocol. Certificate chain validation
+        // (issuer_authentication) requires a full MDL cert setup and is tested separately
+        // in src/definitions/x509/.
+        assert_eq!(validated.device_authentication, AuthenticationStatus::Valid);
         Ok(())
     }
 }

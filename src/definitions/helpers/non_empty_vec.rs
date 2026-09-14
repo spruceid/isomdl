@@ -28,6 +28,10 @@ impl<T: Clone> NonEmptyVec<T> {
         self.0
     }
 
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.0.iter_mut()
+    }
+
     pub fn into<T2>(self) -> NonEmptyVec<T2>
     where
         T2: From<T> + Clone,
@@ -55,6 +59,10 @@ impl<T: Clone> NonEmptyVec<T> {
             // Originally was a NonEmptyVec so there is at least one element
             // and therefore we can safely unwrap.
             .unwrap())
+    }
+
+    pub fn last(&self) -> &T {
+        self.0.last().unwrap()
     }
 }
 

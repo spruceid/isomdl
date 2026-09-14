@@ -4,6 +4,10 @@
 //! It includes fields such as the `version`, `security details, `device retrieval methods, `server retrieval methods, and `protocol information.
 //!
 //! The module also provides implementations for conversions between [DeviceEngagement] and [ciborium::Value], as well as other utility functions.
+pub mod error;
+pub mod nfc;
+pub mod nfc_options;
+
 use std::{collections::BTreeMap, vec};
 
 use anyhow::Result;
@@ -19,8 +23,6 @@ use crate::definitions::helpers::Tag24;
 use crate::definitions::helpers::{ByteStr, NonEmptyVec};
 use crate::definitions::CoseKey;
 
-pub mod error;
-pub mod nfc_options;
 pub type EDeviceKeyBytes = Tag24<CoseKey>;
 pub type EReaderKeyBytes = Tag24<CoseKey>;
 
@@ -54,6 +56,28 @@ pub struct DeviceEngagement {
     /// The optional protocol information for the device engagement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol_info: Option<ProtocolInfo>,
+}
+
+impl DeviceEngagement {
+    pub fn ble_central_client_options(&self) -> impl Iterator<Item = &CentralClientMode> {
+        self.device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.central_client_mode.as_ref(),
+                _ => None,
+            })
+    }
+
+    pub fn ble_peripheral_server_options(&self) -> impl Iterator<Item = &PeripheralServerMode> {
+        self.device_retrieval_methods
+            .iter()
+            .flat_map(|ms| ms.as_ref().iter())
+            .filter_map(|m| match m {
+                DeviceRetrievalMethod::BLE(opt) => opt.peripheral_server_mode.as_ref(),
+                _ => None,
+            })
+    }
 }
 
 impl PartialEq for DeviceEngagement {
@@ -102,7 +126,7 @@ pub struct ServerRetrievalMethods {
 }
 
 /// Represents the options for `Bluetooth Low Energy` (BLE) device engagement.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "ciborium::Value", into = "ciborium::Value")]
 pub struct BleOptions {
     /// The peripheral server mode for `BLE` device engagement.
@@ -115,7 +139,7 @@ pub struct BleOptions {
 }
 
 /// Represents a peripheral server mode.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct PeripheralServerMode {
     /// The 'UUID' of the peripheral server.
     pub uuid: Uuid,
@@ -125,9 +149,15 @@ pub struct PeripheralServerMode {
 }
 
 /// Represents the central client mode for device engagement.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct CentralClientMode {
     pub uuid: Uuid,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum BleMode {
+    PeripheralServer(PeripheralServerMode),
+    CentralClient(CentralClientMode),
 }
 
 /// Represents the options for a `Wi-Fi` device engagement.
@@ -195,11 +225,18 @@ impl TryFrom<ciborium::Value> for DeviceEngagement {
                 .map(|(k, v)| Ok((k.into_integer().map_err(|_| Error::CborError)?.into(), v)))
                 .collect::<Result<BTreeMap<_, _>, Error>>()?;
             let device_engagement_version = map.remove(&0);
-            if let Some(ciborium::Value::Text(v)) = device_engagement_version {
-                if v != "1.0" {
+            let version = if let Some(ciborium::Value::Text(v)) = device_engagement_version {
+                if !matches!(v.as_str(), "1.0" | "1.1") {
                     return Err(Error::UnsupportedVersion);
                 }
+                v
             } else {
+                return Err(Error::Malformed);
+            };
+            // 18013-5: when key 5 or 6 is present the version shall be "1.1",
+            // otherwise it shall be "1.0".
+            let has_second_edition_keys = map.contains_key(&5) || map.contains_key(&6);
+            if (version == "1.1") != has_second_edition_keys {
                 return Err(Error::Malformed);
             }
             let device_engagement_security = map.remove(&1).ok_or(Error::Malformed)?;
@@ -227,7 +264,7 @@ impl TryFrom<ciborium::Value> for DeviceEngagement {
             }
 
             let device_engagement = DeviceEngagement {
-                version: "1.0".into(),
+                version,
                 security,
                 device_retrieval_methods,
                 server_retrieval_methods,
@@ -593,6 +630,56 @@ mod test {
         let roundtripped = crate::cbor::from_slice(&bytes).unwrap();
 
         assert_eq!(device_engagement, roundtripped)
+    }
+
+    /// 18013-5: keys 5/6 require version "1.1"; their absence requires "1.0".
+    #[test]
+    fn version_must_match_second_edition_keys() {
+        let key_pair = create_p256_ephemeral_keys().unwrap();
+        let public_key = Tag24::new(key_pair.1).unwrap();
+        let base = DeviceEngagement {
+            version: "1.0".into(),
+            security: Security(1, public_key),
+            device_retrieval_methods: None,
+            server_retrieval_methods: None,
+            protocol_info: None,
+        };
+
+        fn as_map(de: &DeviceEngagement) -> Vec<(ciborium::Value, ciborium::Value)> {
+            match ciborium::Value::from(de.clone()) {
+                ciborium::Value::Map(m) => m,
+                _ => panic!("expected map"),
+            }
+        }
+
+        // 1.0 without keys 5/6: valid
+        let parsed = DeviceEngagement::try_from(ciborium::Value::Map(as_map(&base)))
+            .expect("1.0 without second-edition keys should parse");
+        assert_eq!(parsed.version, "1.0");
+
+        // 1.0 with key 5: invalid
+        let mut m = as_map(&base);
+        m.push((
+            ciborium::Value::Integer(5.into()),
+            ciborium::Value::Array(vec![]),
+        ));
+        assert!(DeviceEngagement::try_from(ciborium::Value::Map(m)).is_err());
+
+        // 1.1 without keys 5/6: invalid
+        let mut m = as_map(&base);
+        m[0].1 = ciborium::Value::Text("1.1".into());
+        assert!(DeviceEngagement::try_from(ciborium::Value::Map(m)).is_err());
+
+        // 1.1 with key 6: valid
+        let mut m = as_map(&base);
+        m[0].1 = ciborium::Value::Text("1.1".into());
+        m.push((
+            ciborium::Value::Integer(6.into()),
+            ciborium::Value::Map(vec![]),
+        ));
+        let parsed = DeviceEngagement::try_from(ciborium::Value::Map(m))
+            .expect("1.1 with second-edition keys should parse");
+        assert_eq!(parsed.version, "1.1");
     }
 
     #[test]
