@@ -32,6 +32,7 @@
 //! - [DigestAlgorithm] enum represents different digest algorithms, such as `SHA-256, `SHA-384,
 //!   and `SHA-512`.
 use crate::definitions::{helpers::ByteStr, DeviceKeyInfo, ValidityInfo};
+use ciborium::Value;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::collections::BTreeMap;
@@ -64,6 +65,14 @@ pub struct Mso {
 
     /// Information about the validity of the Mso object.
     pub validity_info: ValidityInfo,
+
+    /// Optional status claim, matching the `status` claim defined by IETF
+    /// `draft-ietf-oauth-status-list` (a `{"status_list": {"idx": ..., "uri":
+    /// ...}}` object) or, more generally, any status/revocation entry such as
+    /// a W3C `BitstringStatusListEntry`. Used by verifiers to check whether
+    /// the mdoc has been revoked. Absent from the encoded MSO when `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status: Option<Value>,
 }
 
 #[derive(Clone, Debug, Copy, Deserialize, Serialize)]

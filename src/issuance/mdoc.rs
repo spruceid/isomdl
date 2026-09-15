@@ -48,6 +48,7 @@ pub struct Builder {
     digest_algorithm: Option<DigestAlgorithm>,
     device_key_info: Option<DeviceKeyInfo>,
     enable_decoy_digests: Option<bool>,
+    status: Option<ciborium::Value>,
 }
 
 impl Mdoc {
@@ -56,6 +57,7 @@ impl Mdoc {
     }
 
     /// Prepare mdoc for remote signing.
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         doc_type: String,
         namespaces: Namespaces,
@@ -64,6 +66,7 @@ impl Mdoc {
         device_key_info: DeviceKeyInfo,
         signature_algorithm: Algorithm,
         enable_decoy_digests: bool,
+        status: Option<ciborium::Value>,
     ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
             authorizations.validate()?;
@@ -80,6 +83,7 @@ impl Mdoc {
             device_key_info,
             doc_type: doc_type.clone(),
             validity_info,
+            status,
         };
 
         let mso_bytes = crate::cbor::to_vec(&Tag24::new(&mso)?)?;
@@ -112,6 +116,7 @@ impl Mdoc {
         device_key_info: DeviceKeyInfo,
         x5chain: X5Chain,
         enable_decoy_digests: bool,
+        status: Option<ciborium::Value>,
         signer: S,
     ) -> Result<Mdoc>
     where
@@ -126,6 +131,7 @@ impl Mdoc {
             device_key_info,
             signer.algorithm(),
             enable_decoy_digests,
+            status,
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -147,6 +153,7 @@ impl Mdoc {
         device_key_info: DeviceKeyInfo,
         x5chain: X5Chain,
         enable_decoy_digests: bool,
+        status: Option<ciborium::Value>,
         signer: S,
     ) -> Result<Mdoc>
     where
@@ -161,6 +168,7 @@ impl Mdoc {
             device_key_info,
             signer.algorithm(),
             enable_decoy_digests,
+            status,
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -242,6 +250,13 @@ impl Builder {
         self
     }
 
+    /// Set a status claim (e.g. an IETF status-list or W3C bitstring status
+    /// list entry) to embed in the MSO for revocation checking.
+    pub fn status(mut self, status: ciborium::Value) -> Self {
+        self.status = Some(status);
+        self
+    }
+
     /// Prepare the mdoc for remote signing.
     ///
     /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
@@ -272,6 +287,7 @@ impl Builder {
             device_key_info,
             signature_algorithm,
             enable_decoy_digests,
+            self.status,
         )
     }
 
@@ -306,6 +322,7 @@ impl Builder {
             device_key_info,
             x5chain,
             enable_decoy_digests,
+            self.status,
             signer,
         )
     }
@@ -341,6 +358,7 @@ impl Builder {
             device_key_info,
             x5chain,
             enable_decoy_digests,
+            self.status,
             signer,
         )
         .await
@@ -698,5 +716,190 @@ pub mod test {
                 .values()
                 .fold(0, |acc, x| acc + x.len()),
         );
+    }
+
+    #[test]
+    fn mso_without_status_omits_the_field() {
+        let mdoc = minimal_test_mdoc().expect("failed to issue mdoc");
+        assert!(mdoc.mso.status.is_none());
+
+        let mso_bytes = crate::cbor::to_vec(&mdoc.mso).expect("failed to encode mso");
+        let mso_cbor: ciborium::Value =
+            ciborium::de::from_reader(mso_bytes.as_slice()).expect("failed to decode mso cbor");
+        let map = match mso_cbor {
+            ciborium::Value::Map(m) => m,
+            _ => panic!("expected mso to encode as a cbor map"),
+        };
+        assert!(
+            !map.iter()
+                .any(|(k, _)| k == &ciborium::Value::Text("status".to_string())),
+            "status key should be absent from the encoded MSO when not set"
+        );
+    }
+
+    #[test]
+    fn mso_with_status_round_trips() {
+        use ciborium::cbor;
+
+        // The IETF `draft-ietf-oauth-status-list` `status` claim: its value is a
+        // `{"status_list": {"idx": ..., "uri": ...}}` object.
+        let status = cbor!({
+            "status_list" => {
+                "idx" => 42,
+                "uri" => "https://example.com/statuslists/1",
+            }
+        })
+        .unwrap();
+
+        let x5chain = X5Chain::builder()
+            .with_pem_certificate(ISSUER_CERT)
+            .unwrap()
+            .build()
+            .unwrap();
+        let signer: SigningKey = SecretKey::from_pkcs8_pem(ISSUER_KEY)
+            .expect("failed to parse pem")
+            .into();
+
+        let mdoc = minimal_test_mdoc_builder()
+            .status(status.clone())
+            .issue::<SigningKey, Signature>(x5chain, signer)
+            .expect("failed to issue mdoc");
+
+        assert_eq!(mdoc.mso.status, Some(status));
+
+        let mso_bytes = crate::cbor::to_vec(&mdoc.mso).expect("failed to encode mso");
+        let mso_cbor: ciborium::Value =
+            ciborium::de::from_reader(mso_bytes.as_slice()).expect("failed to decode mso cbor");
+        let map = match mso_cbor {
+            ciborium::Value::Map(m) => m,
+            _ => panic!("expected mso to encode as a cbor map"),
+        };
+        assert!(
+            map.iter()
+                .any(|(k, _)| k == &ciborium::Value::Text("status".to_string())),
+            "status key should be present in the encoded MSO when set"
+        );
+    }
+
+    fn test_status_claim() -> ciborium::Value {
+        use ciborium::cbor;
+        cbor!({
+            "status_list" => {
+                "idx" => 42,
+                "uri" => "https://example.com/statuslists/1",
+            }
+        })
+        .unwrap()
+    }
+
+    fn test_x5chain_and_signer() -> (X5Chain, SigningKey) {
+        let x5chain = X5Chain::builder()
+            .with_pem_certificate(ISSUER_CERT)
+            .unwrap()
+            .build()
+            .unwrap();
+        let signer: SigningKey = SecretKey::from_pkcs8_pem(ISSUER_KEY)
+            .expect("failed to parse pem")
+            .into();
+        (x5chain, signer)
+    }
+
+    /// `status` lives inside the same `Mso` that gets signed, so tampering it
+    /// after issuance must invalidate the issuer's COSE_Sign1 signature — mirroring
+    /// the tamper-detection tests for `value_digests` in
+    /// `presentation::authentication::mdoc::tests`.
+    #[test]
+    fn tampered_status_fails_issuer_authentication() {
+        use crate::definitions::issuer_signed::IssuerSigned;
+        use crate::presentation::authentication::mdoc::issuer_authentication;
+        use crate::presentation::reader::Error;
+
+        let (x5chain, signer) = test_x5chain_and_signer();
+
+        let mdoc = minimal_test_mdoc_builder()
+            .status(test_status_claim())
+            .issue::<SigningKey, Signature>(x5chain.clone(), signer)
+            .expect("failed to issue mdoc");
+
+        let genuine = IssuerSigned {
+            namespaces: Some(mdoc.namespaces.clone()),
+            issuer_auth: mdoc.issuer_auth.clone(),
+        };
+        issuer_authentication(x5chain.clone(), &genuine)
+            .expect("genuine response should pass issuer authentication");
+
+        // Attack: rewrite the signed MSO's status claim (e.g. to hide revocation),
+        // reusing the ORIGINAL issuer signature.
+        let mso_bytes = genuine
+            .issuer_auth
+            .payload
+            .as_ref()
+            .expect("attached payload");
+        let mut tampered_mso = crate::cbor::from_slice::<Tag24<Mso>>(mso_bytes)
+            .expect("parse mso")
+            .into_inner();
+        tampered_mso.status = Some({
+            use ciborium::cbor;
+            cbor!({
+                "status_list" => { "idx" => 0, "uri" => "https://attacker.example/statuslists/1" }
+            })
+            .unwrap()
+        });
+
+        let mut tampered_issuer_auth = genuine.issuer_auth.clone();
+        tampered_issuer_auth.payload = Some(
+            crate::cbor::to_vec(&Tag24::new(tampered_mso).expect("wrap mso")).expect("encode mso"),
+        );
+        let tampered = IssuerSigned {
+            namespaces: Some(mdoc.namespaces),
+            issuer_auth: tampered_issuer_auth,
+        };
+
+        let result = issuer_authentication(x5chain, &tampered);
+        assert!(
+            matches!(result, Err(Error::IssuerAuthentication(_))),
+            "issuer_authentication did not reject a tampered status claim: {result:?}"
+        );
+    }
+
+    /// `status` must also flow through the remote-signing (`prepare` /
+    /// `complete`) path, not just the direct `issue` path.
+    #[test]
+    fn status_survives_prepare_and_complete() {
+        let (x5chain, signer) = test_x5chain_and_signer();
+        let status = test_status_claim();
+
+        let prepared_mdoc = minimal_test_mdoc_builder()
+            .status(status.clone())
+            .prepare(signer.algorithm())
+            .expect("failed to prepare mdoc");
+
+        let signature_payload = prepared_mdoc.signature_payload();
+        let signature = Signer::<Signature>::try_sign(&signer, signature_payload)
+            .expect("failed to sign")
+            .to_vec();
+
+        let mdoc = prepared_mdoc.complete(x5chain, signature);
+
+        assert_eq!(mdoc.mso.status, Some(status));
+    }
+
+    /// Arbitrary, spec-agnostic CBOR (not shaped like a status-list entry) is
+    /// accepted and round-trips as-is: the library treats `status` as an
+    /// opaque claim and does not validate its internal structure.
+    #[test]
+    fn malformed_status_value_is_not_rejected() {
+        let (x5chain, signer) = test_x5chain_and_signer();
+        let malformed = ciborium::Value::Array(vec![
+            ciborium::Value::Text("not a status claim".to_string()),
+            ciborium::Value::Bool(true),
+        ]);
+
+        let mdoc = minimal_test_mdoc_builder()
+            .status(malformed.clone())
+            .issue::<SigningKey, Signature>(x5chain, signer)
+            .expect("failed to issue mdoc with malformed status claim");
+
+        assert_eq!(mdoc.mso.status, Some(malformed));
     }
 }
