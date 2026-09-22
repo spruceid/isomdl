@@ -177,7 +177,13 @@ async fn a_revoked_leaf_is_rejected() {
             &pki.fetcher_revoking(&[pki.leaf_serial()]),
         )
         .await;
-    assert!(!outcome.success(), "a revoked signer should not validate");
+    assert!(
+        outcome
+            .errors
+            .iter()
+            .any(|e| e.contains("certificate is revoked")),
+        "a revoked signer should fail on revocation, not on something else: {outcome:?}"
+    );
 }
 
 /// [`issue_test_mdoc_with_namespaces`] carries attributes that have nothing to do with

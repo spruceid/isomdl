@@ -211,8 +211,9 @@ impl TestPki {
     /// moving the MSO's [`ValidityInfo`](crate::definitions::ValidityInfo) over
     /// pinning validation time — pinning moves the certificate window too.
     ///
-    /// `crl_url` is `None` unless the test exercises CRL fetching; see
-    /// [`prepare_root_certificate`].
+    /// `crl_url` goes into the root's CRL distribution point extension; see
+    /// [`prepare_root_certificate`]. Use [`Self::CRL_URL`] unless the test
+    /// exercises CRL fetching from a specific URL.
     pub fn generate(crl_url: String, validity: Validity, eku: ObjectIdentifier) -> Self {
         Self::generate_with_signer_subject(crl_url, validity, eku, Self::DEFAULT_SUBJECT)
     }
@@ -341,7 +342,7 @@ impl revocation::RevocationFetcher for StaticCrlFetcher {
 /// - CRL Number (5.2.3, M)
 pub(crate) fn build_crl_extensions(root_cert: &Certificate) -> Vec<Extension> {
     use const_oid::AssociatedOid;
-    use der::{Decode, Encode};
+    use der::Encode;
 
     let ski = root_cert
         .tbs_certificate
