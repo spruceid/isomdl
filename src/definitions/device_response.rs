@@ -57,14 +57,14 @@ pub type DocumentErrors = NonEmptyVec<DocumentError>;
 pub type DocumentError = BTreeMap<String, DocumentErrorCode>;
 
 /// Document specific errors.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(try_from = "i128", into = "i128")]
 pub enum DocumentErrorCode {
     DataNotReturned,
     ApplicationSpecific(i128),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(try_from = "u64", into = "u64")]
 pub enum Status {
     OK,

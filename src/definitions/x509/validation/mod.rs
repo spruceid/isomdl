@@ -48,6 +48,81 @@ impl ValidationOptions {
     }
 }
 
+/// Chooses the certificate profile to validate a given document type under.
+///
+/// A `BTreeMap<String, MdocProfile>` selects per doc type and answers `None` for anything
+/// absent, which is refused rather than validated under a guess. To validate every doc type
+/// under one profile, wrap it in [`AnyDocType`] — spelling that out at the call site because
+/// it opts out of the refusal.
+///
+/// The selector runs against the doc type the holder *claims*, before any signature is
+/// checked. That is safe because it can only narrow which certificates are acceptable,
+/// never widen: a document labelled as something it is not fails the
+/// [`DocTypeMismatch`](crate::presentation::authentication::DocumentError::DocTypeMismatch)
+/// check against its signature-verified MSO, which ISO/IEC DIS 18013-5 requires to agree
+/// with the one in the document.
+pub trait ProfileSelector {
+    /// The profile document signer certificates are validated under.
+    type Issuer: CertificateProfile;
+    /// The profile reader certificates are validated under.
+    type Reader: CertificateProfile;
+
+    /// The issuer profile for `doc_type`, or `None` to refuse it.
+    fn issuer_profile_for(&self, doc_type: &str) -> Option<Self::Issuer>;
+
+    /// The reader profile for `doc_type`, or `None` to refuse it.
+    fn reader_profile_for(&self, doc_type: &str) -> Option<Self::Reader>;
+}
+
+/// A [`ProfileSelector`] that answers with the same profile whatever the doc type.
+///
+/// The right choice when a session handles one kind of credential. It accepts doc types the
+/// operator never configured, so it is a named type rather than a bare [`MdocProfile`]: a
+/// call site that opts out of refusing unknown doc types should say so.
+///
+/// Generic over the two halves, so a custom [`CertificateProfile`] goes through it without
+/// writing a [`ProfileSelector`] by hand:
+///
+/// ```ignore
+/// AnyDocType(MdocProfile { issuer: MyProfile, reader: MdocProfile::MDL.reader })
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnyDocType<I = IssuerProfile, R = ReaderProfile>(pub MdocProfile<I, R>);
+
+impl<I, R> ProfileSelector for AnyDocType<I, R>
+where
+    I: CertificateProfile + Clone,
+    R: CertificateProfile + Clone,
+{
+    type Issuer = I;
+    type Reader = R;
+
+    fn issuer_profile_for(&self, _doc_type: &str) -> Option<I> {
+        Some(self.0.issuer.clone())
+    }
+
+    fn reader_profile_for(&self, _doc_type: &str) -> Option<R> {
+        Some(self.0.reader.clone())
+    }
+}
+
+impl<I, R> ProfileSelector for std::collections::BTreeMap<String, MdocProfile<I, R>>
+where
+    I: CertificateProfile + Clone,
+    R: CertificateProfile + Clone,
+{
+    type Issuer = I;
+    type Reader = R;
+
+    fn issuer_profile_for(&self, doc_type: &str) -> Option<I> {
+        self.get(doc_type).map(|profile| profile.issuer.clone())
+    }
+
+    fn reader_profile_for(&self, doc_type: &str) -> Option<R> {
+        self.get(doc_type).map(|profile| profile.reader.clone())
+    }
+}
+
 pub use eu_age_verification::{
     EuAgeVerificationProfile, EU_AGE_VERIFICATION_DOC_TYPE, NCP_POLICY_OID,
 };
@@ -89,9 +164,9 @@ pub use const_oid::ObjectIdentifier;
 /// assert_ne!(profile, MdocProfile::MDL);
 /// assert_ne!(MdocProfile::ISO_23220, MdocProfile::MDL);
 /// ```
-/// The two halves are generic so a custom [`CertificateProfile`] can take either place.
-/// The shipped constants are the default instantiation,
-/// `MdocProfile<IssuerProfile, ReaderProfile>`.
+/// The two halves are generic so a custom [`CertificateProfile`] can take either place and
+/// still use [`AnyDocType`] and the `BTreeMap` selector. The shipped constants are the
+/// default instantiation, `MdocProfile<IssuerProfile, ReaderProfile>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MdocProfile<I = IssuerProfile, R = ReaderProfile> {
     /// Rules for a document signer certificate, applied when reading a document.
@@ -300,8 +375,8 @@ mod oid_as_string {
 /// How a certificate chain is validated against a trust anchor registry.
 ///
 /// The built-in profiles — [`IssuerProfile`], [`ReaderProfile`] and [`VicalProfile`] — cover
-/// ISO/IEC 18013-5 and the credentials that rebase it onto their own OID arc. Implement
-/// this trait for a
+/// ISO/IEC 18013-5 and the credentials that rebase it onto their own OID arc, and are
+/// selected per document type through [`ProfileSelector`]. Implement this trait for a
 /// credential whose PKI differs in ways an [`MdocProfile`] cannot express: a chain carrying
 /// intermediate CA certificates, certificates carrying no mdoc key purpose at all, or checks
 /// this library does not know about.

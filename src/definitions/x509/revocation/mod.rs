@@ -376,125 +376,18 @@ mod tests {
 /// Integration tests that require the reqwest feature for HTTP mocking.
 #[cfg(all(test, feature = "reqwest"))]
 mod integration_tests {
-    use const_oid::AssociatedOid;
-    use der::{asn1::OctetString, Decode, Encode};
-    use p256::NistP256;
-    use signature::Signer;
     use wiremock::{
         matchers::{method, path},
         Mock, MockServer, ResponseTemplate,
     };
-    use x509_cert::{
-        crl::{CertificateList, RevokedCert, TbsCertList},
-        ext::{
-            pkix::{AuthorityKeyIdentifier, SubjectKeyIdentifier},
-            Extension,
-        },
-        name::Name,
-        serial_number::SerialNumber,
-        spki::SignatureBitStringEncoding,
-        time::Time,
-        Certificate, Version,
-    };
 
-    use super::{CachingRevocationFetcher, ReqwestClient, OID_CRL_NUMBER};
+    use super::{CachingRevocationFetcher, ReqwestClient};
     use crate::definitions::x509::{
-        test::setup_with_crl_url,
+        test::{create_crl, setup_with_crl_url},
         trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
-        validation::{validate, MdocProfile},
+        validation::validate,
         X5Chain,
     };
-
-    /// Build CRL extensions per ISO 18013-5 Table B.10:
-    /// - Authority Key Identifier (5.2.1, M) with keyIdentifier matching the IACA's SKI
-    /// - CRL Number (5.2.3, M)
-    fn build_crl_extensions(root_cert: &Certificate) -> Vec<Extension> {
-        // Extract SKI from the root certificate to use as the CRL's AKI
-        let ski = root_cert
-            .tbs_certificate
-            .extensions
-            .iter()
-            .flatten()
-            .find(|ext| ext.extn_id == SubjectKeyIdentifier::OID)
-            .expect("root certificate must have SKI");
-        let ski =
-            SubjectKeyIdentifier::from_der(ski.extn_value.as_bytes()).expect("valid SKI extension");
-
-        let aki = AuthorityKeyIdentifier {
-            key_identifier: Some(OctetString::new(ski.0.as_bytes().to_vec()).unwrap()),
-            ..Default::default()
-        };
-        let aki_ext = Extension {
-            extn_id: super::OID_AUTHORITY_KEY_IDENTIFIER,
-            critical: false,
-            extn_value: OctetString::new(aki.to_der().unwrap()).unwrap(),
-        };
-
-        // CRL Number = 1 (encoded as DER INTEGER)
-        let crl_number_value = 1u64.to_der().unwrap();
-        let crl_number_ext = Extension {
-            extn_id: OID_CRL_NUMBER,
-            critical: false,
-            extn_value: OctetString::new(crl_number_value).unwrap(),
-        };
-
-        vec![aki_ext, crl_number_ext]
-    }
-
-    fn create_crl(
-        issuer: Name,
-        root_cert: &Certificate,
-        root_key: &p256::ecdsa::SigningKey,
-        revoked_serials: &[SerialNumber],
-    ) -> Vec<u8> {
-        let now = std::time::SystemTime::now();
-        let this_update = Time::try_from(now).unwrap();
-        let next_update = Time::try_from(now + std::time::Duration::from_secs(86400)).unwrap();
-
-        let revoked_certificates = if revoked_serials.is_empty() {
-            None
-        } else {
-            Some(
-                revoked_serials
-                    .iter()
-                    .map(|serial| RevokedCert {
-                        serial_number: serial.clone(),
-                        revocation_date: this_update,
-                        crl_entry_extensions: None,
-                    })
-                    .collect(),
-            )
-        };
-
-        let crl_extensions = build_crl_extensions(root_cert);
-
-        let tbs = TbsCertList {
-            version: Version::V2,
-            signature: x509_cert::spki::AlgorithmIdentifierOwned {
-                oid: const_oid::db::rfc5912::ECDSA_WITH_SHA_256,
-                parameters: None,
-            },
-            issuer,
-            this_update,
-            next_update: Some(next_update),
-            revoked_certificates,
-            crl_extensions: Some(crl_extensions),
-        };
-
-        let tbs_bytes = tbs.to_der().unwrap();
-        let signature: ecdsa::Signature<NistP256> = root_key.sign(&tbs_bytes);
-
-        let crl = CertificateList {
-            tbs_cert_list: tbs,
-            signature_algorithm: x509_cert::spki::AlgorithmIdentifierOwned {
-                oid: const_oid::db::rfc5912::ECDSA_WITH_SHA_256,
-                parameters: None,
-            },
-            signature: signature.to_der().to_bitstring().unwrap(),
-        };
-
-        crl.to_der().unwrap()
-    }
 
     #[test_log::test(tokio::test)]
     async fn validation_passes_when_certificate_not_revoked() {
@@ -528,7 +421,7 @@ mod integration_tests {
         let http_client = ReqwestClient::new().unwrap();
         let crl_fetcher = CachingRevocationFetcher::new(http_client);
         let outcome = validate(
-            &MdocProfile::MDL.issuer,
+            &crate::definitions::x509::validation::MdocProfile::MDL.issuer,
             &x5chain,
             &trust_anchor_registry,
             &crl_fetcher,
@@ -576,7 +469,7 @@ mod integration_tests {
         let http_client = ReqwestClient::new().unwrap();
         let crl_fetcher = CachingRevocationFetcher::new(http_client);
         let outcome = validate(
-            &MdocProfile::MDL.issuer,
+            &crate::definitions::x509::validation::MdocProfile::MDL.issuer,
             &x5chain,
             &trust_anchor_registry,
             &crl_fetcher,
@@ -624,7 +517,7 @@ mod integration_tests {
         let http_client = ReqwestClient::new().unwrap();
         let crl_fetcher = CachingRevocationFetcher::new(http_client);
         let outcome = validate(
-            &MdocProfile::MDL.issuer,
+            &crate::definitions::x509::validation::MdocProfile::MDL.issuer,
             &x5chain,
             &trust_anchor_registry,
             &crl_fetcher,
