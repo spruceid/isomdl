@@ -67,6 +67,9 @@ CI sets `RUSTFLAGS="-Dwarnings"` and `RUSTDOCFLAGS="-Dwarnings"` — all warning
   - **`helpers/`** — Utility types: `NonEmptyMap`, `NonEmptyVec`, `ByteStr`, `Tag24`.
   - **`traits/`** — `ToCbor` and `FromJson` traits for CBOR/JSON conversion.
   - **`x509/`** — Certificate validation, CRL revocation, trust anchors.
+    - **`validation`** — The `CertificateProfile` trait and its built-ins (`IssuerProfile`,
+      `ReaderProfile`, `VicalProfile`, `EuAgeVerificationProfile`). `MdocProfile` pairs an
+      issuer and reader half.
 - **`presentation/`** — Device-Reader interaction layer.
   - **`device`** — Device-side state machine (see below).
   - **`reader`** — Reader-side session management.

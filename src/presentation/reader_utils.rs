@@ -103,14 +103,14 @@ where
         }
     }
 
-    let validation_outcome = x509::validation::ValidationRuleset::Mdl
-        .validate_with_options(
-            &x5chain,
-            &trust_anchor_registry,
-            revocation_fetcher,
-            options,
-        )
-        .await;
+    let validation_outcome = x509::validation::validate_with_options(
+        &x509::validation::MdocProfile::MDL.issuer,
+        &x5chain,
+        &trust_anchor_registry,
+        revocation_fetcher,
+        options,
+    )
+    .await;
 
     // Add revocation errors as warnings (non-fatal)
     if !validation_outcome.revocation_errors.is_empty() {

@@ -19,8 +19,8 @@ use crl_distribution_points::{
     CrlDistributionPointsValidator, RelaxedCrlDistributionPointsValidator,
 };
 use der::Decode;
-use extended_key_usage::document_signer_extended_key_usage_oid;
-use extended_key_usage::mdoc_reader_extended_key_usage_oid;
+pub use extended_key_usage::document_signer_extended_key_usage_oid;
+pub use extended_key_usage::mdoc_reader_extended_key_usage_oid;
 use extended_key_usage::vical_signer_extended_key_usage_oid;
 use extended_key_usage::ExtendedKeyUsageValidator;
 use issuer_alternative_name::IssuerAlternativeNameValidator;
@@ -34,6 +34,8 @@ use x509_cert::ext::{
     Extension,
 };
 use x509_cert::Certificate;
+
+use super::ExtensionRule;
 
 type Error = String;
 
@@ -94,7 +96,12 @@ pub fn validate_iaca_extensions(certificate: &Certificate) -> Vec<Error> {
 }
 
 /// Validate document signer extensions according to 18013-5 Annex B.
-pub fn validate_document_signer_certificate_extensions(certificate: &Certificate) -> Vec<Error> {
+pub fn validate_document_signer_certificate_extensions(
+    certificate: &Certificate,
+    expected_eku: ObjectIdentifier,
+    crl_distribution_points: ExtensionRule,
+    issuer_alternative_name: ExtensionRule,
+) -> Vec<Error> {
     tracing::debug!("validating document signer certificate extensions...");
 
     let extensions = certificate.tbs_certificate.extensions.iter().flatten();
@@ -105,11 +112,11 @@ pub fn validate_document_signer_certificate_extensions(certificate: &Certificate
         ExtensionValidators::default()
             .with(SubjectKeyIdentifierValidator::from_certificate(certificate))
             .with(ExtendedKeyUsageValidator {
-                expected_oid: document_signer_extended_key_usage_oid(),
+                expected_oid: expected_eku,
             })
             .with(KeyUsageValidator::document_signer())
-            .with(CrlDistributionPointsValidator)
-            .with(IssuerAlternativeNameValidator)
+            .with_rule(crl_distribution_points, CrlDistributionPointsValidator)
+            .with_rule(issuer_alternative_name, IssuerAlternativeNameValidator)
             .validate_extensions(extensions),
     );
 
@@ -117,7 +124,12 @@ pub fn validate_document_signer_certificate_extensions(certificate: &Certificate
 }
 
 /// Validate mdoc reader extensions according to 18013-5 Annex B.
-pub fn validate_mdoc_reader_certificate_extensions(certificate: &Certificate) -> Vec<Error> {
+pub fn validate_mdoc_reader_certificate_extensions(
+    certificate: &Certificate,
+    expected_eku: ObjectIdentifier,
+    crl_distribution_points: ExtensionRule,
+    issuer_alternative_name: ExtensionRule,
+) -> Vec<Error> {
     tracing::debug!("validating mdoc_reader certificate extensions...");
 
     let extensions = certificate.tbs_certificate.extensions.iter().flatten();
@@ -128,11 +140,11 @@ pub fn validate_mdoc_reader_certificate_extensions(certificate: &Certificate) ->
         ExtensionValidators::default()
             .with(SubjectKeyIdentifierValidator::from_certificate(certificate))
             .with(ExtendedKeyUsageValidator {
-                expected_oid: mdoc_reader_extended_key_usage_oid(),
+                expected_oid: expected_eku,
             })
             .with(KeyUsageValidator::mdoc_reader())
-            .with(CrlDistributionPointsValidator)
-            .with(IssuerAlternativeNameValidator)
+            .with_rule(crl_distribution_points, CrlDistributionPointsValidator)
+            .with_rule(issuer_alternative_name, IssuerAlternativeNameValidator)
             .validate_extensions(extensions),
     );
 
@@ -169,23 +181,18 @@ pub fn validate_vical_signer_certificate_extensions(certificate: &Certificate) -
 }
 
 #[derive(Default)]
-struct ExtensionValidators(Vec<Box<dyn ExtensionValidator>>);
+struct ExtensionValidators(Vec<TrackedExtension>);
 
-struct RequiredExtension {
+struct TrackedExtension {
     found: bool,
+    /// Whether the certificate is allowed to omit the extension. When present it is
+    /// validated either way, so relaxing a profile never skips a check on data that is
+    /// actually there.
+    optional: bool,
     validator: Box<dyn ExtensionValidator>,
 }
 
-impl RequiredExtension {
-    fn new(validator: Box<dyn ExtensionValidator>) -> Self {
-        Self {
-            found: false,
-            validator,
-        }
-    }
-}
-
-impl Deref for RequiredExtension {
+impl Deref for TrackedExtension {
     type Target = Box<dyn ExtensionValidator>;
 
     fn deref(&self) -> &Self::Target {
@@ -201,8 +208,30 @@ trait ExtensionValidator {
 
 impl ExtensionValidators {
     fn with<V: ExtensionValidator + 'static>(mut self, validator: V) -> Self {
-        self.0.push(Box::new(validator));
+        self.0.push(TrackedExtension {
+            found: false,
+            optional: false,
+            validator: Box::new(validator),
+        });
         self
+    }
+
+    /// Add a validator for an extension the profile does not require.
+    fn with_optional<V: ExtensionValidator + 'static>(mut self, validator: V) -> Self {
+        self.0.push(TrackedExtension {
+            found: false,
+            optional: true,
+            validator: Box::new(validator),
+        });
+        self
+    }
+
+    /// Add `validator`, required or not according to `rule`.
+    fn with_rule<V: ExtensionValidator + 'static>(self, rule: ExtensionRule, validator: V) -> Self {
+        match rule {
+            ExtensionRule::Required => self.with(validator),
+            ExtensionRule::Optional => self.with_optional(validator),
+        }
     }
 
     fn validate_extensions<'a, Extensions>(self, extensions: Extensions) -> Vec<Error>
@@ -211,8 +240,7 @@ impl ExtensionValidators {
     {
         let mut validation_errors = vec![];
 
-        let mut validators: Vec<RequiredExtension> =
-            self.0.into_iter().map(RequiredExtension::new).collect();
+        let mut validators = self.0;
 
         for ext in extensions {
             if let Some(validator) = validators.iter_mut().find(|validator| {
@@ -244,7 +272,7 @@ impl ExtensionValidators {
         validation_errors.extend(
             validators
                 .iter()
-                .filter(|v| !v.found)
+                .filter(|v| !v.found && !v.optional)
                 .map(|v| format!("{}: required extension not found", v.ext_name())),
         );
 

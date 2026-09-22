@@ -401,7 +401,7 @@ mod integration_tests {
     use crate::definitions::x509::{
         test::setup_with_crl_url,
         trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
-        validation::ValidationRuleset,
+        validation::{validate, MdocProfile},
         X5Chain,
     };
 
@@ -527,9 +527,13 @@ mod integration_tests {
 
         let http_client = ReqwestClient::new().unwrap();
         let crl_fetcher = CachingRevocationFetcher::new(http_client);
-        let outcome = ValidationRuleset::Mdl
-            .validate(&x5chain, &trust_anchor_registry, &crl_fetcher)
-            .await;
+        let outcome = validate(
+            &MdocProfile::MDL.issuer,
+            &x5chain,
+            &trust_anchor_registry,
+            &crl_fetcher,
+        )
+        .await;
 
         assert!(outcome.success(), "Expected success but got: {outcome:?}");
         assert!(
@@ -571,9 +575,13 @@ mod integration_tests {
 
         let http_client = ReqwestClient::new().unwrap();
         let crl_fetcher = CachingRevocationFetcher::new(http_client);
-        let outcome = ValidationRuleset::Mdl
-            .validate(&x5chain, &trust_anchor_registry, &crl_fetcher)
-            .await;
+        let outcome = validate(
+            &MdocProfile::MDL.issuer,
+            &x5chain,
+            &trust_anchor_registry,
+            &crl_fetcher,
+        )
+        .await;
 
         assert!(
             !outcome.success(),
@@ -615,9 +623,13 @@ mod integration_tests {
 
         let http_client = ReqwestClient::new().unwrap();
         let crl_fetcher = CachingRevocationFetcher::new(http_client);
-        let outcome = ValidationRuleset::Mdl
-            .validate(&x5chain, &trust_anchor_registry, &crl_fetcher)
-            .await;
+        let outcome = validate(
+            &MdocProfile::MDL.issuer,
+            &x5chain,
+            &trust_anchor_registry,
+            &crl_fetcher,
+        )
+        .await;
 
         // Validation should still succeed (CRL fetch errors are non-fatal)
         assert!(
