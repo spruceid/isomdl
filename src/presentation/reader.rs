@@ -690,6 +690,153 @@ pub fn parse_namespaces(
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::definitions::device_engagement::DeviceRetrievalMethods;
+    use crate::definitions::device_request::DataElements;
+    use crate::definitions::device_signed::DeviceAuthType;
+    use crate::definitions::session::{Handover as DeviceHandover, SessionTranscript};
+    use crate::definitions::{BleOptions, DeviceRetrievalMethod};
+    use crate::presentation::authentication::AuthenticationStatus;
+    use crate::presentation::device::{self, Documents};
+    use crate::presentation::reader_utils::validate_response;
+    use crate::presentation::Stringify;
+    use digest::Mac;
+    use signature::Signer;
+
+    /// `SessionTranscriptBytes`, as some platforms (e.g. Apple's ProximityReader) hand it to
+    /// the reader instead of the bare `SessionTranscript`.
+    #[derive(Clone, Serialize, Deserialize)]
+    #[serde(transparent)]
+    struct TaggedSessionTranscript(Tag24<SessionTranscript180135>);
+
+    impl SessionTranscript for TaggedSessionTranscript {}
+
+    /// Runs a simulated QR/BLE session and verifies the device response against the
+    /// reader's session transcript wrapped in Tag24.
+    async fn validate_with_tagged_transcript(
+        auth_type: DeviceAuthType,
+    ) -> ResponseAuthenticationOutcome {
+        const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
+        const NAMESPACE: &str = "org.iso.18013.5.1";
+        const ELEMENT: &str = "age_over_21";
+
+        let mdl = device::Document::parse(
+            include_str!("../../tests/data/stringified-mdl.txt").to_string(),
+        )
+        .unwrap();
+        let der =
+            base64::decode(include_str!("../../test/issuance/device_key.b64").trim()).unwrap();
+        let signing_key: p256::ecdsa::SigningKey =
+            p256::SecretKey::from_sec1_der(&der).unwrap().into();
+
+        let drms = DeviceRetrievalMethods::new(DeviceRetrievalMethod::BLE(BleOptions {
+            peripheral_server_mode: None,
+            central_client_mode: Some(CentralClientMode {
+                uuid: Uuid::new_v4(),
+            }),
+        }));
+        let engaged = device::SessionManagerInit::initialise(
+            Documents::new(DOC_TYPE.to_string(), mdl),
+            Some(drms),
+            None,
+        )
+        .unwrap()
+        .engage(DeviceHandover::QR)
+        .unwrap();
+
+        let (mut reader_sm, request, _) = SessionManager::establish_session(
+            Handover::QR(engaged.qr_handover().unwrap()),
+            device_request::Namespaces::new(
+                NAMESPACE.to_string(),
+                DataElements::new(ELEMENT.to_string(), false),
+            ),
+            TrustAnchorRegistry::default(),
+        )
+        .unwrap();
+
+        let (mut device_sm, validated_request) = engaged
+            .process_session_establishment(
+                cbor::from_slice(&request).unwrap(),
+                TrustAnchorRegistry::default(),
+                &(),
+            )
+            .await
+            .unwrap();
+
+        let permitted = [(
+            DOC_TYPE.to_string(),
+            [(NAMESPACE.to_string(), vec![ELEMENT.to_string()])]
+                .into_iter()
+                .collect(),
+        )]
+        .into_iter()
+        .collect();
+        let e_mac_key = match auth_type {
+            DeviceAuthType::Mac0 => {
+                let static_scalar: p256::NonZeroScalar =
+                    p256::SecretKey::from(signing_key.clone()).into();
+                Some(device_sm.e_mac_key_from_static_key(&static_scalar).unwrap())
+            }
+            DeviceAuthType::Sign1 => None,
+        };
+        device_sm.set_device_auth_type(auth_type);
+        device_sm.prepare_response(&validated_request.items_request, permitted);
+        while let Some((_, payload)) = device_sm
+            .get_next_signature_payload()
+            .map(|(id, p)| (id, p.to_vec()))
+        {
+            let signature = match &e_mac_key {
+                Some(key) => {
+                    let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key).unwrap();
+                    mac.update(&payload);
+                    mac.finalize().into_bytes().to_vec()
+                }
+                None => {
+                    let signature: p256::ecdsa::Signature = signing_key.sign(&payload);
+                    signature.to_vec()
+                }
+            };
+            device_sm.submit_next_signature(signature).unwrap();
+        }
+        let response = device_sm.retrieve_response().unwrap();
+
+        let device_response = reader_sm.decrypt_response(&response).unwrap();
+        let (document, x5chain, namespaces) = parse(&device_response).unwrap();
+        let tagged =
+            TaggedSessionTranscript(Tag24::new(reader_sm.session_transcript.clone()).unwrap());
+        validate_response(
+            tagged,
+            TrustAnchorRegistry::default(),
+            x5chain,
+            document.clone(),
+            namespaces,
+            vec![DOC_TYPE.to_string()],
+            &(),
+            reader_sm.e_reader_key_private,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn device_signature_verifies_with_tagged_session_transcript() {
+        let outcome = validate_with_tagged_transcript(DeviceAuthType::Sign1).await;
+        assert_eq!(
+            outcome.device_authentication,
+            AuthenticationStatus::Valid,
+            "{:?}",
+            outcome.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn device_mac_verifies_with_tagged_session_transcript() {
+        let outcome = validate_with_tagged_transcript(DeviceAuthType::Mac0).await;
+        assert_eq!(
+            outcome.device_authentication,
+            AuthenticationStatus::Valid,
+            "{:?}",
+            outcome.errors
+        );
+    }
 
     #[test]
     fn nested_response_values() {
