@@ -17,6 +17,7 @@ use hmac::Hmac;
 use issuer_signed::IssuerSigned;
 use p256::{FieldBytes, NistP256};
 use p384::NistP384;
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use ssi_jwk::Params;
 use ssi_jwk::JWK as SsiJwk;
@@ -147,7 +148,55 @@ fn verify_value_digests(mso: &Mso, namespaces: &IssuerNamespaces) -> Result<(), 
     Ok(())
 }
 
+/// A `SessionTranscript` normalized to its bare CBOR array form.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+struct UntaggedSessionTranscript(ciborium::Value);
+
+impl SessionTranscript for UntaggedSessionTranscript {}
+
+/// Returns the bare `SessionTranscript` if `session_transcript` is instead
+/// `SessionTranscriptBytes` (`#6.24(bstr .cbor SessionTranscript)`), or `None` if it
+/// is already untagged.
+///
+/// Some platforms hand the reader the tagged form (e.g. Apple's ProximityReader
+/// `sessionTranscript`). `DeviceAuthentication` must embed the bare array (§9.1.3.4), and
+/// the EMacKey salt wraps it in Tag24 itself (§9.1.3.5), so the tagged form would never
+/// verify.
+fn untag_session_transcript<S: SessionTranscript>(
+    session_transcript: &S,
+) -> Result<Option<UntaggedSessionTranscript>, Error> {
+    let value: ciborium::Value = cbor::from_slice(&cbor::to_vec(session_transcript)?)?;
+    match value {
+        ciborium::Value::Tag(24, inner) => match *inner {
+            ciborium::Value::Bytes(bytes) => {
+                Ok(Some(UntaggedSessionTranscript(cbor::from_slice(&bytes)?)))
+            }
+            _ => Err(Error::CborDecodingError),
+        },
+        _ => Ok(None),
+    }
+}
+
+/// Verify mdoc (device) authentication for `document` against `session_transcript`.
+///
+/// `session_transcript` may be either `SessionTranscript` or `SessionTranscriptBytes`;
+/// the tagged form is unwrapped before verification.
 pub fn device_authentication<S>(
+    document: &Document,
+    session_transcript: S,
+    e_reader_key_private: &[u8; 32],
+) -> Result<(), Error>
+where
+    S: SessionTranscript + Clone,
+{
+    match untag_session_transcript(&session_transcript)? {
+        Some(untagged) => verify_device_authentication(document, untagged, e_reader_key_private),
+        None => verify_device_authentication(document, session_transcript, e_reader_key_private),
+    }
+}
+
+fn verify_device_authentication<S>(
     document: &Document,
     session_transcript: S,
     e_reader_key_private: &[u8; 32],
