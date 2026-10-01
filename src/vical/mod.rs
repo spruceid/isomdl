@@ -17,7 +17,7 @@ use crate::{
         x509::{
             revocation::RevocationFetcher,
             trust_anchor::{TrustAnchor, TrustAnchorRegistry, TrustPurpose},
-            validation::{ValidationOutcome, ValidationRuleset},
+            validation::{ValidationOutcome, VicalProfile},
             SupportedCurve, X5Chain,
         },
     },
@@ -187,6 +187,7 @@ impl VerifiedVical {
     ) -> Result<Self, VerificationError> {
         Self::from_bytes_with_options(
             bytes,
+            &VicalProfile,
             trust_anchors,
             revocation_fetcher,
             &ValidationOptions::default(),
@@ -196,19 +197,29 @@ impl VerifiedVical {
 
     /// Verify a VICAL from its CBOR-encoded COSE_Sign1 representation with custom options.
     ///
-    /// This is the same as [`from_bytes`](Self::from_bytes) but allows specifying custom
-    /// validation options, such as a specific validation time for certificate validity checks.
+    /// This is the same as [`from_bytes`](Self::from_bytes) but allows specifying the
+    /// certificate profile and validation options, such as a specific validation time for
+    /// certificate validity checks.
     ///
     /// # Arguments
     /// * `bytes` - The CBOR-encoded COSE_Sign1 containing the VICAL
+    /// * `profile` - The profile the signer's chain is validated under. [`VicalProfile`] is
+    ///   ISO/IEC 18013-5 Annex C; supply your own for a VICAL whose signer certificates
+    ///   deviate from it.
     /// * `trust_anchors` - Registry of trusted root/intermediate certificates for chain validation
     /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
     /// * `options` - Custom validation options
     ///
     /// # Returns
     /// A `VerifiedVical` containing the parsed VICAL and the X.509 certificate chain on success.
-    pub async fn from_bytes_with_options<R: RevocationFetcher>(
+    // Fully qualified: `vical::CertificateProfile` is a different, pre-existing type — the
+    // OID string of C.1.7.1's `certificateProfiles` field.
+    pub async fn from_bytes_with_options<
+        P: crate::definitions::x509::validation::CertificateProfile,
+        R: RevocationFetcher,
+    >(
         bytes: &[u8],
+        profile: &P,
         trust_anchors: &TrustAnchorRegistry,
         revocation_fetcher: &R,
         options: &ValidationOptions,
@@ -255,9 +266,14 @@ impl VerifiedVical {
         }
 
         // Validate certificate chain against trust anchors.
-        let validation_outcome = ValidationRuleset::Vical
-            .validate_with_options(&x5chain, trust_anchors, revocation_fetcher, options)
-            .await;
+        let validation_outcome = crate::definitions::x509::validation::validate_with_options(
+            profile,
+            &x5chain,
+            trust_anchors,
+            revocation_fetcher,
+            options,
+        )
+        .await;
         if !validation_outcome.success() {
             return Err(VerificationError::ChainValidationFailed(validation_outcome));
         }
@@ -386,10 +402,15 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let verified =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
-                .await
-                .expect("VICAL verification should succeed");
+        let verified = VerifiedVical::from_bytes_with_options(
+            AAMVA_VICAL,
+            &VicalProfile,
+            &trust_anchors,
+            &(),
+            &options,
+        )
+        .await
+        .expect("VICAL verification should succeed");
 
         // Verify the VICAL was parsed correctly.
         assert_eq!(verified.vical.version, "1.0");
@@ -410,6 +431,64 @@ mod test {
         );
     }
 
+    /// The profile is the caller's to choose, as it is everywhere else certificates are
+    /// validated. A VICAL whose signer certificates deviate from Annex C is a matter of
+    /// supplying different rules, not of patching this crate.
+    #[tokio::test]
+    async fn a_custom_profile_is_used_instead_of_annex_c() {
+        use crate::definitions::x509::validation::{CertificateProfile, ChainRule, RevocationRule};
+        use x509_cert::Certificate;
+
+        struct HouseRules;
+
+        impl CertificateProfile for HouseRules {
+            fn validate_end_entity(&self, _certificate: &Certificate) -> Vec<String> {
+                vec!["not on the house list".to_string()]
+            }
+            fn trust_purpose(&self) -> TrustPurpose {
+                TrustPurpose::VicalAuthority
+            }
+            fn validate_trust_anchor(&self, _certificate: &Certificate) -> Vec<String> {
+                Vec::new()
+            }
+            fn validate_against_trust_anchor(
+                &self,
+                _signer: &Certificate,
+                _authority: &Certificate,
+            ) -> Vec<String> {
+                Vec::new()
+            }
+            fn chain(&self) -> ChainRule {
+                ChainRule::WalkToTrustAnchor
+            }
+            fn revocation(&self) -> RevocationRule {
+                RevocationRule::Crl
+            }
+        }
+
+        let trust_anchors = aamva_trust_anchors();
+        let options = ValidationOptions {
+            validation_time: Some(validation_time_before_expiry()),
+        };
+
+        // The same VICAL that `verify_aamva_vical_with_trust_anchors` accepts, so the
+        // profile is the only thing that changed.
+        let error = VerifiedVical::from_bytes_with_options(
+            AAMVA_VICAL,
+            &HouseRules,
+            &trust_anchors,
+            &(),
+            &options,
+        )
+        .await
+        .expect_err("the custom profile rejects this signer");
+
+        assert!(
+            format!("{error:?}").contains("not on the house list"),
+            "{error:?}"
+        );
+    }
+
     #[tokio::test]
     async fn verify_aamva_vical_with_intermediate_as_trust_anchor() {
         // Alternatively, trust the intermediate CA directly.
@@ -426,10 +505,15 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let verified =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
-                .await
-                .expect("VICAL verification should succeed with intermediate as trust anchor");
+        let verified = VerifiedVical::from_bytes_with_options(
+            AAMVA_VICAL,
+            &VicalProfile,
+            &trust_anchors,
+            &(),
+            &options,
+        )
+        .await
+        .expect("VICAL verification should succeed with intermediate as trust anchor");
 
         assert_eq!(verified.vical.version, "1.0");
     }
@@ -441,9 +525,14 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let result =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
-                .await;
+        let result = VerifiedVical::from_bytes_with_options(
+            AAMVA_VICAL,
+            &VicalProfile,
+            &trust_anchors,
+            &(),
+            &options,
+        )
+        .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -470,9 +559,14 @@ mod test {
             validation_time: Some(validation_time_before_expiry()),
         };
 
-        let result =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
-                .await;
+        let result = VerifiedVical::from_bytes_with_options(
+            AAMVA_VICAL,
+            &VicalProfile,
+            &trust_anchors,
+            &(),
+            &options,
+        )
+        .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -487,9 +581,14 @@ mod test {
             validation_time: Some(validation_time_after_expiry()),
         };
 
-        let result =
-            VerifiedVical::from_bytes_with_options(AAMVA_VICAL, &trust_anchors, &(), &options)
-                .await;
+        let result = VerifiedVical::from_bytes_with_options(
+            AAMVA_VICAL,
+            &VicalProfile,
+            &trust_anchors,
+            &(),
+            &options,
+        )
+        .await;
 
         assert!(
             matches!(result, Err(VerificationError::ChainValidationFailed(_))),
@@ -540,7 +639,7 @@ mod test {
         use crate::definitions::x509::{
             revocation::{CachingRevocationFetcher, ReqwestClient},
             test::setup_with_crl_url,
-            validation::ValidationRuleset,
+            validation::VicalProfile,
             X5Chain,
         };
         use const_oid::AssociatedOid;
@@ -647,9 +746,13 @@ mod test {
 
         let http_client = ReqwestClient::new().unwrap();
         let revocation_fetcher = CachingRevocationFetcher::new(http_client);
-        let outcome = ValidationRuleset::Vical
-            .validate(&x5chain, &trust_anchors, &revocation_fetcher)
-            .await;
+        let outcome = crate::definitions::x509::validation::validate(
+            &VicalProfile,
+            &x5chain,
+            &trust_anchors,
+            &revocation_fetcher,
+        )
+        .await;
 
         assert!(
             !outcome.success(),
@@ -673,7 +776,7 @@ mod test {
     async fn verify_aamva_vical_with_live_crl_fetching() {
         use crate::definitions::x509::{
             revocation::{extract_crl_urls, CachingRevocationFetcher, ReqwestClient},
-            validation::ValidationRuleset,
+            validation::{validate_with_options, VicalProfile},
         };
 
         let trust_anchors = aamva_trust_anchors();
@@ -697,9 +800,14 @@ mod test {
         let http_client = ReqwestClient::new().expect("failed to create HTTP client");
         let revocation_fetcher = CachingRevocationFetcher::new(http_client);
 
-        let outcome = ValidationRuleset::Vical
-            .validate_with_options(x5chain, &trust_anchors, &revocation_fetcher, &options)
-            .await;
+        let outcome = validate_with_options(
+            &VicalProfile,
+            x5chain,
+            &trust_anchors,
+            &revocation_fetcher,
+            &options,
+        )
+        .await;
 
         // Print any revocation errors for debugging
         if !outcome.revocation_errors.is_empty() {

@@ -115,7 +115,10 @@ fn issue_minimal_mdoc() -> anyhow::Result<()> {
 /// The point of [`issue_test_mdoc`]: the chain it embeds is one a test can trust.
 #[tokio::test]
 async fn issued_test_mdoc_chain_validates() -> anyhow::Result<()> {
-    use crate::definitions::x509::{test::TestPki, validation::ValidationRuleset};
+    use crate::definitions::x509::{
+        test::TestPki,
+        validation::{validate, MdocProfile},
+    };
 
     let pki = TestPki::issuer();
     let mdoc = issue_test_mdoc(&pki, MDL_DOC_TYPE, valid_for_a_year())?;
@@ -137,9 +140,13 @@ async fn issued_test_mdoc_chain_validates() -> anyhow::Result<()> {
             .expect("issued mdoc has no x5chain header"),
     )?;
 
-    let outcome = ValidationRuleset::Mdl
-        .validate(&x5chain, &pki.iaca_registry(), &pki.fetcher())
-        .await;
+    let outcome = validate(
+        &MdocProfile::MDL.issuer,
+        &x5chain,
+        &pki.iaca_registry(),
+        &pki.fetcher(),
+    )
+    .await;
     assert!(outcome.success(), "{outcome:?}");
     Ok(())
 }
@@ -149,17 +156,19 @@ async fn issued_test_mdoc_chain_validates() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_reader_pki_chain_validates() {
     use crate::definitions::x509::{
-        test::TestPki, trust_anchor::TrustPurpose, validation::ValidationRuleset,
+        test::TestPki,
+        trust_anchor::TrustPurpose,
+        validation::{validate, MdocProfile},
     };
 
     let pki = TestPki::reader();
-    let outcome = ValidationRuleset::MdlReaderOneStep
-        .validate(
-            &pki.x5chain(),
-            &pki.registry(TrustPurpose::ReaderCa),
-            &pki.fetcher(),
-        )
-        .await;
+    let outcome = validate(
+        &MdocProfile::MDL.reader,
+        &pki.x5chain(),
+        &pki.registry(TrustPurpose::ReaderCa),
+        &pki.fetcher(),
+    )
+    .await;
     assert!(outcome.success(), "{outcome:?}");
 }
 
@@ -167,16 +176,19 @@ async fn test_reader_pki_chain_validates() {
 /// actually names this PKI's own signer, which is what makes revocation testable.
 #[tokio::test]
 async fn a_revoked_leaf_is_rejected() {
-    use crate::definitions::x509::{test::TestPki, validation::ValidationRuleset};
+    use crate::definitions::x509::{
+        test::TestPki,
+        validation::{validate, MdocProfile},
+    };
 
     let pki = TestPki::issuer();
-    let outcome = ValidationRuleset::Mdl
-        .validate(
-            &pki.x5chain(),
-            &pki.iaca_registry(),
-            &pki.fetcher_revoking(&[pki.leaf_serial()]),
-        )
-        .await;
+    let outcome = validate(
+        &MdocProfile::MDL.issuer,
+        &pki.x5chain(),
+        &pki.iaca_registry(),
+        &pki.fetcher_revoking(&[pki.leaf_serial()]),
+    )
+    .await;
     assert!(
         outcome
             .errors
