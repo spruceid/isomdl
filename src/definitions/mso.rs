@@ -66,7 +66,7 @@ pub struct Mso {
     pub validity_info: ValidityInfo,
 }
 
-#[derive(Clone, Debug, Copy, Deserialize, Serialize)]
+#[derive(Clone, Debug, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub enum DigestAlgorithm {
     #[serde(rename = "SHA-256")]
     SHA256,

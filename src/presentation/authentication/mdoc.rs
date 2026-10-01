@@ -147,22 +147,25 @@ fn verify_value_digests(mso: &Mso, namespaces: &IssuerNamespaces) -> Result<(), 
     Ok(())
 }
 
+/// Verify mdoc authentication: that the holder possesses the private key the issuer
+/// bound to this credential.
+///
+/// `mso` **must** be the value returned by [`issuer_authentication`] for this same
+/// document. The device key lives inside the MSO, so verifying against an MSO that has
+/// not had its signature checked proves nothing at all: an attacker who can rewrite the
+/// response can substitute a device key they hold and produce a DeviceAuth that verifies.
+/// Taking the MSO as a parameter — rather than re-reading it from `document` — is what
+/// makes that mistake unrepresentable.
 pub fn device_authentication<S>(
     document: &Document,
+    mso: &Mso,
     session_transcript: S,
     e_reader_key_private: &[u8; 32],
 ) -> Result<(), Error>
 where
     S: SessionTranscript + Clone,
 {
-    let mso_bytes = document
-        .issuer_signed
-        .issuer_auth
-        .payload
-        .as_ref()
-        .ok_or(Error::DetachedIssuerAuth)?;
-    let mso: Tag24<Mso> = cbor::from_slice(mso_bytes).map_err(|_| Error::MSOParsing)?;
-    let device_key = mso.into_inner().device_key_info.device_key;
+    let device_key = mso.device_key_info.device_key.clone();
     // Clone for MAC ECDH before consuming via JWK conversion
     let s_device_key = device_key.clone();
     let jwk = SsiJwk::try_from(device_key)?;

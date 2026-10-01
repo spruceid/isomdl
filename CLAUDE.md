@@ -69,12 +69,14 @@ CI sets `RUSTFLAGS="-Dwarnings"` and `RUSTDOCFLAGS="-Dwarnings"` — all warning
   - **`x509/`** — Certificate validation, CRL revocation, trust anchors.
     - **`validation`** — The `CertificateProfile` trait and its built-ins (`IssuerProfile`,
       `ReaderProfile`, `VicalProfile`, `EuAgeVerificationProfile`). `MdocProfile` pairs an
-      issuer and reader half.
+      issuer and reader half; `ProfileSelector` picks one per doc type.
 - **`presentation/`** — Device-Reader interaction layer.
   - **`device`** — Device-side state machine (see below).
   - **`reader`** — Reader-side session management.
   - **`reader_utils`** — Reader-side helper utilities.
-  - **`authentication`** — Request/response authentication, `AuthenticationStatus`.
+  - **`authentication`** — Per-document validation outcomes (`ResponseValidationOutcome`,
+    `DocumentError`, `DocumentWarning`). Errors are authoritative: an empty `errors` is the
+    verdict, there is no separate status enum.
 - **`issuance/`** — Document issuance (`Mdoc`, `Namespaces`).
 - **`vical/`** — VICAL (Verifiable Identity Credential Attestation List) support.
 - **`cbor`** — CBOR encoding/decoding utilities (wraps `ciborium`).
@@ -110,6 +112,13 @@ The reader side is simpler: `SessionManager` with `establish_session` and `handl
 
 - Integration tests in `tests/` serve as usage examples (see `tests/README.md`).
 - `tests/common.rs` has shared Device/Reader simulation helpers.
+- Most tests live in `src/` but in their own file, attached with
+  `#[cfg(test)] #[path = "tests/<name>.rs"]` — e.g. `src/presentation/tests/`,
+  `src/definitions/x509/tests.rs`, `src/issuance/mdoc_tests.rs`. They have to be in `src/`
+  because `tests/` links the library without `cfg(test)`, so the PKI and issuance helpers
+  are unreachable there.
+- `src/presentation/test_utils.rs` (`#[cfg(test)]`) has `TestExchange` and the shared doc
+  type / namespace constants; `src/definitions/x509/tests.rs` has `TestPki`.
 - Test data lives in `tests/data/` and `test/` (per-module fixtures).
 - Uses `#[tokio::test]`, `#[test_log::test(tokio::test)]`, and `rstest` for parameterized tests.
 - `wiremock` for HTTP mocking (CRL tests).

@@ -4,22 +4,23 @@ use digest::Mac;
 use hmac::Hmac;
 use isomdl::cbor;
 use isomdl::definitions::device_engagement::{CentralClientMode, DeviceRetrievalMethods};
-use isomdl::definitions::device_request::{DataElements, DocType, Namespaces};
+use isomdl::definitions::device_request::{DataElements, DocType, ItemsRequest, Namespaces};
 use isomdl::definitions::device_signed::DeviceAuthType;
-use isomdl::definitions::helpers::NonEmptyMap;
+use isomdl::definitions::helpers::{NonEmptyMap, NonEmptyVec};
 use isomdl::definitions::session::Handover;
 use isomdl::definitions::x509::trust_anchor::TrustAnchorRegistry;
+use isomdl::definitions::x509::validation::{AnyDocType, MdocProfile};
 use isomdl::definitions::{self, BleOptions, DeviceRetrievalMethod};
 use isomdl::presentation::device::{Document, Documents, RequestedItems, SessionManagerEngaged};
 use isomdl::presentation::{
-    authentication::{AuthenticationStatus, RequestAuthenticationOutcome},
+    authentication::{DocumentError, RequestAuthenticationOutcome},
     device, reader, Stringify,
 };
 use sha2::Sha256;
 use signature::Signer;
 use uuid::Uuid;
 
-pub const DOC_TYPE: &str = "org.iso.18013.5.1.mDL";
+pub use isomdl::definitions::MDL_DOC_TYPE as DOC_TYPE;
 pub const NAMESPACE: &str = "org.iso.18013.5.1";
 pub const AGE_OVER_21_ELEMENT: &str = "age_over_21";
 
@@ -65,7 +66,7 @@ impl Device {
 
         let (reader_sm, session_request, _ble_ident) = reader::SessionManager::establish_session(
             reader::Handover::QR(qr),
-            requested_elements,
+            NonEmptyVec::new(ItemsRequest::mdl(requested_elements)),
             trust_anchors,
         )
         .context("failed to establish reader session")?;
@@ -83,12 +84,20 @@ impl Device {
                 cbor::from_slice(&request).context("could not deserialize request")?;
             // Use () to skip CRL checks in tests
             state
-                .process_session_establishment(session_establishment, trusted_verifiers, &())
+                .process_session_establishment(
+                    session_establishment,
+                    trusted_verifiers,
+                    &AnyDocType(MdocProfile::MDL),
+                    &(),
+                )
                 .await
                 .context("could not process process session establishment")?
         };
-        if session_manager.get_next_signature_payload().is_some() {
-            anyhow::bail!("there were errors processing request");
+        // `has_errors()` is the direct question. The old proxy — "is there something
+        // pending to sign?" — only caught failures that produced an error response, and
+        // reader-authentication failures were not among them.
+        if validated_request.has_errors() {
+            anyhow::bail!("there were errors processing request: {validated_request:?}");
         }
         Ok((session_manager, validated_request))
     }
@@ -173,12 +182,53 @@ impl Reader {
         response: Vec<u8>,
     ) -> Result<()> {
         // Use () to skip CRL checks in tests
-        let validated = reader_sm.handle_response(&response, &()).await;
+        let validated = reader_sm
+            .handle_response(&response, &AnyDocType(MdocProfile::MDL), &())
+            .await;
         println!("Validated Response: {validated:?}");
-        // These tests verify the device-reader protocol. Certificate chain validation
-        // (issuer_authentication) requires a full MDL cert setup and is tested separately
-        // in src/definitions/x509/.
-        assert_eq!(validated.device_authentication, AuthenticationStatus::Valid);
+
+        // This is a protocol-shape test. The reader here is configured with an empty
+        // `TrustAnchorRegistry`, and the committed mDL fixture could not chain anyway:
+        // its signing certificate is expired and missing SKI, EKU, KeyUsage,
+        // CRLDistributionPoints and IssuerAltName. So the document is evaluated and
+        // reported as untrusted, which is exactly what should happen.
+        //
+        // Real device-authentication coverage lives in `src/presentation/mod.rs`'s
+        // `fully_trusted_exchange_reports_no_errors` and its MAC0 sibling, which mint
+        // their own PKI — something an integration test cannot do, since `tests/` links
+        // the library without `cfg(test)`.
+        assert_eq!(validated.failed.len(), 1, "{validated:?}");
+        let document = &validated.failed[0];
+
+        assert!(
+            document
+                .errors
+                .contains(&DocumentError::NoTrustAnchorsConfigured),
+            "{:?}",
+            document.errors
+        );
+        // Device authentication is not attempted: the device key lives in the MSO, and
+        // an unverified MSO's device key proves nothing.
+        assert!(
+            document
+                .errors
+                .iter()
+                .any(|e| matches!(e, DocumentError::DeviceAuthenticationNotAttempted { .. })),
+            "{:?}",
+            document.errors
+        );
+
+        // Nothing unsolicited came back, and the mDL was not rejected by the doc-type
+        // filter the reader session now applies.
+        assert!(validated.rejected.is_empty(), "{:?}", validated.rejected);
+
+        // The point of the exchange: the requested element actually came back, and is
+        // reported even though the credential could not be authenticated.
+        assert_eq!(document.claimed_doc_type, DOC_TYPE);
+        assert_eq!(
+            document.namespaces[NAMESPACE][AGE_OVER_21_ELEMENT],
+            serde_json::json!(true)
+        );
         Ok(())
     }
 }
