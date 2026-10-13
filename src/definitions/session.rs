@@ -116,8 +116,6 @@ pub enum Error {
     SessionKeyError,
     #[error("Something went wrong generating ephemeral keys")]
     EphemeralKeyError,
-    #[error("Invalid ephemeral private key")]
-    InvalidEphemeralKey,
     #[error("Failed to encode a session structure: {0}")]
     Tag24(#[from] super::helpers::tag24::Error),
     #[error("Serialization error")]
@@ -220,16 +218,6 @@ impl EphemeralPrivateKey {
         Ok((Self::P256(private_key), public_key))
     }
 
-    /// Load a P-256 key from its 32-byte big-endian scalar.
-    pub fn from_p256_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != 32 {
-            return Err(Error::InvalidEphemeralKey);
-        }
-        p256::SecretKey::from_bytes(p256::FieldBytes::from_slice(bytes))
-            .map(Self::P256)
-            .map_err(|_| Error::InvalidEphemeralKey)
-    }
-
     pub fn public_key(&self) -> Result<CoseKey, Error> {
         match self {
             EphemeralPrivateKey::P256(key) => p256_cose_key(&key.public_key()),
@@ -274,28 +262,21 @@ impl EphemeralPrivateKey {
     }
 }
 
-#[derive(Serialize)]
-#[serde(tag = "crv")]
-enum EphemeralPrivateKeyRef<'a> {
-    #[serde(rename = "P-256")]
-    P256 {
-        #[serde(with = "serde_bytes")]
-        d: &'a [u8],
-    },
-}
-
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "crv")]
 enum EphemeralPrivateKeyRepr {
     #[serde(rename = "P-256")]
-    P256 { d: serde_bytes::ByteBuf },
+    P256 {
+        #[serde(with = "serde_bytes")]
+        d: [u8; 32],
+    },
 }
 
 impl Serialize for EphemeralPrivateKey {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::P256(key) => EphemeralPrivateKeyRef::P256 {
-                d: key.to_bytes().as_slice(),
+            Self::P256(key) => EphemeralPrivateKeyRepr::P256 {
+                d: key.to_bytes().into(),
             }
             .serialize(serializer),
         }
@@ -305,9 +286,9 @@ impl Serialize for EphemeralPrivateKey {
 impl<'de> Deserialize<'de> for EphemeralPrivateKey {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match EphemeralPrivateKeyRepr::deserialize(deserializer)? {
-            EphemeralPrivateKeyRepr::P256 { d } => {
-                Self::from_p256_bytes(&d).map_err(serde::de::Error::custom)
-            }
+            EphemeralPrivateKeyRepr::P256 { d } => p256::SecretKey::from_bytes(&d.into())
+                .map(Self::P256)
+                .map_err(serde::de::Error::custom),
         }
     }
 }
@@ -462,8 +443,10 @@ mod test {
 
     #[test]
     fn ephemeral_private_key_refuses_invalid_bytes() {
-        assert!(EphemeralPrivateKey::from_p256_bytes(&[0u8; 32]).is_err());
-        assert!(EphemeralPrivateKey::from_p256_bytes(&[1u8; 31]).is_err());
+        let zero = serde_json::json!({ "crv": "P-256", "d": vec![0u8; 32] });
+        assert!(serde_json::from_value::<EphemeralPrivateKey>(zero).is_err());
+        let short = serde_json::json!({ "crv": "P-256", "d": vec![1u8; 31] });
+        assert!(serde_json::from_value::<EphemeralPrivateKey>(short).is_err());
     }
 
     #[test]
