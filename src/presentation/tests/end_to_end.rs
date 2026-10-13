@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use crate::definitions::session::{Error as SessionError, SessionTranscript180135};
 use crate::definitions::{
     x509::{
         revocation::RevocationFetcher,
@@ -11,7 +12,9 @@ use crate::definitions::{
 };
 use crate::issuance::mdoc::test::{issue_test_mdoc, valid_for_a_year, MDL_DOC_TYPE};
 use crate::presentation::authentication::{DocumentError, ResponseValidationOutcome};
-use crate::presentation::reader_utils::{validate_response, ReaderValidationConfig};
+use crate::presentation::reader_utils::{
+    validate_response, ReaderSessionContext, ReaderValidationConfig,
+};
 use crate::presentation::test_utils::TestExchange;
 
 use crate::presentation::test_utils::ISOMDL_NAMESPACE;
@@ -36,10 +39,9 @@ async fn validate(
     };
     validate_response(
         response,
-        &exchange.session_transcript(),
+        exchange.reader_session(),
         &config,
         revocation_fetcher,
-        &exchange.e_reader_key_private(),
     )
     .await
 }
@@ -73,6 +75,23 @@ async fn fully_trusted_mac0_exchange_reports_no_errors() {
     );
 }
 
+/// Validate `response` against `session` rather than the exchange's own.
+async fn validate_in_session(
+    session: &ReaderSessionContext<SessionTranscript180135>,
+    response: &DeviceResponse,
+    pki: &TestPki,
+) -> ResponseValidationOutcome {
+    let registry = pki.iaca_registry();
+    let wanted = requested(&[MDL_DOC_TYPE]);
+    let config = ReaderValidationConfig {
+        trust_anchors: &registry,
+        requested_doc_types: Some(&wanted),
+        options: &ValidationOptions::default(),
+        profiles: &AnyDocType(MdocProfile::MDL),
+    };
+    validate_response(response, session, &config, &pki.fetcher()).await
+}
+
 /// A MAC0 response verified with the wrong reader key must not authenticate.
 ///
 /// Without this, `fully_trusted_mac0_exchange_reports_no_errors` would still pass if
@@ -85,24 +104,12 @@ async fn mac0_device_authentication_fails_with_the_wrong_reader_key() {
     let exchange = TestExchange::new_mac0([mdoc]);
     let response = exchange.respond(&[(MDL_DOC_TYPE, ISOMDL_NAMESPACE, &["age_over_21"])]);
 
-    let mut wrong_key = exchange.e_reader_key_private();
-    wrong_key[0] ^= 0xff;
-    let registry = pki.iaca_registry();
-    let wanted = requested(&[MDL_DOC_TYPE]);
-    let config = ReaderValidationConfig {
-        trust_anchors: &registry,
-        requested_doc_types: Some(&wanted),
-        options: &ValidationOptions::default(),
-        profiles: &AnyDocType(MdocProfile::MDL),
-    };
-    let outcome = validate_response(
-        &response,
-        &exchange.session_transcript(),
-        &config,
-        &pki.fetcher(),
-        &wrong_key,
-    )
-    .await;
+    // A fresh key, under the transcript the device actually MACed over.
+    let session = ReaderSessionContext::with_transcript(|_| {
+        Ok::<_, SessionError>(exchange.session_transcript())
+    })
+    .unwrap();
+    let outcome = validate_in_session(&session, &response, &pki).await;
 
     // Only the device's proof of possession fails, and it fails on its own.
     let document = &outcome.failed[0];
@@ -114,6 +121,26 @@ async fn mac0_device_authentication_fails_with_the_wrong_reader_key() {
         "{:?}",
         document.errors
     );
+}
+
+/// A reader stores the context between session establishment and the device response.
+///
+/// CBOR, not JSON: `Tag24` does not round-trip through JSON.
+#[tokio::test]
+async fn a_stored_reader_session_still_verifies_mac0() {
+    let pki = TestPki::issuer();
+    let mdoc = issue_test_mdoc(&pki, MDL_DOC_TYPE, valid_for_a_year()).unwrap();
+
+    let exchange = TestExchange::new_mac0([mdoc]);
+    let response = exchange.respond(&[(MDL_DOC_TYPE, ISOMDL_NAMESPACE, &["age_over_21"])]);
+
+    let stored = crate::cbor::to_vec(exchange.reader_session()).unwrap();
+    let session: ReaderSessionContext<SessionTranscript180135> =
+        crate::cbor::from_slice(&stored).unwrap();
+    let outcome = validate_in_session(&session, &response, &pki).await;
+
+    assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+    assert!(outcome.single_document().is_some());
 }
 
 /// Device authentication must never be attempted when issuer authentication has not

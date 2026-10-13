@@ -35,8 +35,8 @@ use crate::{
         helpers::{tag24, NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerSigned, IssuerSignedItemBytes},
         session::{
-            self, derive_e_mac_key, derive_session_key, get_shared_secret, Handover, SessionData,
-            SessionTranscript,
+            self, derive_e_mac_key, derive_session_key, get_shared_secret, EphemeralPrivateKey,
+            Handover, SessionData, SessionTranscript,
         },
         x509::{
             self,
@@ -52,7 +52,7 @@ use crate::{
 };
 use coset::Label;
 use coset::{CoseMac0Builder, CoseSign1, CoseSign1Builder};
-use p256::{FieldBytes, NistP256};
+use p256::NistP256;
 use p384::NistP384;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -81,7 +81,7 @@ use super::{
 #[derive(Serialize, Deserialize)]
 pub struct SessionManagerInit {
     documents: Documents,
-    e_device_key: Vec<u8>,
+    e_device_key: EphemeralPrivateKey,
     device_engagement: Tag24<DeviceEngagement>,
 }
 
@@ -92,7 +92,7 @@ pub struct SessionManagerInit {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionManagerEngaged {
     pub documents: Documents,
-    pub e_device_key: Vec<u8>,
+    pub e_device_key: EphemeralPrivateKey,
     pub device_engagement: Tag24<DeviceEngagement>,
     pub handover: Handover,
 }
@@ -284,14 +284,14 @@ pub type PermittedItems = BTreeMap<DocType, BTreeMap<Namespace, Vec<ElementIdent
 
 /// Generate an ephemeral key for device engagement.
 /// Returns: (private_key, public_key)
-pub(crate) fn ephemeral_key() -> Result<(Vec<u8>, Security), Error> {
+pub(crate) fn ephemeral_key() -> Result<(EphemeralPrivateKey, Security), Error> {
     let (e_device_key, e_device_key_pub) =
-        session::create_p256_ephemeral_keys().map_err(Error::EKeyGeneration)?;
+        EphemeralPrivateKey::generate_p256().map_err(Error::EKeyGeneration)?;
     let e_device_key_bytes =
         Tag24::<CoseKey>::new(e_device_key_pub).map_err(Error::Tag24CborEncoding)?;
     let security = Security(1, e_device_key_bytes);
 
-    Ok((e_device_key.to_bytes().to_vec(), security))
+    Ok((e_device_key, security))
 }
 
 impl SessionManagerInit {
@@ -421,9 +421,9 @@ impl SessionManagerEngaged {
         let session_transcript_bytes =
             Tag24::new(session_transcript.clone()).map_err(Error::Tag24CborEncoding)?;
 
-        let e_device_key = p256::SecretKey::from_bytes(FieldBytes::from_slice(&self.e_device_key))?;
-
-        let shared_secret = get_shared_secret(e_reader_key.into_inner(), &e_device_key.into())
+        let shared_secret = self
+            .e_device_key
+            .session_shared_secret(e_reader_key.into_inner())
             .map_err(Error::SharedSecretGeneration)?;
 
         let sk_reader = derive_session_key(&shared_secret, &session_transcript_bytes, true)?.into();

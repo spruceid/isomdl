@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use super::{
     authentication::{ResponseError, ResponseValidationOutcome},
-    reader_utils::{validate_response, ReaderValidationConfig},
+    reader_utils::{validate_response, ReaderSessionContext, ReaderValidationConfig},
 };
 
 use crate::definitions::x509::revocation::RevocationFetcher;
@@ -43,10 +43,7 @@ use crate::{
             ItemsRequestBytesAll,
         },
         helpers::{non_empty_vec, NonEmptyVec, Tag24},
-        session::{
-            self, create_p256_ephemeral_keys, derive_session_key, get_shared_secret,
-            SessionEstablishment,
-        },
+        session::{self, derive_session_key, SessionEstablishment},
         x509::trust_anchor::TrustAnchorRegistry,
         DeviceEngagement, DeviceResponse, SessionData, SessionTranscript180135,
     },
@@ -59,14 +56,16 @@ use crate::{
 /// for handling the session with the device.
 ///
 /// The transition to this state is made by [SessionManager::establish_session].
+///
+/// The serialized form contains the reader's ephemeral private key and the session keys.
+/// Store it as a secret, and delete it when the session ends (ISO/IEC 18013-5 §12.2.4).
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SessionManager {
-    session_transcript: SessionTranscript180135,
+    session: ReaderSessionContext<SessionTranscript180135>,
     sk_device: [u8; 32],
     device_message_counter: u32,
     sk_reader: [u8; 32],
     reader_message_counter: u32,
-    e_reader_key_private: [u8; 32],
     trust_anchor_registry: TrustAnchorRegistry,
     holder_le_role: Option<LeRole>,
     holder_central_client_modes: Vec<CentralClientMode>,
@@ -276,37 +275,23 @@ impl SessionManager {
             }
         };
 
-        //generate own keys
-        let key_pair = create_p256_ephemeral_keys().context("failed to generate ephemeral key")?;
-        let e_reader_key_private = key_pair.0;
-        let e_reader_key_public =
-            Tag24::new(key_pair.1).context("failed to encode public cose key")?;
-
-        // Save private key bytes before consuming the key for ECDH
-        let e_reader_key_private_bytes: [u8; 32] = e_reader_key_private.to_bytes().into();
-
-        //decode device_engagement
-        let device_engagement = device_engagement_bytes.as_ref();
-        let e_device_key = &device_engagement.security.1;
-
         // calculate ble Ident value
+        let e_device_key = &device_engagement_bytes.as_ref().security.1;
         let ble_ident =
             super::calculate_ble_ident(e_device_key).context("failed to calculate BLE Ident")?;
+        let e_device_key = e_device_key.clone().into_inner();
+
+        let session =
+            ReaderSessionContext::new(device_engagement_bytes, session_transcript_handover)
+                .context("failed to generate ephemeral key")?;
 
         // derive shared secret
-        let shared_secret = get_shared_secret(
-            e_device_key.clone().into_inner(),
-            &e_reader_key_private.into(),
-        )
-        .context("failed to derive shared session secret")?;
+        let shared_secret = session
+            .e_reader_key_private()
+            .session_shared_secret(e_device_key)
+            .context("failed to derive shared session secret")?;
 
-        let session_transcript = SessionTranscript180135(
-            device_engagement_bytes,
-            e_reader_key_public.clone(),
-            session_transcript_handover,
-        );
-
-        let session_transcript_bytes = Tag24::new(session_transcript.clone())
+        let session_transcript_bytes = Tag24::new(session.session_transcript().clone())
             .context("failed to encode session transcript")?;
 
         tracing::debug!(
@@ -323,13 +308,13 @@ impl SessionManager {
             .context("failed to derive device session key")?
             .into();
 
+        let e_reader_key = session.e_reader_key().clone();
         let mut session_manager = Self {
-            session_transcript,
+            session,
             sk_device,
             device_message_counter: 0,
             sk_reader,
             reader_message_counter: 0,
-            e_reader_key_private: e_reader_key_private_bytes,
             trust_anchor_registry,
             holder_le_role,
             holder_central_client_modes,
@@ -340,12 +325,12 @@ impl SessionManager {
         let request = session_manager
             .build_request(items_requests)
             .context("failed to build device request")?;
-        let session = SessionEstablishment {
+        let session_establishment = SessionEstablishment {
             data: request.into(),
-            e_reader_key: e_reader_key_public,
+            e_reader_key,
         };
-        let session_request =
-            cbor::to_vec(&session).context("failed to encode session establishment")?;
+        let session_request = cbor::to_vec(&session_establishment)
+            .context("failed to encode session establishment")?;
 
         Ok((session_manager, session_request, ble_ident))
     }
@@ -550,14 +535,7 @@ impl SessionManager {
             profiles,
         };
 
-        validate_response(
-            &device_response,
-            &self.session_transcript,
-            &config,
-            revocation_fetcher,
-            &self.e_reader_key_private,
-        )
-        .await
+        validate_response(&device_response, &self.session, &config, revocation_fetcher).await
     }
 }
 

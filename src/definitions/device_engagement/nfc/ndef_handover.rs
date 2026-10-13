@@ -8,6 +8,7 @@ use thiserror::Error;
 use crate::definitions::{
     device_engagement::nfc::{ble, ndef_parser, util::ByteVecDisplayAsHex, StaticHandoverState},
     helpers::ByteStr,
+    session::EphemeralPrivateKey,
     traits::ToCbor,
     DeviceEngagement,
 };
@@ -131,7 +132,7 @@ impl<'r, 'p> RecordPayload for RawPayload<'r, 'p> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BleInfo {
     StaticHandover {
-        private_key: Vec<u8>,
+        private_key: EphemeralPrivateKey,
         device_engagement: Box<DeviceEngagement>,
     },
 }

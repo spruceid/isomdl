@@ -116,6 +116,10 @@ pub enum Error {
     SessionKeyError,
     #[error("Something went wrong generating ephemeral keys")]
     EphemeralKeyError,
+    #[error("Invalid ephemeral private key")]
+    InvalidEphemeralKey,
+    #[error("Failed to encode a session structure: {0}")]
+    Tag24(#[from] super::helpers::tag24::Error),
     #[error("Serialization error")]
     Cbor(#[from] CborError),
     #[error("NFC negotiation error")]
@@ -170,37 +174,154 @@ impl From<EncodedPoints> for Vec<u8> {
     }
 }
 
-pub fn create_p256_ephemeral_keys() -> Result<(p256::SecretKey, CoseKey), Error> {
+pub(crate) fn create_p256_ephemeral_keys() -> Result<(p256::SecretKey, CoseKey), Error> {
     let private_key = p256::SecretKey::random(&mut OsRng);
-
-    let encoded_point = ecdsa::EncodedPoint::<NistP256>::from(private_key.public_key());
-    let x_coordinate = encoded_point.x().ok_or(Error::EphemeralKeyError)?;
-    let y_coordinate = encoded_point.y().ok_or(Error::EphemeralKeyError)?;
-
-    let crv = EC2Curve::try_from(1).map_err(|_e| Error::EphemeralKeyError)?;
-    let public_key = CoseKey::EC2 {
-        crv,
-        x: x_coordinate.to_vec(),
-        y: EC2Y::Value(y_coordinate.to_vec()),
-    };
-
+    let public_key = p256_cose_key(&private_key.public_key())?;
     Ok((private_key, public_key))
 }
 
-pub fn get_shared_secret(
-    cose_key: CoseKey,
-    e_device_key_priv: &p256::NonZeroScalar,
+pub(crate) fn get_shared_secret(
+    peer_key: CoseKey,
+    private_key: &p256::NonZeroScalar,
 ) -> Result<SharedSecret<NistP256>> {
-    let encoded_point: EncodedPoint<NistP256> = EncodedPoint::<NistP256>::try_from(cose_key)?;
-    let public_key_opt = p256::PublicKey::from_encoded_point(&encoded_point);
-    if public_key_opt.is_none().into() {
-        return Err(anyhow::anyhow!(
-            "reader's public key could not be constructed"
-        ));
-    }
-    let public_key = public_key_opt.unwrap();
-    let shared_secret = p256::ecdh::diffie_hellman(e_device_key_priv, public_key.as_affine());
+    let encoded_point: EncodedPoint<NistP256> = EncodedPoint::<NistP256>::try_from(peer_key)?;
+    let public_key: Option<p256::PublicKey> =
+        p256::PublicKey::from_encoded_point(&encoded_point).into();
+    let public_key = public_key
+        .ok_or_else(|| anyhow::anyhow!("the peer's public key could not be constructed"))?;
+    let shared_secret = p256::ecdh::diffie_hellman(private_key, public_key.as_affine());
     Ok(shared_secret)
+}
+
+/// The private half of an ephemeral session key (ISO/IEC 18013-5 §12.2.4): EReaderKey.Priv
+/// on the reader side, EDeviceKey.Priv on the mdoc side.
+///
+/// Both sides use it to derive the session encryption keys. The reader also uses it to
+/// verify COSE_Mac0 device authentication.
+///
+/// Serialized as `{ "crv": <curve>, "d": <private scalar> }`. `Debug` does not show the key.
+#[derive(Clone)]
+pub enum EphemeralPrivateKey {
+    P256(p256::SecretKey),
+}
+
+impl std::fmt::Debug for EphemeralPrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::P256(_) => f.write_str("EphemeralPrivateKey::P256(..)"),
+        }
+    }
+}
+
+impl EphemeralPrivateKey {
+    /// Generate a new P-256 key. Returns the key and its public half.
+    pub fn generate_p256() -> Result<(Self, CoseKey), Error> {
+        let (private_key, public_key) = create_p256_ephemeral_keys()?;
+        Ok((Self::P256(private_key), public_key))
+    }
+
+    /// Load a P-256 key from its 32-byte big-endian scalar.
+    pub fn from_p256_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        if bytes.len() != 32 {
+            return Err(Error::InvalidEphemeralKey);
+        }
+        p256::SecretKey::from_bytes(p256::FieldBytes::from_slice(bytes))
+            .map(Self::P256)
+            .map_err(|_| Error::InvalidEphemeralKey)
+    }
+
+    pub fn public_key(&self) -> Result<CoseKey, Error> {
+        match self {
+            EphemeralPrivateKey::P256(key) => p256_cose_key(&key.public_key()),
+        }
+    }
+
+    /// ECDH with the other side's ephemeral public key (EDeviceKey for the reader,
+    /// EReaderKey for the mdoc), to derive the session keys.
+    pub fn session_shared_secret(&self, peer_key: CoseKey) -> Result<SharedSecret<NistP256>> {
+        match self {
+            EphemeralPrivateKey::P256(key) => get_shared_secret(peer_key, &key.to_nonzero_scalar()),
+        }
+    }
+
+    /// Derive EMacKey, as the reader, for COSE_Mac0 device authentication (ISO/IEC
+    /// 18013-5 §12.4.5).
+    ///
+    /// `s_device_key` is the mdoc authentication key from the MSO. It must be on the same
+    /// curve as this key.
+    pub(crate) fn e_mac_key<T: Serialize>(
+        &self,
+        s_device_key: CoseKey,
+        session_transcript: &Tag24<T>,
+    ) -> Result<GenericArray<u8, U32>> {
+        match self {
+            EphemeralPrivateKey::P256(key) => {
+                if !matches!(
+                    s_device_key,
+                    CoseKey::EC2 {
+                        crv: EC2Curve::P256,
+                        ..
+                    }
+                ) {
+                    return Err(anyhow::anyhow!(
+                        "the mdoc authentication key is not on the reader key's curve (P-256)"
+                    ));
+                }
+                let shared_secret = get_shared_secret(s_device_key, &key.to_nonzero_scalar())?;
+                derive_e_mac_key(&shared_secret, session_transcript)
+            }
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "crv")]
+enum EphemeralPrivateKeyRef<'a> {
+    #[serde(rename = "P-256")]
+    P256 {
+        #[serde(with = "serde_bytes")]
+        d: &'a [u8],
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "crv")]
+enum EphemeralPrivateKeyRepr {
+    #[serde(rename = "P-256")]
+    P256 { d: serde_bytes::ByteBuf },
+}
+
+impl Serialize for EphemeralPrivateKey {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::P256(key) => EphemeralPrivateKeyRef::P256 {
+                d: key.to_bytes().as_slice(),
+            }
+            .serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EphemeralPrivateKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match EphemeralPrivateKeyRepr::deserialize(deserializer)? {
+            EphemeralPrivateKeyRepr::P256 { d } => {
+                Self::from_p256_bytes(&d).map_err(serde::de::Error::custom)
+            }
+        }
+    }
+}
+
+fn p256_cose_key(public_key: &p256::PublicKey) -> Result<CoseKey, Error> {
+    let encoded_point = ecdsa::EncodedPoint::<NistP256>::from(public_key);
+    let x_coordinate = encoded_point.x().ok_or(Error::EphemeralKeyError)?;
+    let y_coordinate = encoded_point.y().ok_or(Error::EphemeralKeyError)?;
+    let crv = EC2Curve::try_from(1).map_err(|_e| Error::EphemeralKeyError)?;
+    Ok(CoseKey::EC2 {
+        crv,
+        x: x_coordinate.to_vec(),
+        y: EC2Y::Value(y_coordinate.to_vec()),
+    })
 }
 
 pub fn derive_session_key(
@@ -318,9 +439,32 @@ pub fn get_initialization_vector(message_count: &mut u32, reader: bool) -> [u8; 
 #[cfg(test)]
 mod test {
     use super::*;
+
     use crate::cbor;
     use crate::definitions::device_engagement::Security;
     use crate::definitions::device_request::DeviceRequest;
+
+    #[test]
+    fn ephemeral_private_key_debug_hides_the_key() {
+        let (key, _) = EphemeralPrivateKey::generate_p256().unwrap();
+        assert_eq!(format!("{key:?}"), "EphemeralPrivateKey::P256(..)");
+    }
+
+    #[test]
+    fn ephemeral_private_key_is_stored_with_its_curve() {
+        let (key, public_key) = EphemeralPrivateKey::generate_p256().unwrap();
+        let json = serde_json::to_value(&key).unwrap();
+        assert_eq!(json["crv"], "P-256");
+
+        let back: EphemeralPrivateKey = serde_json::from_value(json).unwrap();
+        assert_eq!(back.public_key().unwrap(), public_key);
+    }
+
+    #[test]
+    fn ephemeral_private_key_refuses_invalid_bytes() {
+        assert!(EphemeralPrivateKey::from_p256_bytes(&[0u8; 32]).is_err());
+        assert!(EphemeralPrivateKey::from_p256_bytes(&[1u8; 31]).is_err());
+    }
 
     #[test]
     fn qr_handover() {
