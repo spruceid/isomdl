@@ -7,6 +7,7 @@ use crate::definitions::{
         },
         util::{IntoRaw, KnownOrRaw},
     },
+    session::EphemeralPrivateKey,
     Security,
 };
 
@@ -16,10 +17,10 @@ use uuid::Uuid;
 pub(crate) const APDU_AID_MDOC: &[u8] = &[0xA0, 0x00, 0x00, 0x02, 0x48, 0x04, 0x00];
 pub(crate) const APDU_AID_NDEF_APPLICATION: &[u8] = &[0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01];
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StaticHandoverState {
     pub uuid: uuid::Uuid,
-    pub private_key: Vec<u8>,
+    pub private_key: EphemeralPrivateKey,
     pub security: Security,
 }
 
@@ -33,16 +34,6 @@ impl StaticHandoverState {
             private_key,
             security,
         })
-    }
-}
-
-impl std::fmt::Debug for StaticHandoverState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StaticHandoverState")
-            .field("uuid", &self.uuid)
-            .field("private_key", &"<redacted>")
-            .field("security", &self.security)
-            .finish()
     }
 }
 

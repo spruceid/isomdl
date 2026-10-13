@@ -6,10 +6,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::definitions::{
+    device_engagement::EReaderKeyBytes,
     device_response::{DeviceResponse, Document},
     helpers::NonEmptyVec,
-    session::SessionTranscript,
+    helpers::Tag24,
+    session::{
+        DeviceEngagementBytes, EReaderKey, EphemeralPrivateKey, Error as SessionError, Handover,
+        SessionTranscript, SessionTranscript180135,
+    },
     x509::{
         self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry,
         validation::ValidationOptions, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
@@ -49,14 +56,82 @@ pub struct ReaderValidationConfig<'a, P: ProfileSelector> {
     pub profiles: &'a P,
 }
 
+/// The session a device response is validated against.
+///
+/// It holds the session transcript and the reader's ephemeral private key, EReaderKey.Priv.
+/// The key is always present: an mdoc reader shall support both MAC and signature device
+/// authentication (ISO/IEC 18013-5 §12.4.4).
+///
+/// The context generates the key before it builds the transcript, so a transcript built
+/// by [`Self::new`] always carries this key.
+///
+/// Store the context between session establishment and the device response. It contains
+/// the private key: store it as a secret and delete it when the session ends (ISO/IEC
+/// 18013-5 §12.2.4).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReaderSessionContext<S> {
+    session_transcript: S,
+    e_reader_key_private: EphemeralPrivateKey,
+}
+
+impl ReaderSessionContext<SessionTranscript180135> {
+    /// A session for ISO/IEC 18013-5 device retrieval, with a new P-256 EReaderKey.
+    pub fn new(
+        device_engagement: DeviceEngagementBytes,
+        handover: Handover,
+    ) -> Result<Self, SessionError> {
+        Self::with_transcript(|e_reader_key| {
+            Ok(SessionTranscript180135(
+                device_engagement,
+                Tag24::new(e_reader_key)?,
+                handover,
+            ))
+        })
+    }
+
+    /// EReaderKey.Pub as it appears in the session transcript, to send to the mdoc.
+    pub fn e_reader_key(&self) -> &EReaderKeyBytes {
+        &self.session_transcript.1
+    }
+}
+
+impl<S: SessionTranscript> ReaderSessionContext<S> {
+    /// A session with a new P-256 EReaderKey, and a transcript built by `build_transcript`.
+    ///
+    /// `build_transcript` receives EReaderKey.Pub. Put it in the transcript where the
+    /// protocol has a place for it.
+    ///
+    /// In ISO/IEC 18013-7 (OpenID4VP and Digital Credentials API), the key for COSE_Mac0 is
+    /// the verifier's response encryption key, and the transcript refers to it only by hash
+    /// (for example the JWK thumbprint). Use this key as the encryption key: derive the
+    /// thumbprint from EReaderKey.Pub here, and decrypt the response with
+    /// [`Self::e_reader_key_private`].
+    pub fn with_transcript<E: From<SessionError>>(
+        build_transcript: impl FnOnce(EReaderKey) -> Result<S, E>,
+    ) -> Result<Self, E> {
+        let (e_reader_key_private, e_reader_key) = EphemeralPrivateKey::generate_p256()?;
+        Ok(Self {
+            session_transcript: build_transcript(e_reader_key)?,
+            e_reader_key_private,
+        })
+    }
+
+    pub fn session_transcript(&self) -> &S {
+        &self.session_transcript
+    }
+
+    /// EReaderKey.Priv, for the ECDH that derives the session encryption keys.
+    pub fn e_reader_key_private(&self) -> &EphemeralPrivateKey {
+        &self.e_reader_key_private
+    }
+}
+
 /// Validate every requested document in a device response.
 ///
 /// Documents whose doc type was not requested are **not validated at all** — they are
 /// listed in `rejected` and no cryptographic operation is performed on them.
 ///
-/// Pass `&()` as `revocation_fetcher` to skip CRL checks. `e_reader_key_private` is used
-/// for ECDH against the device's static key under COSE_Mac0 (ISO/IEC 18013-5 §9.1.3.5) and
-/// ignored for COSE_Sign1.
+/// Pass `&()` as `revocation_fetcher` to skip CRL checks.
 ///
 /// # Known limitation
 ///
@@ -64,10 +139,9 @@ pub struct ReaderValidationConfig<'a, P: ProfileSelector> {
 /// [`TrustPurpose`](crate::definitions::x509::trust_anchor::TrustPurpose), not by doc type.
 pub async fn validate_response<S, R, P>(
     device_response: &DeviceResponse,
-    session_transcript: &S,
+    session: &ReaderSessionContext<S>,
     config: &ReaderValidationConfig<'_, P>,
     revocation_fetcher: &R,
-    e_reader_key_private: &[u8; 32],
 ) -> ResponseValidationOutcome
 where
     S: SessionTranscript + Clone,
@@ -126,10 +200,9 @@ where
         };
         match validate_document(
             document,
-            session_transcript,
+            session,
             config.trust_anchors,
             revocation_fetcher,
-            e_reader_key_private,
             config.options,
             profile,
         )
@@ -174,10 +247,9 @@ where
 #[allow(clippy::result_large_err)]
 pub async fn validate_document<S, R, P>(
     document: &Document,
-    session_transcript: &S,
+    session: &ReaderSessionContext<S>,
     trust_anchors: &TrustAnchorRegistry,
     revocation_fetcher: &R,
-    e_reader_key_private: &[u8; 32],
     options: &ValidationOptions,
     profile: P,
 ) -> Result<ValidatedDocument, FailedDocument>
@@ -287,13 +359,7 @@ where
         }),
     }
 
-    device_auth(
-        document,
-        &mso,
-        session_transcript,
-        e_reader_key_private,
-        &mut outcome,
-    );
+    device_auth(document, &mso, session, &mut outcome);
 
     outcome.finish()
 }
@@ -374,18 +440,12 @@ impl Evaluation {
 fn device_auth<S>(
     document: &Document,
     mso: &Mso,
-    session_transcript: &S,
-    e_reader_key_private: &[u8; 32],
+    session: &ReaderSessionContext<S>,
     outcome: &mut Evaluation,
 ) where
     S: SessionTranscript + Clone,
 {
-    if let Err(e) = device_authentication(
-        document,
-        mso,
-        session_transcript.clone(),
-        e_reader_key_private,
-    ) {
+    if let Err(e) = device_authentication(document, mso, session) {
         outcome.errors.push(DocumentError::DeviceAuthentication {
             detail: e.to_string(),
         });

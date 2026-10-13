@@ -33,6 +33,7 @@ use crate::{
         SessionManagerEngaged,
     },
     presentation::reader::ReaderAuthentication,
+    presentation::reader_utils::ReaderSessionContext,
 };
 
 use super::device::DeviceSession;
@@ -78,7 +79,7 @@ impl DeviceSession for TestDeviceSession {
 pub(crate) struct TestExchange {
     session: TestDeviceSession,
     device_key: SigningKey,
-    e_reader_key_private: [u8; 32],
+    reader_session: ReaderSessionContext<SessionTranscript180135>,
 }
 
 impl TestExchange {
@@ -122,16 +123,16 @@ impl TestExchange {
             .try_into()
             .expect("TestExchange needs at least one mdoc");
 
-        let (session_transcript, e_reader_key_private) = test_session_transcript();
+        let reader_session = test_reader_session();
 
         Self {
             session: TestDeviceSession {
                 documents,
-                session_transcript,
+                session_transcript: reader_session.session_transcript().clone(),
                 device_auth_type,
             },
             device_key: Self::device_signing_key(),
-            e_reader_key_private,
+            reader_session,
         }
     }
 
@@ -139,11 +140,9 @@ impl TestExchange {
         self.session.session_transcript.clone()
     }
 
-    /// The reader's ephemeral private key. Meaningful only for MAC0.
-    ///
-    /// [`device_authentication`]: super::authentication::mdoc::device_authentication
-    pub(crate) fn e_reader_key_private(&self) -> [u8; 32] {
-        self.e_reader_key_private
+    /// The session as the reader sees it.
+    pub(crate) fn reader_session(&self) -> &ReaderSessionContext<SessionTranscript180135> {
+        &self.reader_session
     }
 
     /// Produce a signed, plaintext response disclosing exactly `asks`.
@@ -267,18 +266,12 @@ pub(crate) fn build_request(asks: &[Ask]) -> (RequestedItems, PermittedItems) {
     (requested, permitted)
 }
 
-/// A structurally valid session transcript, and the reader's ephemeral private key.
+/// A reader session over a structurally valid session transcript.
 ///
-/// Both sides of a test use this same value, so it does not need to correspond to a real
-/// engagement — it only needs to be the *same* transcript the device signed over.
-///
-/// The reader private key is returned rather than discarded because MAC0 device
-/// authentication needs it: the reader recomputes EMacKey with it.
-pub(crate) fn test_session_transcript() -> (SessionTranscript180135, [u8; 32]) {
+/// Both sides of a test use this same transcript, so it does not need to correspond to a
+/// real engagement — it only needs to be the *same* transcript the device signed over.
+pub(crate) fn test_reader_session() -> ReaderSessionContext<SessionTranscript180135> {
     let (_, device_public) = create_p256_ephemeral_keys().expect("failed to generate device key");
-    let (reader_private, reader_public) =
-        create_p256_ephemeral_keys().expect("failed to generate reader key");
-    let reader_private: [u8; 32] = reader_private.to_bytes().into();
 
     let device_engagement = DeviceEngagement {
         version: "1.0".into(),
@@ -291,13 +284,11 @@ pub(crate) fn test_session_transcript() -> (SessionTranscript180135, [u8; 32]) {
         protocol_info: None,
     };
 
-    let transcript = SessionTranscript180135(
+    ReaderSessionContext::new(
         Tag24::new(device_engagement).expect("failed to encode device engagement"),
-        Tag24::new(reader_public).expect("failed to encode reader key"),
         Handover::QR,
-    );
-
-    (transcript, reader_private)
+    )
+    .expect("failed to build the reader session")
 }
 
 /// Relabel a document without touching what the issuer signed.
@@ -376,9 +367,9 @@ pub(crate) struct TestReader {
 impl TestReader {
     /// Do the reader's half of the key agreement against an engaged device.
     pub(crate) fn engage(engaged: &SessionManagerEngaged) -> Self {
-        let (private, public) =
-            create_p256_ephemeral_keys().expect("failed to generate reader ephemeral key");
-        let e_reader_key = Tag24::new(public).expect("failed to encode reader key");
+        let session =
+            ReaderSessionContext::new(engaged.device_engagement.clone(), engaged.handover.clone())
+                .expect("failed to build the reader session");
 
         let e_device_key = engaged
             .device_engagement
@@ -387,16 +378,13 @@ impl TestReader {
             .1
             .clone()
             .into_inner();
-        let shared_secret =
-            get_shared_secret(e_device_key, &private.into()).expect("ECDH with the device failed");
+        let shared_secret = session
+            .e_reader_key_private()
+            .session_shared_secret(e_device_key)
+            .expect("ECDH with the device failed");
 
-        let session_transcript = SessionTranscript180135(
-            engaged.device_engagement.clone(),
-            e_reader_key.clone(),
-            engaged.handover.clone(),
-        );
-        let transcript_bytes =
-            Tag24::new(session_transcript.clone()).expect("failed to encode session transcript");
+        let transcript_bytes = Tag24::new(session.session_transcript().clone())
+            .expect("failed to encode session transcript");
         let sk_reader = derive_session_key(&shared_secret, &transcript_bytes, true)
             .expect("failed to derive SKReader")
             .into();
@@ -404,8 +392,8 @@ impl TestReader {
         Self {
             sk_reader,
             counter: 0,
-            session_transcript,
-            e_reader_key,
+            session_transcript: session.session_transcript().clone(),
+            e_reader_key: session.e_reader_key().clone(),
         }
     }
 

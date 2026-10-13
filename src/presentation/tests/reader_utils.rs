@@ -37,14 +37,7 @@ async fn validate(
         options: &ValidationOptions::default(),
         profiles: &AnyDocType(MdocProfile::MDL),
     };
-    validate_response(
-        response,
-        &exchange.session_transcript(),
-        &config,
-        &pki.fetcher(),
-        &exchange.e_reader_key_private(),
-    )
-    .await
+    validate_response(response, exchange.reader_session(), &config, &pki.fetcher()).await
 }
 
 /// Same as [`validate`], but under a caller-supplied certificate profile.
@@ -63,14 +56,7 @@ async fn validate_with_profile(
         options: &ValidationOptions::default(),
         profiles: &AnyDocType(profile),
     };
-    validate_response(
-        response,
-        &exchange.session_transcript(),
-        &config,
-        &pki.fetcher(),
-        &exchange.e_reader_key_private(),
-    )
-    .await
+    validate_response(response, exchange.reader_session(), &config, &pki.fetcher()).await
 }
 
 /// The point of the whole exercise: a credential whose document signer carries a
@@ -610,14 +596,11 @@ async fn a_response_with_no_documents_is_not_evaluated() {
         options: &ValidationOptions::default(),
         profiles: &AnyDocType(MdocProfile::MDL),
     };
-    let (transcript, reader_key) = test_utils::test_session_transcript();
-
     let outcome = validate_response::<SessionTranscript180135, (), _>(
         &response,
-        &transcript,
+        &test_utils::test_reader_session(),
         &config,
         &(),
-        &reader_key,
     )
     .await;
 
@@ -644,10 +627,9 @@ async fn an_unknown_request_skips_the_filter_with_a_warning() {
     };
     let outcome = validate_response(
         &response,
-        &exchange.session_transcript(),
+        exchange.reader_session(),
         &config,
         &pki.fetcher(),
-        &exchange.e_reader_key_private(),
     )
     .await;
 
@@ -717,11 +699,10 @@ async fn a_revoked_certificate_is_an_error_not_a_warning() {
     };
     let outcome = validate_response(
         &response,
-        &exchange.session_transcript(),
+        exchange.reader_session(),
         &config,
         // The same PKI, now publishing a CRL that names its own signing certificate.
         &pki.fetcher_revoking(&[pki.leaf_serial()]),
-        &exchange.e_reader_key_private(),
     )
     .await;
 
@@ -867,10 +848,9 @@ async fn an_outcome_survives_a_json_round_trip() {
     };
     let failed = validate_response::<SessionTranscript180135, (), _>(
         &empty,
-        &exchange.session_transcript(),
+        exchange.reader_session(),
         &config,
         &(),
-        &[0u8; 32],
     )
     .await;
     let json = serde_json::to_string(&failed).expect("failed outcome does not serialize");
