@@ -431,3 +431,44 @@ fn decoy_digests() {
             .fold(0, |acc, x| acc + x.len()),
     );
 }
+
+/// The `status` set on the builder ends up in the MSO the issuer signs, not only in
+/// the decoded copy next to it.
+#[test]
+fn the_status_is_signed_into_the_mso() -> anyhow::Result<()> {
+    use crate::definitions::{x509::test::TestPki, Status, StatusListInfo};
+
+    let status = Status {
+        status_list: Some(StatusListInfo {
+            idx: 412,
+            uri: "https://issuer.example/status/1".to_string(),
+            certificate: None,
+        }),
+        ..Default::default()
+    };
+    let pki = TestPki::issuer();
+
+    let mdoc = minimal_test_mdoc_builder()
+        .status(status.clone())
+        .issue::<SigningKey, Signature>(pki.x5chain(), pki.leaf_key.clone())?;
+
+    let payload = mdoc
+        .issuer_auth
+        .inner
+        .payload
+        .as_ref()
+        .expect("expected an attached payload");
+    let signed: Tag24<Mso> = crate::cbor::from_slice(payload)?;
+    assert_eq!(signed.into_inner().status, Some(status));
+    Ok(())
+}
+
+/// Without a status, the MSO carries no `status` key at all.
+#[test]
+fn an_mdoc_without_status_has_no_status_key() -> anyhow::Result<()> {
+    let mdoc = minimal_test_mdoc()?;
+    let payload = mdoc.issuer_auth.inner.payload.as_ref().unwrap();
+    let signed: Tag24<Mso> = crate::cbor::from_slice(payload)?;
+    assert_eq!(signed.into_inner().status, None);
+    Ok(())
+}
