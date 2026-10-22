@@ -9,6 +9,8 @@ pub struct HttpRequest {
     pub url: String,
     /// The HTTP method and optional body.
     pub method: HttpMethod,
+    /// Request headers, as `(name, value)` pairs.
+    pub headers: Vec<(String, String)>,
 }
 
 /// HTTP method with optional body for POST requests.

@@ -23,6 +23,12 @@ use std::io::Read;
 use time::OffsetDateTime;
 use x509_cert::Certificate;
 
+mod fetcher;
+
+#[cfg(feature = "reqwest")]
+pub use fetcher::CachingStatusListFetcher;
+pub use fetcher::{SimpleStatusListFetcher, StatusListFetcher};
+
 /// The `typ` of a Status List Token in CWT form. The CoAP Content-Format ID that draft-10
 /// 5.2 also allows is still "TBD" (14.8), so there is no number to accept.
 pub const STATUS_LIST_CWT_TYPE: &str = "application/statuslist+cwt";
@@ -261,6 +267,11 @@ pub enum StatusListError {
     SubjectMismatch { expected: String, found: String },
     #[error("the status list token expired at {0}")]
     Expired(OffsetDateTime),
+    #[error("the status list token could not be fetched from {uri}: {detail}")]
+    Fetch { uri: String, detail: String },
+    /// The `()` fetcher: the reader does not check the MSO status.
+    #[error("MSO status checking is disabled (no status list fetcher configured)")]
+    NotSupported,
     /// 1, 2, 4 or 8 bits per status:
     /// <https://www.ietf.org/archive/id/draft-ietf-oauth-status-list-10.html#name-status-list>.
     #[error("invalid status size: {0} bits")]

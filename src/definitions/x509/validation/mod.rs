@@ -631,6 +631,11 @@ impl CertificateProfile for StatusListSignerProfile {
     /// 12.3.6.3 makes the extended key usage of draft-ietf-oauth-status-list optional, and
     /// draft-10 does not assign its OID yet. The document signer key may also sign the
     /// list (draft-10 11.3), so no key purpose is required.
+    ///
+    /// The cost: any end-entity certificate under the trust point can sign the list of that
+    /// issuer. Later drafts assign `id-kp-oauthStatusListSigning`. A stricter rule is then
+    /// possible: if an extended key usage is present, it must contain that OID or the
+    /// document signer OID.
     fn validate_end_entity(&self, _certificate: &Certificate) -> Vec<String> {
         Vec::new()
     }

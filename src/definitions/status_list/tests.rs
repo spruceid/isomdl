@@ -525,3 +525,157 @@ fn refuses_a_status_size_the_draft_does_not_allow() {
         );
     }
 }
+
+#[cfg(feature = "reqwest")]
+mod fetcher {
+    use std::{
+        collections::VecDeque,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        },
+        time::Duration,
+    };
+
+    use async_trait::async_trait;
+    use time::OffsetDateTime;
+    use wiremock::{
+        matchers::{header, method},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    use super::{claims, int, token, without, SUB};
+    use crate::definitions::{
+        status_list::{
+            CachingStatusListFetcher, SimpleStatusListFetcher, StatusListError, StatusListFetcher,
+            STATUS_LIST_CWT_TYPE,
+        },
+        x509::revocation::{
+            HttpClient, HttpRequest, HttpResponse, NoHttpClientError, ReqwestClient,
+        },
+    };
+
+    /// The mock answers only a request that asks for the CWT form, so this also checks
+    /// that `ReqwestClient` sends the headers of the request.
+    #[tokio::test]
+    async fn asks_for_the_cwt_form() {
+        let server = MockServer::start().await;
+        let body = token(Some(STATUS_LIST_CWT_TYPE), claims(), true);
+        Mock::given(method("GET"))
+            .and(header("accept", STATUS_LIST_CWT_TYPE))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let fetched = SimpleStatusListFetcher::new(ReqwestClient::new().unwrap())
+            .fetch_status_list_token(&server.uri())
+            .await
+            .unwrap();
+        assert_eq!(*fetched, *body);
+    }
+
+    /// Serves `responses` in order, and counts the requests.
+    struct Scripted {
+        responses: Mutex<VecDeque<Result<HttpResponse, NoHttpClientError>>>,
+        requests: AtomicUsize,
+    }
+
+    impl Scripted {
+        fn new(
+            responses: impl IntoIterator<Item = Result<HttpResponse, NoHttpClientError>>,
+        ) -> Self {
+            Self {
+                responses: Mutex::new(responses.into_iter().collect()),
+                requests: AtomicUsize::new(0),
+            }
+        }
+
+        fn requests(&self) -> usize {
+            self.requests.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl HttpClient for &Scripted {
+        type Error = NoHttpClientError;
+
+        async fn request(&self, _request: HttpRequest) -> Result<HttpResponse, Self::Error> {
+            self.requests.fetch_add(1, Ordering::SeqCst);
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("no response left")
+        }
+    }
+
+    fn ok(body: Vec<u8>) -> Result<HttpResponse, NoHttpClientError> {
+        Ok(HttpResponse { status: 200, body })
+    }
+
+    /// A token whose `ttl` claim is `ttl` seconds.
+    fn token_with_ttl(ttl: i64) -> Vec<u8> {
+        let mut claims = without(65534);
+        claims.push((65534, int(ttl)));
+        token(Some(STATUS_LIST_CWT_TYPE), claims, true)
+    }
+
+    #[tokio::test]
+    async fn serves_a_fresh_token_from_the_cache() {
+        let body = token_with_ttl(43200);
+        let client = Scripted::new([ok(body.clone())]);
+        let fetcher = CachingStatusListFetcher::new(&client);
+        for _ in 0..2 {
+            assert_eq!(*fetcher.fetch_status_list_token(SUB).await.unwrap(), *body);
+        }
+        assert_eq!(client.requests(), 1);
+    }
+
+    #[tokio::test]
+    async fn max_ttl_limits_the_ttl_of_the_token() {
+        let client = Scripted::new([ok(token_with_ttl(43200)), ok(token_with_ttl(43200))]);
+        let fetcher = CachingStatusListFetcher::with_config(&client, 100, Duration::ZERO);
+        for _ in 0..2 {
+            fetcher.fetch_status_list_token(SUB).await.unwrap();
+        }
+        assert_eq!(client.requests(), 2);
+    }
+
+    /// `ttl` 0: the second call fetches again, and the fetch fails.
+    #[tokio::test]
+    async fn serves_the_cached_token_when_the_refetch_fails() {
+        let body = token_with_ttl(0);
+        let client = Scripted::new([ok(body.clone()), Err(NoHttpClientError)]);
+        let fetcher = CachingStatusListFetcher::new(&client);
+        fetcher.fetch_status_list_token(SUB).await.unwrap();
+        assert_eq!(*fetcher.fetch_status_list_token(SUB).await.unwrap(), *body);
+        assert_eq!(client.requests(), 2);
+    }
+
+    #[tokio::test]
+    async fn does_not_serve_a_cached_token_after_its_exp() {
+        let mut claims = without(4);
+        claims.push((4, int(OffsetDateTime::now_utc().unix_timestamp() - 1)));
+        let expired = token(Some(STATUS_LIST_CWT_TYPE), claims, true);
+        let client = Scripted::new([ok(expired), Err(NoHttpClientError)]);
+        let fetcher = CachingStatusListFetcher::new(&client);
+        fetcher.fetch_status_list_token(SUB).await.unwrap();
+        assert!(matches!(
+            fetcher.fetch_status_list_token(SUB).await,
+            Err(StatusListError::Fetch { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn does_not_cache_a_response_that_does_not_decode() {
+        let client = Scripted::new([ok(vec![0xa0]), ok(token_with_ttl(43200))]);
+        let fetcher = CachingStatusListFetcher::new(&client);
+        assert!(matches!(
+            fetcher.fetch_status_list_token(SUB).await,
+            Err(StatusListError::MalformedToken(_))
+        ));
+        fetcher.fetch_status_list_token(SUB).await.unwrap();
+        assert_eq!(client.requests(), 2);
+    }
+}
