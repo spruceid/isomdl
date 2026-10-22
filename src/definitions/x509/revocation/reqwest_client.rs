@@ -52,7 +52,7 @@ impl HttpClient for ReqwestClient {
     async fn request(&self, request: HttpRequest) -> Result<HttpResponse, Self::Error> {
         let url = &request.url;
 
-        let req_builder = match request.method {
+        let mut req_builder = match request.method {
             HttpMethod::Get => self.client.get(url),
             HttpMethod::Post { body, content_type } => self
                 .client
@@ -60,6 +60,9 @@ impl HttpClient for ReqwestClient {
                 .header("Content-Type", content_type)
                 .body(body),
         };
+        for (name, value) in request.headers {
+            req_builder = req_builder.header(name, value);
+        }
 
         let response = req_builder.send().await?;
         let status = response.status().as_u16();

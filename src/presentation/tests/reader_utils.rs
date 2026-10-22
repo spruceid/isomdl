@@ -42,6 +42,7 @@ async fn validate(
         &exchange.session_transcript(),
         &config,
         &pki.fetcher(),
+        &(),
         &exchange.e_reader_key_private(),
     )
     .await
@@ -68,6 +69,7 @@ async fn validate_with_profile(
         &exchange.session_transcript(),
         &config,
         &pki.fetcher(),
+        &(),
         &exchange.e_reader_key_private(),
     )
     .await
@@ -612,10 +614,11 @@ async fn a_response_with_no_documents_is_not_evaluated() {
     };
     let (transcript, reader_key) = test_utils::test_session_transcript();
 
-    let outcome = validate_response::<SessionTranscript180135, (), _>(
+    let outcome = validate_response::<SessionTranscript180135, (), (), _>(
         &response,
         &transcript,
         &config,
+        &(),
         &(),
         &reader_key,
     )
@@ -647,6 +650,7 @@ async fn an_unknown_request_skips_the_filter_with_a_warning() {
         &exchange.session_transcript(),
         &config,
         &pki.fetcher(),
+        &(),
         &exchange.e_reader_key_private(),
     )
     .await;
@@ -721,6 +725,7 @@ async fn a_revoked_certificate_is_an_error_not_a_warning() {
         &config,
         // The same PKI, now publishing a CRL that names its own signing certificate.
         &pki.fetcher_revoking(&[pki.leaf_serial()]),
+        &(),
         &exchange.e_reader_key_private(),
     )
     .await;
@@ -865,10 +870,11 @@ async fn an_outcome_survives_a_json_round_trip() {
         options: &ValidationOptions::default(),
         profiles: &AnyDocType(MdocProfile::MDL),
     };
-    let failed = validate_response::<SessionTranscript180135, (), _>(
+    let failed = validate_response::<SessionTranscript180135, (), (), _>(
         &empty,
         &exchange.session_transcript(),
         &config,
+        &(),
         &(),
         &[0u8; 32],
     )
@@ -877,4 +883,295 @@ async fn an_outcome_survives_a_json_round_trip() {
     let back: ResponseValidationOutcome =
         serde_json::from_str(&json).expect("failed outcome does not deserialize");
     assert_eq!(failed, back);
+}
+
+/// The MSO status check, from the issued MSO to the outcome (ISO/IEC 18013-5 §12.3.6).
+///
+/// The token failures (`sub`, `exp`, signature, chain) are tested on `verify_token`. These
+/// tests check the trust point the reader picks and the mapping of each result.
+mod mso_status {
+    use super::*;
+    use crate::definitions::status_list::{
+        StatusListError, StatusListFetcher, STATUS_LIST_CWT_TYPE,
+    };
+    use crate::definitions::{IdentifierListInfo, StatusListInfo, ValidityInfo};
+    use crate::issuance::mdoc::test::issue_test_mdoc_with_status;
+    use ciborium::Value;
+    use coset::{iana, CoseSign1Builder, HeaderBuilder, TaggedCborSerializable};
+    use flate2::{write::ZlibEncoder, Compression};
+    use signature::Signer;
+    use std::io::Write;
+    use std::sync::Arc;
+    use time::OffsetDateTime;
+    use x509_cert::der::Encode;
+
+    const URI: &str = "https://issuer.example/status/1";
+    /// The entry of the MSO: bit 3 of the first byte of the list.
+    const IDX: u64 = 3;
+    const VALID: u8 = 0;
+    const REVOKED: u8 = 1 << IDX;
+
+    /// Serves one token for every URI.
+    struct Serve(Arc<[u8]>);
+
+    #[async_trait::async_trait]
+    impl StatusListFetcher for Serve {
+        async fn fetch_status_list_token(&self, _uri: &str) -> Result<Arc<[u8]>, StatusListError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// A list of one byte at 1 bit per entry, for `URI`, signed by the leaf of `signer`.
+    fn list(signer: &TestPki, byte: u8) -> Serve {
+        let mut lst = ZlibEncoder::new(Vec::new(), Compression::default());
+        lst.write_all(&[byte]).unwrap();
+        let int = |i: i64| Value::Integer(i.into());
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let status_list = Value::Map(vec![
+            (Value::Text("bits".into()), int(1)),
+            (
+                Value::Text("lst".into()),
+                Value::Bytes(lst.finish().unwrap()),
+            ),
+        ]);
+        let claims = Value::Map(vec![
+            (int(2), Value::Text(URI.into())),
+            (int(6), int(now)),
+            (int(4), int(now + 3600)),
+            (int(65533), status_list),
+        ]);
+        let protected = HeaderBuilder::new()
+            .algorithm(iana::Algorithm::ES256)
+            .value(16, Value::Text(STATUS_LIST_CWT_TYPE.into()))
+            .value(X5CHAIN_COSE_HEADER_LABEL, signer.x5chain().into_cbor())
+            .build();
+        let token = CoseSign1Builder::new()
+            .protected(protected)
+            .payload(crate::cbor::to_vec(&claims).unwrap())
+            .create_signature(&[], |data| {
+                let signature: p256::ecdsa::Signature = signer.leaf_key.sign(data);
+                signature.to_bytes().to_vec()
+            })
+            .build();
+        Serve(token.to_tagged_vec().unwrap().into())
+    }
+
+    /// A status that points to entry `idx` of the list at `URI`.
+    fn status_list(idx: u64, certificate: Option<&TestPki>) -> crate::definitions::Status {
+        crate::definitions::Status {
+            status_list: Some(StatusListInfo {
+                idx,
+                uri: URI.to_string(),
+                certificate: certificate.map(|pki| pki.root.to_der().unwrap().into()),
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Issue an mDL with `status` under `pki`, present it, and validate the response.
+    async fn present<F: StatusListFetcher>(
+        pki: &TestPki,
+        validity: ValidityInfo,
+        status: crate::definitions::Status,
+        trust_anchors: &TrustAnchorRegistry,
+        status_list_fetcher: &F,
+    ) -> ResponseValidationOutcome {
+        let mdoc = issue_test_mdoc_with_status(pki, validity, status).unwrap();
+        let exchange = TestExchange::new([mdoc]);
+        let response = exchange.respond(&[ask(MDL_DOC_TYPE, &["age_over_21"])]);
+        let requested = wanted(&[MDL_DOC_TYPE]);
+        let config = ReaderValidationConfig {
+            trust_anchors,
+            requested_doc_types: Some(&requested),
+            options: &ValidationOptions::default(),
+            profiles: &AnyDocType(MdocProfile::MDL),
+        };
+        validate_response(
+            &response,
+            &exchange.session_transcript(),
+            &config,
+            &pki.fetcher(),
+            status_list_fetcher,
+            &exchange.e_reader_key_private(),
+        )
+        .await
+    }
+
+    fn warns(warnings: &[DocumentWarning], code: &str) -> bool {
+        warnings.iter().any(|w| w.code() == code)
+    }
+
+    #[tokio::test]
+    async fn a_valid_entry_adds_nothing() {
+        let pki = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status_list(IDX, None),
+            &pki.iaca_registry(),
+            &list(&pki, VALID),
+        )
+        .await;
+        assert_eq!(only_valid(&outcome).warnings, vec![]);
+    }
+
+    #[tokio::test]
+    async fn a_revoked_entry_fails_the_document() {
+        let pki = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status_list(IDX, None),
+            &pki.iaca_registry(),
+            &list(&pki, REVOKED),
+        )
+        .await;
+        let failed = only_failed(&outcome);
+        assert_eq!(
+            failed.errors.as_ref(),
+            &[DocumentError::MsoNotValid { status: 1 }]
+        );
+    }
+
+    /// The reader trusts both IACAs for documents, but the list of this MSO must chain to
+    /// the IACA of this MSO.
+    #[tokio::test]
+    async fn a_list_under_another_trusted_iaca_is_only_a_warning() {
+        let pki = TestPki::issuer();
+        let other = TestPki::issuer();
+        let mut trust_anchors = pki.iaca_registry();
+        trust_anchors.anchors.extend(other.iaca_registry().anchors);
+
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status_list(IDX, None),
+            &trust_anchors,
+            &list(&other, REVOKED),
+        )
+        .await;
+        assert!(warns(&only_valid(&outcome).warnings, "mso_status"));
+    }
+
+    /// `status_list.certificate` replaces the IACA as the trust point. The registry does not
+    /// hold it: the issuer signature on the MSO makes it authentic.
+    #[tokio::test]
+    async fn the_certificate_of_the_status_is_the_trust_point() {
+        let pki = TestPki::issuer();
+        let other = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status_list(IDX, Some(&other)),
+            &pki.iaca_registry(),
+            &list(&other, REVOKED),
+        )
+        .await;
+        // Only a verified list gives a status.
+        assert!(has(&only_failed(&outcome).errors, "mso_not_valid"));
+    }
+
+    /// draft-ietf-oauth-status-list-16: an index out of the list rejects the token.
+    #[tokio::test]
+    async fn an_index_past_the_list_fails_the_document() {
+        let pki = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status_list(8, None),
+            &pki.iaca_registry(),
+            &list(&pki, VALID),
+        )
+        .await;
+        assert_eq!(
+            only_failed(&outcome).errors.as_ref(),
+            &[DocumentError::MsoStatusIndexOutOfRange { idx: 8 }]
+        );
+    }
+
+    /// No status list processing for a document that already failed: the list is not read.
+    #[tokio::test]
+    async fn an_expired_mso_is_not_checked() {
+        let pki = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            expired(),
+            status_list(IDX, None),
+            &pki.iaca_registry(),
+            &list(&pki, REVOKED),
+        )
+        .await;
+        let failed = only_failed(&outcome);
+        assert!(!has(&failed.errors, "mso_not_valid"), "{:?}", failed.errors);
+        assert!(!warns(&failed.warnings, "mso_status"));
+    }
+
+    #[tokio::test]
+    async fn no_status_fetcher_is_a_warning() {
+        let pki = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status_list(IDX, None),
+            &pki.iaca_registry(),
+            &(),
+        )
+        .await;
+        assert!(warns(&only_valid(&outcome).warnings, "mso_status"));
+    }
+
+    #[tokio::test]
+    async fn an_identifier_list_is_a_warning() {
+        let pki = TestPki::issuer();
+        let status = crate::definitions::Status {
+            identifier_list: Some(IdentifierListInfo {
+                id: vec![1].into(),
+                uri: URI.to_string(),
+                certificate: None,
+            }),
+            ..Default::default()
+        };
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status,
+            &pki.iaca_registry(),
+            &list(&pki, VALID),
+        )
+        .await;
+        assert!(warns(&only_valid(&outcome).warnings, "mso_status"));
+    }
+
+    /// The issuer did not make the MSO revocable, so there is nothing to report.
+    #[tokio::test]
+    async fn no_status_adds_nothing() {
+        let pki = TestPki::issuer();
+        let mdoc = issue_test_mdoc(&pki, MDL_DOC_TYPE, valid_for_a_year()).unwrap();
+        let exchange = TestExchange::new([mdoc]);
+        let response = exchange.respond(&[ask(MDL_DOC_TYPE, &["age_over_21"])]);
+        let outcome = validate(
+            &exchange,
+            &response,
+            &pki.iaca_registry(),
+            &[MDL_DOC_TYPE],
+            &pki,
+        )
+        .await;
+        assert_eq!(only_valid(&outcome).warnings, vec![]);
+    }
+
+    /// Both members of `status` are optional (§12.3.6.1). An empty map references no list.
+    #[tokio::test]
+    async fn an_empty_status_adds_nothing() {
+        let pki = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            crate::definitions::Status::default(),
+            &pki.iaca_registry(),
+            &(),
+        )
+        .await;
+        assert_eq!(only_valid(&outcome).warnings, vec![]);
+    }
 }

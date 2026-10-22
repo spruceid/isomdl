@@ -66,6 +66,7 @@ impl<C: HttpClient> RevocationFetcher for SimpleRevocationFetcher<C> {
         let request = HttpRequest {
             url: url.to_string(),
             method: HttpMethod::Get,
+            headers: Vec::new(),
         };
 
         let response = self
@@ -194,6 +195,7 @@ mod caching {
             let request = HttpRequest {
                 url: url.to_string(),
                 method: HttpMethod::Get,
+                headers: Vec::new(),
             };
 
             let response =

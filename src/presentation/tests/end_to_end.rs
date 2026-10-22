@@ -39,6 +39,7 @@ async fn validate(
         &exchange.session_transcript(),
         &config,
         revocation_fetcher,
+        &(),
         &exchange.e_reader_key_private(),
     )
     .await
@@ -100,6 +101,7 @@ async fn mac0_device_authentication_fails_with_the_wrong_reader_key() {
         &exchange.session_transcript(),
         &config,
         &pki.fetcher(),
+        &(),
         &wrong_key,
     )
     .await;
@@ -281,7 +283,7 @@ mod end_to_end {
             .expect("the device produced no response");
 
         reader_session
-            .handle_response(&response, profiles, fetcher)
+            .handle_response(&response, profiles, fetcher, &())
             .await
     }
 

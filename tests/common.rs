@@ -183,7 +183,7 @@ impl Reader {
     ) -> Result<()> {
         // Use () to skip CRL checks in tests
         let validated = reader_sm
-            .handle_response(&response, &AnyDocType(MdocProfile::MDL), &())
+            .handle_response(&response, &AnyDocType(MdocProfile::MDL), &(), &())
             .await;
         println!("Validated Response: {validated:?}");
 
