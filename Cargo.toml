@@ -64,6 +64,7 @@ strum_macros = "0.24"
 
 coset = "0.3.8"
 ciborium = "0.2.2"
+flate2 = "1.1"
 digest = "0.10.7"
 tracing = "0.1.41"
 sha1 = "0.10.6"

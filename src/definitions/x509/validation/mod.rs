@@ -346,6 +346,14 @@ pub struct ValidationOutcome {
     /// failures rather than security failures. Actual certificate revocation is
     /// reported in `errors`, not here.
     pub revocation_errors: Vec<String>,
+    /// The trust anchor the chain terminated at, if one was found. Set even when `errors`
+    /// is not empty, so read it only after a successful validation.
+    ///
+    /// The MSO status check uses it: without a `certificate` in the status, the status list
+    /// must be signed under the IACA that signed the document signer (ISO/IEC 18013-5
+    /// second edition CD 12.3.6.2).
+    #[serde(skip)]
+    pub trust_anchor: Option<Box<Certificate>>,
 }
 
 impl ValidationOutcome {
@@ -611,6 +619,62 @@ impl CertificateProfile for VicalProfile {
     }
 }
 
+/// The signer of an MSO status list (ISO/IEC 18013-5 second edition CD 12.3.6).
+///
+/// Validate under a registry that holds only the trust point of 12.3.6.2: the `certificate`
+/// of the MSO status, or else the IACA that signed the document signer. A list signed under
+/// any other anchor is then refused, even an anchor the reader trusts for documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StatusListSignerProfile;
+
+impl CertificateProfile for StatusListSignerProfile {
+    /// 12.3.6.3 makes the extended key usage of draft-ietf-oauth-status-list optional, and
+    /// draft-10 does not assign its OID yet. The document signer key may also sign the
+    /// list (draft-10 11.3), so no key purpose is required.
+    fn validate_end_entity(&self, _certificate: &Certificate) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The trust point registry is built for one check and holds only the trust point, so
+    /// the purpose only has to match it. The IACA is the usual trust point.
+    fn trust_purpose(&self) -> TrustPurpose {
+        TrustPurpose::Iaca
+    }
+
+    /// An IACA was already checked as the anchor of the document signer, and 12.3.6.2 sets
+    /// no rule for a `certificate` trust point. Its validity period is still checked when
+    /// the chain is matched to it.
+    fn validate_trust_anchor(&self, _certificate: &Certificate) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn validate_against_trust_anchor(
+        &self,
+        _signer: &Certificate,
+        _trust_point: &Certificate,
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// 12.3.6.3 allows "the certificate or chain of certificates" in `x5chain`.
+    fn chain(&self) -> ChainRule {
+        ChainRule::WalkToTrustAnchor
+    }
+
+    /// `exp` limits the life of one list, but only a CRL revokes a compromised signer key.
+    fn revocation(&self) -> RevocationRule {
+        RevocationRule::Crl
+    }
+
+    fn end_entity_name(&self) -> &'static str {
+        "Status list signer certificate"
+    }
+
+    fn trust_anchor_name(&self) -> &'static str {
+        "Status list trust point"
+    }
+}
+
 /// Validate a certificate chain under `profile`, with default options.
 ///
 /// # Arguments
@@ -684,6 +748,7 @@ pub async fn validate_with_options<P: CertificateProfile, R: RevocationFetcher>(
             }
 
             check_anchor(&mut outcome, profile, end_entity, anchor);
+            outcome.trust_anchor = Some(Box::new(anchor.clone()));
 
             match profile.revocation() {
                 RevocationRule::Crl => {
@@ -712,10 +777,12 @@ pub async fn validate_with_options<P: CertificateProfile, R: RevocationFetcher>(
             let external_trust_anchor = match chain_result {
                 ChainToTrustAnchorResult::ValidInChainAnchor(anchor) => {
                     check_anchor(&mut outcome, profile, end_entity, anchor);
+                    outcome.trust_anchor = Some(Box::new(anchor.clone()));
                     None
                 }
                 ChainToTrustAnchorResult::ValidExternalAnchor(anchor) => {
                     check_anchor(&mut outcome, profile, end_entity, anchor);
+                    outcome.trust_anchor = Some(Box::new(anchor.clone()));
                     Some(anchor)
                 }
                 ChainToTrustAnchorResult::Invalid => {
