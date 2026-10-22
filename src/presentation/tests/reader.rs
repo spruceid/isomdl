@@ -98,6 +98,7 @@ async fn an_undecodable_response_reports_a_reason() {
                 crate::definitions::x509::validation::MdocProfile::MDL,
             ),
             &(),
+            &(),
         )
         .await;
 

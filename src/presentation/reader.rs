@@ -27,6 +27,7 @@ use super::{
     reader_utils::{validate_response, ReaderValidationConfig},
 };
 
+use crate::definitions::status_list::StatusListFetcher;
 use crate::definitions::x509::revocation::RevocationFetcher;
 pub use crate::definitions::x509::validation::ValidationOptions;
 
@@ -502,16 +503,25 @@ impl SessionManager {
     /// # Arguments
     /// * `response` - The encrypted device response
     /// * `revocation_fetcher` - Revocation fetcher for CRL checking. Use `&()` to skip revocation checks.
-    pub async fn handle_response<P: ProfileSelector, R: RevocationFetcher>(
+    /// * `status_list_fetcher` - Fetcher for MSO status lists. Use `&()` to skip the MSO
+    ///   status check (each MSO with a status list then gets a warning).
+    pub async fn handle_response<P, R, F>(
         &mut self,
         response: &[u8],
         profiles: &P,
         revocation_fetcher: &R,
-    ) -> ResponseValidationOutcome {
+        status_list_fetcher: &F,
+    ) -> ResponseValidationOutcome
+    where
+        P: ProfileSelector,
+        R: RevocationFetcher,
+        F: StatusListFetcher,
+    {
         self.handle_response_with_options(
             response,
             profiles,
             revocation_fetcher,
+            status_list_fetcher,
             &ValidationOptions::default(),
         )
         .await
@@ -521,13 +531,19 @@ impl SessionManager {
     ///
     /// The `options` control the validation time used both for certificate chain
     /// validity checks and for the MSO `validityInfo` window check.
-    pub async fn handle_response_with_options<P: ProfileSelector, R: RevocationFetcher>(
+    pub async fn handle_response_with_options<P, R, F>(
         &mut self,
         response: &[u8],
         profiles: &P,
         revocation_fetcher: &R,
+        status_list_fetcher: &F,
         options: &ValidationOptions,
-    ) -> ResponseValidationOutcome {
+    ) -> ResponseValidationOutcome
+    where
+        P: ProfileSelector,
+        R: RevocationFetcher,
+        F: StatusListFetcher,
+    {
         let device_response = match self.decrypt_response(response) {
             Ok(device_response) => device_response,
             Err(e) => {
@@ -555,6 +571,7 @@ impl SessionManager {
             &self.session_transcript,
             &config,
             revocation_fetcher,
+            status_list_fetcher,
             &self.e_reader_key_private,
         )
         .await

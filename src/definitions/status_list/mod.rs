@@ -15,13 +15,14 @@ use crate::{
         x5chain::X5CHAIN_COSE_HEADER_LABEL,
         SupportedCurve, X5Chain,
     },
+    definitions::StatusListInfo,
 };
 use ciborium::{value::Integer, Value};
 use coset::{CoseSign1, Label, RegisteredLabelWithPrivate};
 use flate2::bufread::ZlibDecoder;
 use std::io::Read;
 use time::OffsetDateTime;
-use x509_cert::Certificate;
+use x509_cert::{der::Decode, Certificate};
 
 mod fetcher;
 
@@ -104,6 +105,47 @@ pub fn decode_token(bytes: &[u8]) -> Result<StatusListToken, StatusListError> {
         bits,
         lst,
     })
+}
+
+/// Fetch, verify and read the status of the MSO that carries `status_list`.
+///
+/// `iaca` is the trust anchor of the document signer chain. It is the trust point when
+/// `status_list` has no `certificate` (ISO/IEC 18013-5 second edition CD 12.3.6.2).
+///
+/// On success, returns the status and the CRL failures of the signer chain (see
+/// [`verify_token`]).
+pub async fn check_status<R: RevocationFetcher, F: StatusListFetcher>(
+    status_list: &StatusListInfo,
+    iaca: &Certificate,
+    revocation_fetcher: &R,
+    status_list_fetcher: &F,
+    options: &ValidationOptions,
+) -> Result<(u8, Vec<String>), StatusListError> {
+    // Authentic: the MSO that carries it is signature-verified.
+    let certificate;
+    let trust_point = match &status_list.certificate {
+        Some(der) => {
+            certificate = Certificate::from_der(der.as_ref())
+                .map_err(|e| StatusListError::MalformedCertificate(e.to_string()))?;
+            &certificate
+        }
+        None => iaca,
+    };
+
+    let bytes = status_list_fetcher
+        .fetch_status_list_token(&status_list.uri)
+        .await?;
+    let token = decode_token(&bytes)?;
+    let warnings = verify_token(
+        &token,
+        &status_list.uri,
+        trust_point,
+        revocation_fetcher,
+        options,
+    )
+    .await?;
+    let status = compressed_status_at(&token.lst, token.bits, status_list.idx)?;
+    Ok((status, warnings))
 }
 
 /// Verify a decoded token for the MSO `status_list` that references it by `uri`.
@@ -247,6 +289,8 @@ fn timestamp(value: Value, name: &'static str) -> Result<OffsetDateTime, StatusL
 pub enum StatusListError {
     #[error("the status list token is malformed: {0}")]
     MalformedToken(String),
+    #[error("the certificate of the MSO status list is malformed: {0}")]
+    MalformedCertificate(String),
     #[error("the status list token does not have the type {STATUS_LIST_CWT_TYPE}")]
     WrongType,
     #[error("the status list token has no {0} claim")]
