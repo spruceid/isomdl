@@ -146,7 +146,7 @@ async fn handle_request(
     if let Ok(Some(response)) = get_errors(session_manager.clone()) {
         // Use () to skip CRL checks in tests
         let validated_response = reader_session_manager
-            .handle_response(&response, &AnyDocType(MdocProfile::MDL), &(), &())
+            .handle_response(&response, &AnyDocType(MdocProfile::MDL), &())
             .await;
         println!("Reader: {validated_response:?}");
         return Ok(None);
@@ -209,7 +209,7 @@ async fn reader_handle_device_response(
 ) -> Result<()> {
     // Use () to skip CRL checks in tests
     let validated = reader_sm
-        .handle_response(&response, &AnyDocType(MdocProfile::MDL), &(), &())
+        .handle_response(&response, &AnyDocType(MdocProfile::MDL), &())
         .await;
     println!("Validated Response: {validated:?}");
 

@@ -24,12 +24,6 @@ use std::io::Read;
 use time::OffsetDateTime;
 use x509_cert::{der::Decode, Certificate};
 
-mod fetcher;
-
-#[cfg(feature = "reqwest")]
-pub use fetcher::CachingStatusListFetcher;
-pub use fetcher::{SimpleStatusListFetcher, StatusListFetcher};
-
 /// The `typ` of a Status List Token in CWT form. The CoAP Content-Format ID that draft-10
 /// 5.2 also allows is still "TBD" (14.8), so there is no number to accept.
 pub const STATUS_LIST_CWT_TYPE: &str = "application/statuslist+cwt";
@@ -114,11 +108,10 @@ pub fn decode_token(bytes: &[u8]) -> Result<StatusListToken, StatusListError> {
 ///
 /// On success, returns the status and the CRL failures of the signer chain (see
 /// [`verify_token`]).
-pub async fn check_status<R: RevocationFetcher, F: StatusListFetcher>(
+pub async fn check_status<R: RevocationFetcher>(
     status_list: &StatusListInfo,
     iaca: &Certificate,
     revocation_fetcher: &R,
-    status_list_fetcher: &F,
     options: &ValidationOptions,
 ) -> Result<(u8, Vec<String>), StatusListError> {
     // Authentic: the MSO that carries it is signature-verified.
@@ -132,7 +125,7 @@ pub async fn check_status<R: RevocationFetcher, F: StatusListFetcher>(
         None => iaca,
     };
 
-    let bytes = status_list_fetcher
+    let bytes = revocation_fetcher
         .fetch_status_list_token(&status_list.uri)
         .await?;
     let token = decode_token(&bytes)?;
@@ -144,6 +137,10 @@ pub async fn check_status<R: RevocationFetcher, F: StatusListFetcher>(
         options,
     )
     .await?;
+    // 12.3.6.5 allows only 1. The draft also allows 2, 4 and 8, so the lookup does too.
+    if token.bits != 1 {
+        return Err(StatusListError::InvalidBits(token.bits));
+    }
     let status = compressed_status_at(&token.lst, token.bits, status_list.idx)?;
     Ok((status, warnings))
 }
@@ -314,7 +311,7 @@ pub enum StatusListError {
     #[error("the status list token could not be fetched from {uri}: {detail}")]
     Fetch { uri: String, detail: String },
     /// The `()` fetcher: the reader does not check the MSO status.
-    #[error("MSO status checking is disabled (no status list fetcher configured)")]
+    #[error("the revocation fetcher does not fetch status lists")]
     NotSupported,
     /// 1, 2, 4 or 8 bits per status:
     /// <https://www.ietf.org/archive/id/draft-ietf-oauth-status-list-10.html#name-status-list>.

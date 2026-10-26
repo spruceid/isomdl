@@ -1,9 +1,10 @@
 //! Revocation fetcher trait and CRL implementations.
 //!
 //! This module provides:
-//! - [`RevocationFetcher`]: Trait for fetching revocation data (CRLs, and in the future OCSP)
-//! - [`SimpleRevocationFetcher`]: Basic CRL implementation that wraps an [`HttpClient`]
-//! - [`CachingRevocationFetcher`]: Caching CRL implementation with stale-while-revalidate (requires `reqwest` feature)
+//! - [`RevocationFetcher`]: Trait for fetching revocation data (CRLs and Status List
+//!   Tokens, and in the future OCSP)
+//! - [`SimpleRevocationFetcher`]: Basic implementation that wraps an [`HttpClient`]
+//! - [`CachingRevocationFetcher`]: Caching implementation with stale-while-revalidate (requires `reqwest` feature)
 //!
 //! # Architecture
 //!
@@ -14,6 +15,8 @@
 //! For cross-platform mobile apps, only [`HttpClient`] needs platform-specific
 //! implementation; [`CachingRevocationFetcher`] handles all CRL-specific logic.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use der::Decode;
 use x509_cert::crl::CertificateList;
@@ -22,6 +25,7 @@ use super::{
     error::CrlError,
     http::{HttpClient, HttpMethod, HttpRequest},
 };
+use crate::definitions::status_list::{StatusListError, STATUS_LIST_CWT_TYPE};
 
 /// Trait for fetching certificate revocation data.
 ///
@@ -41,6 +45,18 @@ pub trait RevocationFetcher: Send + Sync {
     /// signature. Use [`check_certificate_revocation`](super::check_certificate_revocation)
     /// for full validation.
     async fn fetch_crl(&self, url: &str) -> Result<CertificateList, CrlError>;
+
+    /// Fetch the Status List Token at the `uri` of an MSO `status_list`.
+    ///
+    /// This method does not verify the token. The reader verifies it on each use, so a
+    /// cache does not depend on the trust point of one MSO. `Arc`, so a cache hit gives a
+    /// reference count increment, not a copy.
+    ///
+    /// The default returns [`StatusListError::NotSupported`]: each MSO with a
+    /// `status_list` then gets a warning, so "not checked" never reads as "not revoked".
+    async fn fetch_status_list_token(&self, _uri: &str) -> Result<Arc<[u8]>, StatusListError> {
+        Err(StatusListError::NotSupported)
+    }
 }
 
 /// Simple CRL fetcher that wraps an HTTP client without caching.
@@ -87,6 +103,39 @@ impl<C: HttpClient> RevocationFetcher for SimpleRevocationFetcher<C> {
 
         CertificateList::from_der(&response.body).map_err(CrlError::Parse)
     }
+
+    async fn fetch_status_list_token(&self, uri: &str) -> Result<Arc<[u8]>, StatusListError> {
+        fetch_status_list_token(&self.http_client, uri)
+            .await
+            .map(Arc::from)
+    }
+}
+
+async fn fetch_status_list_token<C: HttpClient>(
+    http_client: &C,
+    uri: &str,
+) -> Result<Vec<u8>, StatusListError> {
+    let fetch_error = |detail: String| StatusListError::Fetch {
+        uri: uri.to_string(),
+        detail,
+    };
+
+    let response = http_client
+        .request(HttpRequest {
+            url: uri.to_string(),
+            method: HttpMethod::Get,
+            // draft-10 8.1. A server can serve the JWT and the CWT form at one URI.
+            headers: vec![("Accept".into(), STATUS_LIST_CWT_TYPE.into())],
+        })
+        .await
+        .map_err(|e| fetch_error(e.to_string()))?;
+
+    // draft-10 8.1: a successful response uses a status code in the 2xx range.
+    if !(200..300).contains(&response.status) {
+        return Err(fetch_error(format!("HTTP status {}", response.status)));
+    }
+
+    Ok(response.body)
 }
 
 // --- Feature-gated caching implementation ---
@@ -97,13 +146,17 @@ mod caching {
     use async_trait::async_trait;
     use der::Decode;
     use moka::future::Cache;
+    use time::OffsetDateTime;
     use tracing::{debug, error, warn};
     use x509_cert::crl::CertificateList;
 
-    use super::RevocationFetcher;
-    use crate::definitions::x509::revocation::{
-        error::CrlError,
-        http::{HttpClient, HttpMethod, HttpRequest},
+    use super::{fetch_status_list_token, RevocationFetcher};
+    use crate::definitions::{
+        status_list::{decode_token, StatusListError},
+        x509::revocation::{
+            error::CrlError,
+            http::{HttpClient, HttpMethod, HttpRequest},
+        },
     };
 
     /// Cached CRL entry.
@@ -112,6 +165,16 @@ mod caching {
         crl: CertificateList,
         /// When this entry was fetched.
         fetched_at: std::time::Instant,
+    }
+
+    /// Cached Status List Token.
+    #[derive(Clone)]
+    struct CachedToken {
+        bytes: Arc<[u8]>,
+        /// A fresh copy is fetched after this time.
+        fresh_until: OffsetDateTime,
+        /// The `exp` of the token. After it, the token is never served.
+        exp: OffsetDateTime,
     }
 
     /// CRL fetcher with caching based on CRL's `nextUpdate` field.
@@ -138,6 +201,22 @@ mod caching {
     ///
     /// If more aggressive retry behavior is needed, implement a wrapper that adds
     /// retry logic (e.g., using exponential backoff with jitter).
+    ///
+    /// # Status List Tokens
+    ///
+    /// Tokens have their own cache, by `uri`:
+    /// - A token is fresh for `ttl` seconds (draft-10 `ttl` claim), limited by
+    ///   `status_list_max_ttl` and by its `exp`. A token without `ttl` is fresh for
+    ///   `status_list_max_ttl` (default 1 hour).
+    /// - After that, the next call fetches again. If that fetch fails, the cached token is
+    ///   served until its `exp`: `ttl` says a fresh copy SHOULD be fetched, not that the
+    ///   old one is invalid.
+    /// - A response that does not decode is an error, like a failed fetch, and is not
+    ///   cached.
+    ///
+    /// The `ttl` and `exp` come from a token that is not verified yet. A forged token can
+    /// stay in the cache for at most `status_list_max_ttl`, and it fails verification on
+    /// each use.
     // TODO: Consider adding configurable retries if real-world usage shows it's needed.
     // If implemented: only retry transient errors (5xx, timeouts), use exponential
     // backoff with jitter, and make retry count/backoff configurable.
@@ -147,6 +226,8 @@ mod caching {
         cache: Cache<String, Arc<CachedCrl>>,
         /// How long to continue using a stale CRL if refetch fails.
         max_stale_duration: Duration,
+        tokens: Cache<String, CachedToken>,
+        status_list_max_ttl: Duration,
     }
 
     impl<C: HttpClient> CachingRevocationFetcher<C> {
@@ -174,7 +255,15 @@ mod caching {
                 http_client,
                 cache,
                 max_stale_duration: max_stale,
+                tokens: Cache::new(cache_capacity),
+                status_list_max_ttl: Duration::from_secs(3600),
             }
+        }
+
+        /// Limit how long a Status List Token is fresh, whatever its `ttl`.
+        pub fn with_status_list_max_ttl(mut self, max_ttl: Duration) -> Self {
+            self.status_list_max_ttl = max_ttl;
+            self
         }
 
         /// Check if a cached CRL is still valid based on its nextUpdate field.
@@ -215,6 +304,30 @@ mod caching {
             }
 
             CertificateList::from_der(&response.body).map_err(CrlError::Parse)
+        }
+
+        async fn fetch_and_cache_token(&self, uri: &str) -> Result<Arc<[u8]>, StatusListError> {
+            let bytes: Arc<[u8]> = fetch_status_list_token(&self.http_client, uri)
+                .await?
+                .into();
+
+            let token = decode_token(&bytes)?;
+            let ttl = token.ttl.map_or(self.status_list_max_ttl, |ttl| {
+                Duration::from_secs(ttl).min(self.status_list_max_ttl)
+            });
+            let fresh_until = (OffsetDateTime::now_utc() + ttl).min(token.exp);
+            self.tokens
+                .insert(
+                    uri.to_string(),
+                    CachedToken {
+                        bytes: bytes.clone(),
+                        fresh_until,
+                        exp: token.exp,
+                    },
+                )
+                .await;
+
+            Ok(bytes)
         }
     }
 
@@ -263,6 +376,31 @@ mod caching {
 
             Ok(crl)
         }
+
+        async fn fetch_status_list_token(&self, uri: &str) -> Result<Arc<[u8]>, StatusListError> {
+            let Some(cached) = self.tokens.get(uri).await else {
+                debug!("status list cache miss for {uri}");
+                return self.fetch_and_cache_token(uri).await;
+            };
+
+            let now = OffsetDateTime::now_utc();
+            if now < cached.fresh_until {
+                debug!("status list cache hit for {uri}");
+                return Ok(cached.bytes);
+            }
+
+            match self.fetch_and_cache_token(uri).await {
+                Ok(bytes) => Ok(bytes),
+                Err(e) if now < cached.exp => {
+                    warn!("status list refetch failed for {uri}, using the cached token: {e}");
+                    Ok(cached.bytes)
+                }
+                Err(e) => {
+                    self.tokens.invalidate(uri).await;
+                    Err(e)
+                }
+            }
+        }
     }
 }
 
@@ -273,7 +411,8 @@ pub use caching::CachingRevocationFetcher;
 ///
 /// This allows using `()` as the revocation fetcher type parameter when revocation
 /// checking should be skipped. The validation logic will add a warning to
-/// revocation_errors when fetch fails.
+/// revocation_errors when fetch fails, and an MSO status warning for each MSO with a
+/// `status_list`.
 #[async_trait]
 impl RevocationFetcher for () {
     async fn fetch_crl(&self, url: &str) -> Result<CertificateList, CrlError> {

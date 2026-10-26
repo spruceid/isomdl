@@ -12,7 +12,7 @@ use crate::definitions::{
     device_response::{DeviceResponse, Document},
     helpers::NonEmptyVec,
     session::SessionTranscript,
-    status_list::{check_status, StatusListError, StatusListFetcher},
+    status_list::{check_status, StatusListError},
     x509::{
         self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry,
         validation::ValidationOptions, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
@@ -57,9 +57,8 @@ pub struct ReaderValidationConfig<'a, P: ProfileSelector> {
 /// Documents whose doc type was not requested are **not validated at all** — they are
 /// listed in `rejected` and no cryptographic operation is performed on them.
 ///
-/// Pass `&()` as `revocation_fetcher` to skip CRL checks. Pass `&()` as `status_list_fetcher`
-/// to skip the MSO status check: each MSO with a status list then gets a
-/// [`DocumentWarning::MsoStatus`]. `e_reader_key_private` is used
+/// Pass `&()` as `revocation_fetcher` to skip CRL and MSO status checks: each MSO with a
+/// status list then gets a [`DocumentWarning::MsoStatus`]. `e_reader_key_private` is used
 /// for ECDH against the device's static key under COSE_Mac0 (ISO/IEC 18013-5 §9.1.3.5) and
 /// ignored for COSE_Sign1.
 ///
@@ -67,18 +66,16 @@ pub struct ReaderValidationConfig<'a, P: ProfileSelector> {
 ///
 /// Any trusted root can vouch for any doc type: anchors are scoped by
 /// [`TrustPurpose`](crate::definitions::x509::trust_anchor::TrustPurpose), not by doc type.
-pub async fn validate_response<S, R, F, P>(
+pub async fn validate_response<S, R, P>(
     device_response: &DeviceResponse,
     session_transcript: &S,
     config: &ReaderValidationConfig<'_, P>,
     revocation_fetcher: &R,
-    status_list_fetcher: &F,
     e_reader_key_private: &[u8; 32],
 ) -> ResponseValidationOutcome
 where
     S: SessionTranscript + Clone,
     R: RevocationFetcher,
-    F: StatusListFetcher,
     P: ProfileSelector,
 {
     let mut warnings = Vec::new();
@@ -136,7 +133,6 @@ where
             session_transcript,
             config.trust_anchors,
             revocation_fetcher,
-            status_list_fetcher,
             e_reader_key_private,
             config.options,
             profile,
@@ -179,15 +175,12 @@ where
 /// wrote the response holds the key they themselves put there.
 // Both variants are large and equally likely — a document either validates or it doesn't —
 // so boxing the error would shrink nothing that matters and cost consumers an indirection.
-// A real revocation fetcher does not implement `StatusListFetcher`, so swapping the two
-// fetchers does not compile.
-#[allow(clippy::result_large_err, clippy::too_many_arguments)]
-pub async fn validate_document<S, R, F, P>(
+#[allow(clippy::result_large_err)]
+pub async fn validate_document<S, R, P>(
     document: &Document,
     session_transcript: &S,
     trust_anchors: &TrustAnchorRegistry,
     revocation_fetcher: &R,
-    status_list_fetcher: &F,
     e_reader_key_private: &[u8; 32],
     options: &ValidationOptions,
     profile: P,
@@ -195,7 +188,6 @@ pub async fn validate_document<S, R, F, P>(
 where
     S: SessionTranscript + Clone,
     R: RevocationFetcher,
-    F: StatusListFetcher,
     P: CertificateProfile,
 {
     let mut outcome = Evaluation::new(document);
@@ -313,7 +305,6 @@ where
         &mso,
         iaca.as_deref(),
         revocation_fetcher,
-        status_list_fetcher,
         options,
         &mut outcome,
     )
@@ -327,17 +318,13 @@ where
 /// Only a status from a verified list is an error. Every other failure is a
 /// [`DocumentWarning::MsoStatus`], and the caller decides whether to accept an unchecked
 /// credential.
-async fn check_mso_status<R, F>(
+async fn check_mso_status<R: RevocationFetcher>(
     mso: &Mso,
     iaca: Option<&Certificate>,
     revocation_fetcher: &R,
-    status_list_fetcher: &F,
     options: &ValidationOptions,
     outcome: &mut Evaluation,
-) where
-    R: RevocationFetcher,
-    F: StatusListFetcher,
-{
+) {
     // draft-ietf-oauth-status-list-17: no status list processing for a token that is
     // already invalid.
     if !outcome.errors.is_empty() {
@@ -365,15 +352,7 @@ async fn check_mso_status<R, F>(
         return;
     };
 
-    match check_status(
-        status_list,
-        iaca,
-        revocation_fetcher,
-        status_list_fetcher,
-        options,
-    )
-    .await
-    {
+    match check_status(status_list, iaca, revocation_fetcher, options).await {
         Ok((status, revocation_errors)) => {
             outcome.warnings.extend(
                 revocation_errors

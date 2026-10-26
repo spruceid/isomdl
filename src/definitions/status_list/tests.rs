@@ -546,12 +546,10 @@ mod fetcher {
 
     use super::{claims, int, token, without, SUB};
     use crate::definitions::{
-        status_list::{
-            CachingStatusListFetcher, SimpleStatusListFetcher, StatusListError, StatusListFetcher,
-            STATUS_LIST_CWT_TYPE,
-        },
+        status_list::{StatusListError, STATUS_LIST_CWT_TYPE},
         x509::revocation::{
-            HttpClient, HttpRequest, HttpResponse, NoHttpClientError, ReqwestClient,
+            CachingRevocationFetcher, HttpClient, HttpRequest, HttpResponse, NoHttpClientError,
+            ReqwestClient, RevocationFetcher, SimpleRevocationFetcher,
         },
     };
 
@@ -568,7 +566,7 @@ mod fetcher {
             .mount(&server)
             .await;
 
-        let fetched = SimpleStatusListFetcher::new(ReqwestClient::new().unwrap())
+        let fetched = SimpleRevocationFetcher::new(ReqwestClient::new().unwrap())
             .fetch_status_list_token(&server.uri())
             .await
             .unwrap();
@@ -614,6 +612,28 @@ mod fetcher {
         Ok(HttpResponse { status: 200, body })
     }
 
+    /// draft-10 8.1: any status code in the 2xx range is a success.
+    #[tokio::test]
+    async fn accepts_any_2xx_status() {
+        let body = token(Some(STATUS_LIST_CWT_TYPE), claims(), true);
+        let client = Scripted::new([
+            Ok(HttpResponse {
+                status: 203,
+                body: body.clone(),
+            }),
+            Ok(HttpResponse {
+                status: 300,
+                body: body.clone(),
+            }),
+        ]);
+        let fetcher = SimpleRevocationFetcher::new(&client);
+        assert_eq!(*fetcher.fetch_status_list_token(SUB).await.unwrap(), *body);
+        assert!(matches!(
+            fetcher.fetch_status_list_token(SUB).await,
+            Err(StatusListError::Fetch { .. })
+        ));
+    }
+
     /// A token whose `ttl` claim is `ttl` seconds.
     fn token_with_ttl(ttl: i64) -> Vec<u8> {
         let mut claims = without(65534);
@@ -625,7 +645,7 @@ mod fetcher {
     async fn serves_a_fresh_token_from_the_cache() {
         let body = token_with_ttl(43200);
         let client = Scripted::new([ok(body.clone())]);
-        let fetcher = CachingStatusListFetcher::new(&client);
+        let fetcher = CachingRevocationFetcher::new(&client);
         for _ in 0..2 {
             assert_eq!(*fetcher.fetch_status_list_token(SUB).await.unwrap(), *body);
         }
@@ -635,7 +655,8 @@ mod fetcher {
     #[tokio::test]
     async fn max_ttl_limits_the_ttl_of_the_token() {
         let client = Scripted::new([ok(token_with_ttl(43200)), ok(token_with_ttl(43200))]);
-        let fetcher = CachingStatusListFetcher::with_config(&client, 100, Duration::ZERO);
+        let fetcher =
+            CachingRevocationFetcher::new(&client).with_status_list_max_ttl(Duration::ZERO);
         for _ in 0..2 {
             fetcher.fetch_status_list_token(SUB).await.unwrap();
         }
@@ -647,7 +668,7 @@ mod fetcher {
     async fn serves_the_cached_token_when_the_refetch_fails() {
         let body = token_with_ttl(0);
         let client = Scripted::new([ok(body.clone()), Err(NoHttpClientError)]);
-        let fetcher = CachingStatusListFetcher::new(&client);
+        let fetcher = CachingRevocationFetcher::new(&client);
         fetcher.fetch_status_list_token(SUB).await.unwrap();
         assert_eq!(*fetcher.fetch_status_list_token(SUB).await.unwrap(), *body);
         assert_eq!(client.requests(), 2);
@@ -659,7 +680,7 @@ mod fetcher {
         claims.push((4, int(OffsetDateTime::now_utc().unix_timestamp() - 1)));
         let expired = token(Some(STATUS_LIST_CWT_TYPE), claims, true);
         let client = Scripted::new([ok(expired), Err(NoHttpClientError)]);
-        let fetcher = CachingStatusListFetcher::new(&client);
+        let fetcher = CachingRevocationFetcher::new(&client);
         fetcher.fetch_status_list_token(SUB).await.unwrap();
         assert!(matches!(
             fetcher.fetch_status_list_token(SUB).await,
@@ -670,7 +691,7 @@ mod fetcher {
     #[tokio::test]
     async fn does_not_cache_a_response_that_does_not_decode() {
         let client = Scripted::new([ok(vec![0xa0]), ok(token_with_ttl(43200))]);
-        let fetcher = CachingStatusListFetcher::new(&client);
+        let fetcher = CachingRevocationFetcher::new(&client);
         assert!(matches!(
             fetcher.fetch_status_list_token(SUB).await,
             Err(StatusListError::MalformedToken(_))

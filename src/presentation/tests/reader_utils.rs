@@ -42,7 +42,6 @@ async fn validate(
         &exchange.session_transcript(),
         &config,
         &pki.fetcher(),
-        &(),
         &exchange.e_reader_key_private(),
     )
     .await
@@ -69,7 +68,6 @@ async fn validate_with_profile(
         &exchange.session_transcript(),
         &config,
         &pki.fetcher(),
-        &(),
         &exchange.e_reader_key_private(),
     )
     .await
@@ -614,11 +612,10 @@ async fn a_response_with_no_documents_is_not_evaluated() {
     };
     let (transcript, reader_key) = test_utils::test_session_transcript();
 
-    let outcome = validate_response::<SessionTranscript180135, (), (), _>(
+    let outcome = validate_response::<SessionTranscript180135, (), _>(
         &response,
         &transcript,
         &config,
-        &(),
         &(),
         &reader_key,
     )
@@ -650,7 +647,6 @@ async fn an_unknown_request_skips_the_filter_with_a_warning() {
         &exchange.session_transcript(),
         &config,
         &pki.fetcher(),
-        &(),
         &exchange.e_reader_key_private(),
     )
     .await;
@@ -725,7 +721,6 @@ async fn a_revoked_certificate_is_an_error_not_a_warning() {
         &config,
         // The same PKI, now publishing a CRL that names its own signing certificate.
         &pki.fetcher_revoking(&[pki.leaf_serial()]),
-        &(),
         &exchange.e_reader_key_private(),
     )
     .await;
@@ -870,11 +865,10 @@ async fn an_outcome_survives_a_json_round_trip() {
         options: &ValidationOptions::default(),
         profiles: &AnyDocType(MdocProfile::MDL),
     };
-    let failed = validate_response::<SessionTranscript180135, (), (), _>(
+    let failed = validate_response::<SessionTranscript180135, (), _>(
         &empty,
         &exchange.session_transcript(),
         &config,
-        &(),
         &(),
         &[0u8; 32],
     )
@@ -891,9 +885,9 @@ async fn an_outcome_survives_a_json_round_trip() {
 /// tests check the trust point the reader picks and the mapping of each result.
 mod mso_status {
     use super::*;
-    use crate::definitions::status_list::{
-        StatusListError, StatusListFetcher, STATUS_LIST_CWT_TYPE,
-    };
+    use crate::definitions::status_list::{StatusListError, STATUS_LIST_CWT_TYPE};
+    use crate::definitions::x509::revocation::{CrlError, RevocationFetcher};
+    use crate::definitions::x509::test::StaticCrlFetcher;
     use crate::definitions::{IdentifierListInfo, StatusListInfo, ValidityInfo};
     use crate::issuance::mdoc::test::issue_test_mdoc_with_status;
     use ciborium::Value;
@@ -903,7 +897,7 @@ mod mso_status {
     use std::io::Write;
     use std::sync::Arc;
     use time::OffsetDateTime;
-    use x509_cert::der::Encode;
+    use x509_cert::{crl::CertificateList, der::Encode};
 
     const URI: &str = "https://issuer.example/status/1";
     /// The entry of the MSO: bit 3 of the first byte of the list.
@@ -911,24 +905,38 @@ mod mso_status {
     const VALID: u8 = 0;
     const REVOKED: u8 = 1 << IDX;
 
-    /// Serves one token for every URI.
-    struct Serve(Arc<[u8]>);
+    /// Serves the CRL of a PKI, and one token for every URI.
+    struct Serve {
+        crls: StaticCrlFetcher,
+        token: Option<Arc<[u8]>>,
+    }
 
     #[async_trait::async_trait]
-    impl StatusListFetcher for Serve {
-        async fn fetch_status_list_token(&self, _uri: &str) -> Result<Arc<[u8]>, StatusListError> {
-            Ok(self.0.clone())
+    impl RevocationFetcher for Serve {
+        async fn fetch_crl(&self, url: &str) -> Result<CertificateList, CrlError> {
+            self.crls.fetch_crl(url).await
+        }
+
+        async fn fetch_status_list_token(&self, uri: &str) -> Result<Arc<[u8]>, StatusListError> {
+            match &self.token {
+                Some(token) => Ok(token.clone()),
+                None => self.crls.fetch_status_list_token(uri).await,
+            }
         }
     }
 
     /// A list of one byte at 1 bit per entry, for `URI`, signed by the leaf of `signer`.
-    fn list(signer: &TestPki, byte: u8) -> Serve {
+    fn list(signer: &TestPki, byte: u8) -> Vec<u8> {
+        list_with_bits(signer, 1, byte)
+    }
+
+    fn list_with_bits(signer: &TestPki, bits: i64, byte: u8) -> Vec<u8> {
         let mut lst = ZlibEncoder::new(Vec::new(), Compression::default());
         lst.write_all(&[byte]).unwrap();
         let int = |i: i64| Value::Integer(i.into());
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let status_list = Value::Map(vec![
-            (Value::Text("bits".into()), int(1)),
+            (Value::Text("bits".into()), int(bits)),
             (
                 Value::Text("lst".into()),
                 Value::Bytes(lst.finish().unwrap()),
@@ -953,7 +961,7 @@ mod mso_status {
                 signature.to_bytes().to_vec()
             })
             .build();
-        Serve(token.to_tagged_vec().unwrap().into())
+        token.to_tagged_vec().unwrap()
     }
 
     /// A status that points to entry `idx` of the list at `URI`.
@@ -969,12 +977,14 @@ mod mso_status {
     }
 
     /// Issue an mDL with `status` under `pki`, present it, and validate the response.
-    async fn present<F: StatusListFetcher>(
+    ///
+    /// The revocation fetcher serves the CRL of `pki`, and `token` if there is one.
+    async fn present(
         pki: &TestPki,
         validity: ValidityInfo,
         status: crate::definitions::Status,
         trust_anchors: &TrustAnchorRegistry,
-        status_list_fetcher: &F,
+        token: Option<Vec<u8>>,
     ) -> ResponseValidationOutcome {
         let mdoc = issue_test_mdoc_with_status(pki, validity, status).unwrap();
         let exchange = TestExchange::new([mdoc]);
@@ -990,8 +1000,10 @@ mod mso_status {
             &response,
             &exchange.session_transcript(),
             &config,
-            &pki.fetcher(),
-            status_list_fetcher,
+            &Serve {
+                crls: pki.fetcher(),
+                token: token.map(Arc::from),
+            },
             &exchange.e_reader_key_private(),
         )
         .await
@@ -1009,7 +1021,7 @@ mod mso_status {
             valid_for_a_year(),
             status_list(IDX, None),
             &pki.iaca_registry(),
-            &list(&pki, VALID),
+            Some(list(&pki, VALID)),
         )
         .await;
         assert_eq!(only_valid(&outcome).warnings, vec![]);
@@ -1023,7 +1035,7 @@ mod mso_status {
             valid_for_a_year(),
             status_list(IDX, None),
             &pki.iaca_registry(),
-            &list(&pki, REVOKED),
+            Some(list(&pki, REVOKED)),
         )
         .await;
         let failed = only_failed(&outcome);
@@ -1047,7 +1059,7 @@ mod mso_status {
             valid_for_a_year(),
             status_list(IDX, None),
             &trust_anchors,
-            &list(&other, REVOKED),
+            Some(list(&other, REVOKED)),
         )
         .await;
         assert!(warns(&only_valid(&outcome).warnings, "mso_status"));
@@ -1064,7 +1076,7 @@ mod mso_status {
             valid_for_a_year(),
             status_list(IDX, Some(&other)),
             &pki.iaca_registry(),
-            &list(&other, REVOKED),
+            Some(list(&other, REVOKED)),
         )
         .await;
         // Only a verified list gives a status.
@@ -1080,7 +1092,7 @@ mod mso_status {
             valid_for_a_year(),
             status_list(8, None),
             &pki.iaca_registry(),
-            &list(&pki, VALID),
+            Some(list(&pki, VALID)),
         )
         .await;
         assert_eq!(
@@ -1098,7 +1110,7 @@ mod mso_status {
             expired(),
             status_list(IDX, None),
             &pki.iaca_registry(),
-            &list(&pki, REVOKED),
+            Some(list(&pki, REVOKED)),
         )
         .await;
         let failed = only_failed(&outcome);
@@ -1106,15 +1118,31 @@ mod mso_status {
         assert!(!warns(&failed.warnings, "mso_status"));
     }
 
+    /// §12.3.6.5 allows only 1 bit for each entry.
     #[tokio::test]
-    async fn no_status_fetcher_is_a_warning() {
+    async fn a_list_with_two_bits_is_a_warning() {
         let pki = TestPki::issuer();
         let outcome = present(
             &pki,
             valid_for_a_year(),
             status_list(IDX, None),
             &pki.iaca_registry(),
-            &(),
+            Some(list_with_bits(&pki, 2, VALID)),
+        )
+        .await;
+        assert!(warns(&only_valid(&outcome).warnings, "mso_status"));
+    }
+
+    /// The default of `fetch_status_list_token`, which `StaticCrlFetcher` and `()` use.
+    #[tokio::test]
+    async fn a_fetcher_without_status_lists_is_a_warning() {
+        let pki = TestPki::issuer();
+        let outcome = present(
+            &pki,
+            valid_for_a_year(),
+            status_list(IDX, None),
+            &pki.iaca_registry(),
+            None,
         )
         .await;
         assert!(warns(&only_valid(&outcome).warnings, "mso_status"));
@@ -1136,7 +1164,7 @@ mod mso_status {
             valid_for_a_year(),
             status,
             &pki.iaca_registry(),
-            &list(&pki, VALID),
+            Some(list(&pki, VALID)),
         )
         .await;
         assert!(warns(&only_valid(&outcome).warnings, "mso_status"));
@@ -1169,7 +1197,7 @@ mod mso_status {
             valid_for_a_year(),
             crate::definitions::Status::default(),
             &pki.iaca_registry(),
-            &(),
+            None,
         )
         .await;
         assert_eq!(only_valid(&outcome).warnings, vec![]);
