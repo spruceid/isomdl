@@ -352,6 +352,18 @@ pub(crate) fn issue_test_mdoc_with_namespaces(
         .expect("failed to issue mdoc"))
 }
 
+/// Issue an mdoc whose MSO references `status`.
+pub(crate) fn issue_test_mdoc_with_status(
+    pki: &crate::definitions::x509::test::TestPki,
+    validity_info: ValidityInfo,
+    status: crate::definitions::Status,
+) -> anyhow::Result<Mdoc> {
+    Ok(minimal_test_mdoc_builder_for(MDL_DOC_TYPE, validity_info)
+        .status(status)
+        .issue::<SigningKey, Signature>(pki.x5chain(), pki.leaf_key.clone())
+        .expect("failed to issue mdoc"))
+}
+
 pub fn minimal_test_mdoc() -> anyhow::Result<Mdoc> {
     let mdoc_builder = minimal_test_mdoc_builder();
 

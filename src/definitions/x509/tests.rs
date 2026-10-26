@@ -604,6 +604,20 @@ mod iaca {
         assert!(outcome.success(), "{outcome:?}");
     }
 
+    #[test_log::test(tokio::test)]
+    async fn the_outcome_holds_the_trust_anchor_of_the_chain() {
+        let pki = TestPki::issuer();
+        let outcome = validate(
+            &crate::definitions::x509::validation::MdocProfile::MDL.issuer,
+            &pki.x5chain(),
+            &pki.iaca_registry(),
+            &pki.fetcher(),
+        )
+        .await;
+        assert!(outcome.success(), "{outcome:?}");
+        assert_eq!(outcome.trust_anchor.as_deref(), Some(&pki.root));
+    }
+
     /// The EU age verification PKI, as a worked example of [`CertificateProfile`].
     ///
     /// `eu.europa.ec.av.1` defines no mdoc key-purpose OIDs at all. Its architecture wants a

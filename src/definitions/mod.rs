@@ -12,6 +12,7 @@ pub mod mcd;
 pub mod mso;
 pub mod namespaces;
 pub mod session;
+pub mod status_list;
 pub mod traits;
 pub mod validity_info;
 pub mod x509;

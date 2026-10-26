@@ -273,6 +273,15 @@ pub enum DocumentError {
     MsoExpired,
     #[error("the credential is not yet valid")]
     MsoNotYetValid,
+    /// The verified status list of the issuer gives the MSO a status other than VALID (0):
+    /// 1 is INVALID, 2 is SUSPENDED, other values are application-specific
+    /// (draft-ietf-oauth-status-list-10 7.1).
+    #[error("the issuer's status list gives the credential the status {status}, not VALID")]
+    MsoNotValid { status: u8 },
+    /// The MSO points to an index outside the verified status list of the issuer.
+    /// draft-ietf-oauth-status-list-16 requires the reader to reject the credential.
+    #[error("the credential's status index {idx} is outside the issuer's status list")]
+    MsoStatusIndexOutOfRange { idx: u64 },
     #[error("device authentication failed: {detail}")]
     DeviceAuthentication { detail: String },
     /// Device authentication could not be performed, because the device key lives in
@@ -302,6 +311,8 @@ impl DocumentError {
             Self::DocTypeMismatch { .. } => "doc_type_mismatch",
             Self::MsoExpired => "mso_expired",
             Self::MsoNotYetValid => "mso_not_yet_valid",
+            Self::MsoNotValid { .. } => "mso_not_valid",
+            Self::MsoStatusIndexOutOfRange { .. } => "mso_status_index_out_of_range",
             Self::DeviceAuthentication { .. } => "device_authentication",
             Self::DeviceAuthenticationNotAttempted { .. } => "device_authentication_not_attempted",
             Self::NoNamespaces => "no_namespaces",
@@ -318,6 +329,15 @@ pub enum DocumentWarning {
     /// to be revoked — that is a [`DocumentError::CertificateChain`].
     #[error("revocation status could not be determined: {detail}")]
     Revocation { detail: String },
+    /// The status of the MSO could not be established from its status list. The MSO was
+    /// *not* found to be revoked: that is [`DocumentError::MsoNotValid`].
+    ///
+    /// Every failure to fetch, decode or verify the list is this warning, so a bad list is
+    /// not treated more strictly than a failed fetch, which a network attacker can always
+    /// cause. A reader that must not accept an unchecked credential treats the code
+    /// `mso_status` as a failure.
+    #[error("the credential's status could not be determined: {detail}")]
+    MsoStatus { detail: String },
     /// A disclosed element could not be represented as JSON, so it is absent from
     /// [`ValidatedDocument::namespaces`]. Not a failure — the issuer signed it and its
     /// digest matched, this library just cannot render it. Named rather than dropped, so a
@@ -339,6 +359,7 @@ impl DocumentWarning {
     pub fn code(&self) -> &str {
         match self {
             Self::Revocation { .. } => "revocation",
+            Self::MsoStatus { .. } => "mso_status",
             Self::UndecodableElement { .. } => "undecodable_element",
             Self::Other { code, .. } => code,
         }

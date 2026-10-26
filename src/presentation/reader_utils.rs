@@ -6,10 +6,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use x509_cert::Certificate;
+
 use crate::definitions::{
     device_response::{DeviceResponse, Document},
     helpers::NonEmptyVec,
     session::SessionTranscript,
+    status_list::{check_status, StatusListError},
     x509::{
         self, revocation::RevocationFetcher, trust_anchor::TrustAnchorRegistry,
         validation::ValidationOptions, x5chain::X5CHAIN_COSE_HEADER_LABEL, X5Chain,
@@ -54,7 +57,8 @@ pub struct ReaderValidationConfig<'a, P: ProfileSelector> {
 /// Documents whose doc type was not requested are **not validated at all** — they are
 /// listed in `rejected` and no cryptographic operation is performed on them.
 ///
-/// Pass `&()` as `revocation_fetcher` to skip CRL checks. `e_reader_key_private` is used
+/// Pass `&()` as `revocation_fetcher` to skip CRL and MSO status checks: each MSO with a
+/// status list then gets a [`DocumentWarning::MsoStatus`]. `e_reader_key_private` is used
 /// for ECDH against the device's static key under COSE_Mac0 (ISO/IEC 18013-5 §9.1.3.5) and
 /// ignored for COSE_Sign1.
 ///
@@ -250,6 +254,7 @@ where
             });
         return outcome.finish();
     }
+    let iaca = validation.trust_anchor;
 
     let mso = match issuer_authentication(x5chain, &document.issuer_signed) {
         Ok(mso) => mso,
@@ -295,7 +300,75 @@ where
         &mut outcome,
     );
 
+    // Last, so a document that already failed causes no fetch.
+    check_mso_status(
+        &mso,
+        iaca.as_deref(),
+        revocation_fetcher,
+        options,
+        &mut outcome,
+    )
+    .await;
+
     outcome.finish()
+}
+
+/// Read the status of the MSO from the status list of its issuer.
+///
+/// Only a status from a verified list is an error. Every other failure is a
+/// [`DocumentWarning::MsoStatus`], and the caller decides whether to accept an unchecked
+/// credential.
+async fn check_mso_status<R: RevocationFetcher>(
+    mso: &Mso,
+    iaca: Option<&Certificate>,
+    revocation_fetcher: &R,
+    options: &ValidationOptions,
+    outcome: &mut Evaluation,
+) {
+    // draft-ietf-oauth-status-list-17: no status list processing for a token that is
+    // already invalid.
+    if !outcome.errors.is_empty() {
+        return;
+    }
+    // No status: the issuer did not make the MSO revocable.
+    let Some(status) = &mso.status else {
+        return;
+    };
+    let warn = |detail: String| DocumentWarning::MsoStatus { detail };
+    let Some(status_list) = &status.status_list else {
+        // An empty `status` map references no mechanism, the same as no status.
+        if status.identifier_list.is_some() {
+            outcome.warnings.push(warn(
+                "the MSO has only an identifier list, which is not supported".to_string(),
+            ));
+        }
+        return;
+    };
+    // Set whenever the issuer chain validated, which it did to get here.
+    let Some(iaca) = iaca else {
+        outcome.warnings.push(warn(
+            "the trust anchor of the issuer chain is unknown".to_string(),
+        ));
+        return;
+    };
+
+    match check_status(status_list, iaca, revocation_fetcher, options).await {
+        Ok((status, revocation_errors)) => {
+            outcome.warnings.extend(
+                revocation_errors
+                    .into_iter()
+                    .map(|detail| DocumentWarning::Revocation { detail }),
+            );
+            if status != 0 {
+                outcome.errors.push(DocumentError::MsoNotValid { status });
+            }
+        }
+        // Only the lookup returns it, after the list is verified.
+        Err(StatusListError::IndexOutOfRange(idx)) => outcome
+            .errors
+            .push(DocumentError::MsoStatusIndexOutOfRange { idx }),
+        Err(e) => outcome.warnings.push(warn(e.to_string())),
+    }
 }
 
 /// A document whose doc type no configured profile covers.
