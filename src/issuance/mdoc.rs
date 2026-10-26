@@ -15,7 +15,8 @@ use crate::{
     definitions::{
         helpers::{NonEmptyMap, NonEmptyVec, Tag24},
         issuer_signed::{IssuerNamespaces, IssuerSignedItemBytes},
-        DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, ValidityInfo,
+        DeviceKeyInfo, DigestAlgorithm, DigestId, DigestIds, IssuerSignedItem, Mso, Status,
+        ValidityInfo,
     },
 };
 
@@ -48,6 +49,7 @@ pub struct Builder {
     digest_algorithm: Option<DigestAlgorithm>,
     device_key_info: Option<DeviceKeyInfo>,
     enable_decoy_digests: Option<bool>,
+    status: Option<Status>,
 }
 
 impl Mdoc {
@@ -56,6 +58,7 @@ impl Mdoc {
     }
 
     /// Prepare mdoc for remote signing.
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         doc_type: String,
         namespaces: Namespaces,
@@ -64,6 +67,7 @@ impl Mdoc {
         device_key_info: DeviceKeyInfo,
         signature_algorithm: Algorithm,
         enable_decoy_digests: bool,
+        status: Option<Status>,
     ) -> Result<PreparedMdoc> {
         if let Some(authorizations) = &device_key_info.key_authorizations {
             authorizations.validate()?;
@@ -80,6 +84,7 @@ impl Mdoc {
             device_key_info,
             doc_type: doc_type.clone(),
             validity_info,
+            status,
         };
 
         let mso_bytes = crate::cbor::to_vec(&Tag24::new(&mso)?)?;
@@ -113,6 +118,7 @@ impl Mdoc {
         x5chain: X5Chain,
         enable_decoy_digests: bool,
         signer: S,
+        status: Option<Status>,
     ) -> Result<Mdoc>
     where
         S: Signer<Sig> + SignatureAlgorithm,
@@ -126,6 +132,7 @@ impl Mdoc {
             device_key_info,
             signer.algorithm(),
             enable_decoy_digests,
+            status,
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -148,6 +155,7 @@ impl Mdoc {
         x5chain: X5Chain,
         enable_decoy_digests: bool,
         signer: S,
+        status: Option<Status>,
     ) -> Result<Mdoc>
     where
         S: AsyncSigner<Sig> + SignatureAlgorithm,
@@ -161,6 +169,7 @@ impl Mdoc {
             device_key_info,
             signer.algorithm(),
             enable_decoy_digests,
+            status,
         )?;
 
         let signature_payload = prepared_mdoc.signature_payload();
@@ -242,6 +251,12 @@ impl Builder {
         self
     }
 
+    /// Set where verifiers check whether the mdoc is revoked or suspended.
+    pub fn status(mut self, status: Status) -> Self {
+        self.status = Some(status);
+        self
+    }
+
     /// Prepare the mdoc for remote signing.
     ///
     /// The signature algorithm which the mdoc will be signed with must be known ahead of time as
@@ -272,6 +287,7 @@ impl Builder {
             device_key_info,
             signature_algorithm,
             enable_decoy_digests,
+            self.status,
         )
     }
 
@@ -307,6 +323,7 @@ impl Builder {
             x5chain,
             enable_decoy_digests,
             signer,
+            self.status,
         )
     }
 
@@ -342,6 +359,7 @@ impl Builder {
             x5chain,
             enable_decoy_digests,
             signer,
+            self.status,
         )
         .await
     }

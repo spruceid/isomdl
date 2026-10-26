@@ -32,6 +32,8 @@ pub const EUDI_PID_DOC_TYPE: &str = "eu.europa.ec.eudi.pid.1";
 pub use device_response::{DeviceResponse, Document};
 pub use device_signed::{DeviceAuth, DeviceSigned};
 pub use issuer_signed::{IssuerSigned, IssuerSignedItem};
-pub use mso::{DigestAlgorithm, DigestId, DigestIds, Mso};
+pub use mso::{
+    DigestAlgorithm, DigestId, DigestIds, IdentifierListInfo, Mso, Status, StatusListInfo,
+};
 pub use session::{SessionData, SessionEstablishment, SessionTranscript180135};
 pub use validity_info::ValidityInfo;

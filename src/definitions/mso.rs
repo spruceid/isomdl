@@ -64,6 +64,10 @@ pub struct Mso {
 
     /// Information about the validity of the Mso object.
     pub validity_info: ValidityInfo,
+
+    /// Where to check whether the mdoc is revoked or suspended.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<Status>,
 }
 
 #[derive(Clone, Debug, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -97,10 +101,56 @@ impl DigestAlgorithm {
     }
 }
 
+/// The `status` element of the [Mso] (ISO/IEC DIS 18013-5 12.3.6.1,
+/// ISO/IEC TS 23220-4 A.1.2.4.2.1).
+///
+/// Unknown keys are reserved for future use and are ignored on decoding.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct Status {
+    /// Reference to an Identifier List that may list this mdoc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identifier_list: Option<IdentifierListInfo>,
+
+    /// Reference to the entry of this mdoc in a Token Status List.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_list: Option<StatusListInfo>,
+}
+
+/// Reference to an entry in a Token Status List
+/// (draft-ietf-oauth-status-list).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct StatusListInfo {
+    /// Index of the entry in the list.
+    pub idx: u64,
+
+    /// URI of the Status List Token.
+    pub uri: String,
+
+    /// DER-encoded certificate for the Status List Token signature.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<ByteStr>,
+}
+
+/// Reference to an Identifier List.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct IdentifierListInfo {
+    /// Identifier of this mdoc in the list.
+    pub id: ByteStr,
+
+    /// URI of the Identifier List.
+    pub uri: String,
+
+    /// DER-encoded certificate for the Identifier List signature.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<ByteStr>,
+}
+
 #[cfg(test)]
 mod test {
+    use super::{Status, StatusListInfo};
     use crate::cbor;
     use crate::definitions::{helpers::Tag24, IssuerSigned, Mso};
+    use ciborium::Value;
     use hex::FromHex;
 
     static ISSUER_SIGNED_CBOR: &str = include_str!("../../test/definitions/issuer_signed.cbor");
@@ -122,5 +172,53 @@ mod test {
             mso_bytes, &roundtripped_bytes,
             "original cbor and re-serialized Mso do not match"
         )
+    }
+
+    fn status_list(idx: u64) -> Status {
+        Status {
+            status_list: Some(StatusListInfo {
+                idx,
+                uri: "https://issuer.example/status/1".to_string(),
+                certificate: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Text keys in snake_case, and no key for an absent optional member.
+    #[test]
+    fn status_encodes_with_spec_keys() {
+        let value = cbor::from_slice::<Value>(&cbor::to_vec(&status_list(7)).unwrap()).unwrap();
+        let expected = Value::Map(vec![(
+            Value::Text("status_list".into()),
+            Value::Map(vec![
+                (Value::Text("idx".into()), Value::Integer(7.into())),
+                (
+                    Value::Text("uri".into()),
+                    Value::Text("https://issuer.example/status/1".into()),
+                ),
+            ]),
+        )]);
+        assert_eq!(value, expected);
+    }
+
+    /// Keys other than `identifier_list` and `status_list` are RFU and are ignored.
+    #[test]
+    fn status_ignores_rfu_keys() {
+        let value = Value::Map(vec![
+            (
+                Value::Text("status_list".into()),
+                Value::Map(vec![
+                    (Value::Text("idx".into()), Value::Integer(7.into())),
+                    (
+                        Value::Text("uri".into()),
+                        Value::Text("https://issuer.example/status/1".into()),
+                    ),
+                ]),
+            ),
+            (Value::Text("future_list".into()), Value::Bool(true)),
+        ]);
+        let bytes = cbor::to_vec(&value).unwrap();
+        assert_eq!(cbor::from_slice::<Status>(&bytes).unwrap(), status_list(7));
     }
 }
